@@ -147,7 +147,9 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Index on startup")
-      .setDesc("When disabled, PalmWiki Home indexes lazily when the view is opened.")
+      .setDesc(
+        "When enabled, indexing starts only after the workspace is ready and Obsidian becomes idle. When disabled, PalmWiki Home indexes lazily after its view is shown."
+      )
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.indexOnStartup)
@@ -155,6 +157,12 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
             await this.plugin.updateSettings({ indexOnStartup: value }, value);
           });
       });
+
+    new Setting(containerEl)
+      .setName("Persistent index cache")
+      .setDesc(
+        "PalmWiki Home stores derived page metadata in index-cache.json inside this Vault's plugin folder, including titles, paths, tags, links, statistics, and up to 180 characters of body-derived description per note. It does not store full note bodies, and the cache is rebuilt safely when settings or files change."
+      );
 
     new Setting(containerEl)
       .setName("Performance debug logging")

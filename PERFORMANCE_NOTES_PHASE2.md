@@ -44,4 +44,4 @@ Phase 2 has not yet been manually retested in Obsidian after this implementation
 
 ## Known Risk
 
-The in-memory body cache, graph data, PageRank data, date-label cache, and image URL cache are not persisted across plugin reloads. This is acceptable for the current copied-vault scale, but should be revisited if future phases add larger body-derived indexes or full-text search.
+Page records and body-derived metadata now persist in the Vault-local plugin cache. Date-label and image URL caches remain in memory. Future full-text search would require a separate storage design rather than expanding this derived-metadata JSON cache without profiling.

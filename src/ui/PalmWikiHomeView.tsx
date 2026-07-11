@@ -311,14 +311,30 @@ function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): JSX.Element {
         <div className="palmwiki-state palmwiki-state-error">{indexState.lastError}</div>
       ) : null}
 
+      {indexState.usingCachedIndex && !indexState.isIndexing ? (
+        <div className="palmwiki-state">
+          Showing the saved index. Refresh will start when Obsidian is idle.
+        </div>
+      ) : null}
+
       {indexState.isIndexing ? (
         <div className="palmwiki-state">Indexing pages...</div>
       ) : null}
 
-      {!indexState.isIndexing && visiblePages.length === 0 ? (
+      {!indexState.isIndexing && indexState.indexDirty && indexState.pages.length === 0 ? (
+        <div className="palmwiki-state">
+          Index will start after Obsidian finishes restoring tabs and becomes idle.
+        </div>
+      ) : null}
+
+      {!indexState.isIndexing && !indexState.indexDirty && indexState.pages.length === 0 ? (
         <div className="palmwiki-state">
           No pages to display. Check include/exclude folder settings.
         </div>
+      ) : null}
+
+      {!indexState.isIndexing && indexState.pages.length > 0 && visiblePages.length === 0 ? (
+        <div className="palmwiki-state">No pages match the current filters.</div>
       ) : null}
 
       {visiblePages.length > 0 && viewMode === "card" ? (

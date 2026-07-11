@@ -1,10 +1,15 @@
-import { Plugin, TAbstractFile, TFile } from "obsidian";
+import { normalizePath, Plugin, TAbstractFile, TFile } from "obsidian";
 import {
   buildPageIndex,
   type BuildPageIndexStats,
   type BodyMetadataCache
 } from "./core/index/buildPageIndex";
+import { passesFolderSettings } from "./core/filters/filterPages";
 import type { PageRecord } from "./core/index/PageRecord";
+import {
+  createPersistentIndexCache,
+  parsePersistentIndexCache
+} from "./core/index/IndexCache";
 import { PalmWikiHomeSettingTab } from "./settings/SettingTab";
 import {
   DEFAULT_SETTINGS,
@@ -18,14 +23,33 @@ export interface PalmWikiHomeIndexState {
   pages: PageRecord[];
   isIndexing: boolean;
   indexDirty: boolean;
+  usingCachedIndex: boolean;
   lastIndexedAt: number | null;
   lastError: string | null;
+}
+
+export interface PalmWikiHomeDiagnostics {
+  lastCacheLoad: Record<string, unknown> | null;
+  lastIndexBuild: Record<string, unknown> | null;
+  lastCacheSave: Record<string, unknown> | null;
 }
 
 type IndexListener = (state: PalmWikiHomeIndexState) => void;
 
 const OPEN_VIEW_REBUILD_DEBOUNCE_MS = 1500;
-const BODY_READ_CONCURRENCY = 8;
+const VIEW_OPEN_IDLE_DELAY_MS = 750;
+const STARTUP_IDLE_DELAY_MS = 3000;
+const INDEX_IDLE_TIMEOUT_MS = 5000;
+const CACHE_WRITE_DELAY_MS = 1000;
+const CACHE_WRITE_IDLE_TIMEOUT_MS = 10000;
+const BODY_READ_CONCURRENCY = 2;
+const INDEX_CACHE_FILENAME = "index-cache.json";
+const MAX_INDEX_CACHE_BYTES = 64 * 1024 * 1024;
+
+interface PendingRebuild {
+  reason: string;
+  allowBackground: boolean;
+}
 
 export default class PalmWikiHomePlugin extends Plugin {
   settings: PalmWikiHomeSettings;
@@ -33,14 +57,36 @@ export default class PalmWikiHomePlugin extends Plugin {
   private pages: PageRecord[] = [];
   private isIndexing = false;
   private indexDirty = true;
+  private usingCachedIndex = false;
   private lastIndexedAt: number | null = null;
   private lastError: string | null = null;
+  private diagnostics: PalmWikiHomeDiagnostics = {
+    lastCacheLoad: null,
+    lastIndexBuild: null,
+    lastCacheSave: null
+  };
   private indexListeners = new Set<IndexListener>();
   private bodyMetadataCache: BodyMetadataCache = new Map();
   private rebuildTimer: number | null = null;
+  private rebuildIdleCallback: number | null = null;
   private rebuildSequence = 0;
+  private indexInputGeneration = 0;
   private rebuildInProgress = false;
-  private pendingRebuildReason: string | null = null;
+  private pendingRebuild: PendingRebuild | null = null;
+  private cacheLoadPromise: Promise<void> | null = null;
+  private cacheLoadGeneration = 0;
+  private preparationPromise: Promise<void> | null = null;
+  private automaticWorkGeneration = 0;
+  private cacheHydrated = false;
+  private cacheWriteTimer: number | null = null;
+  private cacheWriteIdleCallback: number | null = null;
+  private cacheWriteSequence = 0;
+  private cacheWriteInProgress = false;
+  private cacheWritePending = false;
+  private layoutReady = false;
+  private indexRequested = false;
+  private indexEventsRegistered = false;
+  private unloaded = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -71,17 +117,30 @@ export default class PalmWikiHomePlugin extends Plugin {
     });
 
     this.addSettingTab(new PalmWikiHomeSettingTab(this));
-    this.registerIndexEvents();
+    this.app.workspace.onLayoutReady(() => {
+      if (this.unloaded) {
+        return;
+      }
 
-    if (this.settings.indexOnStartup) {
-      this.scheduleIndexRebuild("startup", 0);
-    }
+      this.layoutReady = true;
+      this.registerIndexEvents();
+
+      if (this.settings.indexOnStartup) {
+        void this.prepareIndexForUse("startup", true);
+      } else if (this.indexRequested || this.hasHomeViewOpen()) {
+        void this.prepareIndexForUse("restored-view", false);
+      }
+    });
   }
 
   onunload(): void {
-    if (this.rebuildTimer !== null) {
-      window.clearTimeout(this.rebuildTimer);
-    }
+    this.unloaded = true;
+    this.indexInputGeneration += 1;
+    this.cacheLoadGeneration += 1;
+    this.automaticWorkGeneration += 1;
+    this.pendingRebuild = null;
+    this.cancelScheduledRebuild();
+    this.cancelScheduledCacheWrite();
 
     this.app.workspace.detachLeavesOfType(PALMWIKI_HOME_VIEW_TYPE);
   }
@@ -112,8 +171,10 @@ export default class PalmWikiHomePlugin extends Plugin {
   }
 
   ensureIndexForView(): void {
-    if (this.indexDirty || this.pages.length === 0) {
-      this.scheduleIndexRebuild("view-open", 0);
+    this.indexRequested = true;
+
+    if (this.layoutReady && (this.indexDirty || this.pages.length === 0)) {
+      void this.prepareIndexForUse("view-open", false);
     }
   }
 
@@ -122,8 +183,23 @@ export default class PalmWikiHomePlugin extends Plugin {
       pages: this.pages,
       isIndexing: this.isIndexing,
       indexDirty: this.indexDirty,
+      usingCachedIndex: this.usingCachedIndex,
       lastIndexedAt: this.lastIndexedAt,
       lastError: this.lastError
+    };
+  }
+
+  getDiagnostics(): PalmWikiHomeDiagnostics {
+    return {
+      lastCacheLoad: this.diagnostics.lastCacheLoad
+        ? { ...this.diagnostics.lastCacheLoad }
+        : null,
+      lastIndexBuild: this.diagnostics.lastIndexBuild
+        ? { ...this.diagnostics.lastIndexBuild }
+        : null,
+      lastCacheSave: this.diagnostics.lastCacheSave
+        ? { ...this.diagnostics.lastCacheSave }
+        : null
     };
   }
 
@@ -136,40 +212,65 @@ export default class PalmWikiHomePlugin extends Plugin {
     };
   }
 
-  scheduleIndexRebuild(reason: string, delayMs = OPEN_VIEW_REBUILD_DEBOUNCE_MS): void {
+  scheduleIndexRebuild(
+    reason: string,
+    delayMs = OPEN_VIEW_REBUILD_DEBOUNCE_MS,
+    allowBackground = false
+  ): void {
     this.indexDirty = true;
     this.notifyIndexListeners();
 
     if (this.rebuildInProgress) {
-      this.pendingRebuildReason = reason;
+      this.pendingRebuild = { reason, allowBackground };
       return;
     }
 
-    if (this.rebuildTimer !== null) {
-      window.clearTimeout(this.rebuildTimer);
-    }
+    this.cancelScheduledRebuild();
 
     this.rebuildTimer = window.setTimeout(() => {
       this.rebuildTimer = null;
-      void this.rebuildIndex(reason);
+      this.rebuildIdleCallback = this.requestIdle(
+        () => {
+          this.rebuildIdleCallback = null;
+
+          if (
+            this.unloaded ||
+            (!allowBackground && !this.isHomeViewActive()) ||
+            (allowBackground &&
+              !this.settings.indexOnStartup &&
+              !this.isHomeViewActive())
+          ) {
+            this.logPerformance("skip scheduled rebuild while inactive", { reason });
+            this.notifyIndexListeners();
+            return;
+          }
+
+          void this.rebuildIndex(reason, allowBackground);
+        },
+        INDEX_IDLE_TIMEOUT_MS
+      );
     }, delayMs);
   }
 
-  async rebuildIndex(_reason: string): Promise<void> {
-    if (this.rebuildTimer !== null) {
-      window.clearTimeout(this.rebuildTimer);
-      this.rebuildTimer = null;
-    }
+  async rebuildIndex(_reason: string, allowBackground = true): Promise<void> {
+    // Any real build supersedes pending automatic preparation. This prevents a
+    // delayed view/startup task from scheduling a second build after a manual
+    // refresh has already completed.
+    this.automaticWorkGeneration += 1;
+    this.cancelScheduledRebuild();
+    this.cacheLoadGeneration += 1;
+    this.cacheHydrated = true;
 
     this.indexDirty = true;
 
     if (this.rebuildInProgress) {
-      this.pendingRebuildReason = _reason;
+      this.pendingRebuild = { reason: _reason, allowBackground };
       this.notifyIndexListeners();
       return;
     }
 
     const sequence = ++this.rebuildSequence;
+    const inputGeneration = this.indexInputGeneration;
     this.rebuildInProgress = true;
     this.isIndexing = true;
     this.lastError = null;
@@ -177,7 +278,9 @@ export default class PalmWikiHomePlugin extends Plugin {
     const startedAt = performance.now();
     const stats: BuildPageIndexStats = {
       bodyCacheHits: 0,
-      bodyReads: 0
+      bodyReads: 0,
+      activeBodyReads: 0,
+      maxConcurrentBodyReads: 0
     };
 
     try {
@@ -187,19 +290,47 @@ export default class PalmWikiHomePlugin extends Plugin {
         concurrency: BODY_READ_CONCURRENCY
       });
 
-      if (sequence !== this.rebuildSequence) {
+      if (
+        sequence !== this.rebuildSequence ||
+        this.unloaded ||
+        inputGeneration !== this.indexInputGeneration ||
+        this.pendingRebuild !== null
+      ) {
+        this.isIndexing = false;
+        this.indexDirty = true;
+        this.logPerformance("discard stale index build", {
+          reason: _reason,
+          pendingReason: this.pendingRebuild?.reason ?? null,
+          inputChanged: inputGeneration !== this.indexInputGeneration,
+          unloaded: this.unloaded
+        });
+        if (!this.unloaded) {
+          this.notifyIndexListeners();
+        }
         return;
       }
 
       await this.prunePinnedPages();
+      if (this.unloaded || inputGeneration !== this.indexInputGeneration) {
+        this.isIndexing = false;
+        this.indexDirty = true;
+        return;
+      }
+
       this.pruneBodyMetadataCache();
-      const hasPendingRebuild = this.pendingRebuildReason !== null;
-      this.pages = pages;
+      const currentPinnedPages = new Set(this.settings.pinnedPages);
+      const publishedPages = pages.map((page) => ({
+        ...page,
+        pinned: currentPinnedPages.has(page.path)
+      }));
+      this.pages = publishedPages;
       this.isIndexing = false;
-      this.indexDirty = hasPendingRebuild;
+      this.indexDirty = false;
+      this.usingCachedIndex = false;
       this.lastIndexedAt = Date.now();
       this.lastError = null;
       this.notifyIndexListeners();
+      this.scheduleIndexCacheWrite();
       if (stats.graphBuild) {
         this.logPerformance("graph build", stats.graphBuild);
       }
@@ -208,16 +339,20 @@ export default class PalmWikiHomePlugin extends Plugin {
         this.logPerformance("page rank", stats.pageRank);
       }
 
-      this.logPerformance("index build", {
+      const indexBuildDiagnostics = {
         reason: _reason,
         ms: Math.round(performance.now() - startedAt),
-        pages: pages.length,
+        pages: publishedPages.length,
         bodyCacheHits: stats.bodyCacheHits,
         bodyReads: stats.bodyReads,
-        pendingFollowUp: hasPendingRebuild
-      });
+        bodyReadConcurrency: BODY_READ_CONCURRENCY,
+        maxConcurrentBodyReads: stats.maxConcurrentBodyReads,
+        pendingFollowUp: false
+      };
+      this.diagnostics.lastIndexBuild = indexBuildDiagnostics;
+      this.logPerformance("index build", indexBuildDiagnostics);
     } catch (error) {
-      if (sequence !== this.rebuildSequence) {
+      if (sequence !== this.rebuildSequence || this.unloaded) {
         return;
       }
 
@@ -228,7 +363,9 @@ export default class PalmWikiHomePlugin extends Plugin {
     } finally {
       if (sequence === this.rebuildSequence) {
         this.rebuildInProgress = false;
-        this.schedulePendingRebuildAfterCurrent();
+        if (!this.unloaded) {
+          this.schedulePendingRebuildAfterCurrent();
+        }
       }
     }
   }
@@ -237,17 +374,50 @@ export default class PalmWikiHomePlugin extends Plugin {
     patch: Partial<PalmWikiHomeSettings>,
     rebuildIndex: boolean
   ): Promise<void> {
+    const previousSettings = this.settings;
     this.settings = normalizeSettings({
       ...this.settings,
       ...patch
     });
+
+    const indexScopeChanged = hasIndexScopeChanged(previousSettings, this.settings);
+    if (indexScopeChanged) {
+      this.indexInputGeneration += 1;
+      this.cacheLoadGeneration += 1;
+      this.indexDirty = true;
+      this.pages = [];
+      this.bodyMetadataCache.clear();
+      this.usingCachedIndex = false;
+      this.lastIndexedAt = null;
+      this.cancelScheduledCacheWrite();
+
+      if (this.rebuildInProgress) {
+        this.pendingRebuild = {
+          reason: "settings-scope-changed",
+          allowBackground: this.settings.indexOnStartup
+        };
+      }
+    }
+
+    if (patch.indexOnStartup === false) {
+      this.automaticWorkGeneration += 1;
+      this.cancelScheduledRebuild();
+
+      if (this.rebuildInProgress) {
+        this.indexInputGeneration += 1;
+        this.indexDirty = true;
+        this.pendingRebuild = this.isHomeViewActive()
+          ? { reason: "startup-index-disabled", allowBackground: false }
+          : null;
+      }
+    }
 
     await this.saveSettings();
     this.notifyIndexListeners();
 
     if (rebuildIndex) {
       if (patch.indexOnStartup === true) {
-        this.scheduleIndexRebuild("settings-index-on-startup", 0);
+        void this.prepareIndexForUse("settings-index-on-startup", true);
       } else {
         this.requestIndexAfterChange("settings");
       }
@@ -288,7 +458,347 @@ export default class PalmWikiHomePlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  private async prepareIndexForUse(
+    reason: string,
+    allowBackground: boolean
+  ): Promise<void> {
+    this.indexRequested = true;
+    const workGeneration = this.automaticWorkGeneration;
+
+    if (!this.layoutReady || this.unloaded) {
+      return;
+    }
+
+    if (this.preparationPromise) {
+      await this.preparationPromise;
+
+      if (
+        !this.unloaded &&
+        workGeneration === this.automaticWorkGeneration &&
+        this.indexDirty &&
+        (allowBackground || this.isHomeViewActive())
+      ) {
+        this.scheduleIndexRebuild(reason, VIEW_OPEN_IDLE_DELAY_MS, allowBackground);
+      }
+      return;
+    }
+
+    const delayMs = allowBackground ? STARTUP_IDLE_DELAY_MS : VIEW_OPEN_IDLE_DELAY_MS;
+    this.preparationPromise = (async () => {
+      await this.waitForPaintAndIdle(delayMs);
+      if (this.unloaded || workGeneration !== this.automaticWorkGeneration) {
+        return;
+      }
+
+      await this.hydrateIndexCache();
+      if (
+        this.unloaded ||
+        workGeneration !== this.automaticWorkGeneration ||
+        !this.indexDirty ||
+        (!allowBackground && !this.isHomeViewActive())
+      ) {
+        return;
+      }
+
+      this.scheduleIndexRebuild(reason, VIEW_OPEN_IDLE_DELAY_MS, allowBackground);
+    })();
+
+    try {
+      await this.preparationPromise;
+    } finally {
+      this.preparationPromise = null;
+    }
+  }
+
+  private async waitForPaintAndIdle(delayMs: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          window.setTimeout(resolve, delayMs);
+        });
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      this.requestIdle(resolve, INDEX_IDLE_TIMEOUT_MS);
+    });
+  }
+
+  private async hydrateIndexCache(): Promise<void> {
+    if (this.cacheHydrated) {
+      return;
+    }
+
+    if (this.cacheLoadPromise) {
+      await this.cacheLoadPromise;
+      return;
+    }
+
+    this.cacheLoadPromise = this.loadIndexCacheFromDisk();
+
+    try {
+      await this.cacheLoadPromise;
+    } finally {
+      this.cacheHydrated = true;
+      this.cacheLoadPromise = null;
+    }
+  }
+
+  private async loadIndexCacheFromDisk(): Promise<void> {
+    const loadGeneration = this.cacheLoadGeneration;
+    const cachePath = this.getIndexCachePath();
+    if (!cachePath || !(await this.app.vault.adapter.exists(cachePath))) {
+      return;
+    }
+
+    if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
+      return;
+    }
+
+    const cacheStat = await this.app.vault.adapter.stat(cachePath);
+    if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
+      return;
+    }
+
+    if (cacheStat && cacheStat.size > MAX_INDEX_CACHE_BYTES) {
+      this.logPerformance("index cache ignored", {
+        reason: "cache-too-large",
+        bytes: cacheStat.size
+      });
+      return;
+    }
+
+    const startedAt = performance.now();
+
+    try {
+      const raw = await this.app.vault.adapter.read(cachePath);
+      if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
+        return;
+      }
+
+      const cache = parsePersistentIndexCache(JSON.parse(raw), this.settings);
+      if (!cache) {
+        this.logPerformance("index cache ignored", {
+          reason: "invalid-or-settings-mismatch"
+        });
+        return;
+      }
+
+      const filesByPath = new Map(
+        this.app.vault
+          .getMarkdownFiles()
+          .filter((file) =>
+            passesFolderSettings(
+              file.path,
+              this.settings.includeFolders,
+              this.settings.excludeFolders
+            )
+          )
+          .map((file) => [file.path, file])
+      );
+      const pinnedPages = new Set(this.settings.pinnedPages);
+      const pages = cache.pages
+        .filter((page) => filesByPath.has(page.path))
+        .map((page) => ({ ...page, pinned: pinnedPages.has(page.path) }));
+      const bodyMetadataCache: BodyMetadataCache = new Map();
+
+      for (const [path, entry] of cache.bodyMetadataCache) {
+        const file = filesByPath.get(path);
+        if (
+          file &&
+          entry.mtime === file.stat.mtime &&
+          entry.size === file.stat.size
+        ) {
+          bodyMetadataCache.set(path, entry);
+        }
+      }
+
+      if (
+        this.unloaded ||
+        loadGeneration !== this.cacheLoadGeneration ||
+        this.rebuildInProgress ||
+        !this.indexDirty
+      ) {
+        return;
+      }
+
+      this.pages = pages;
+      this.bodyMetadataCache = bodyMetadataCache;
+      this.lastIndexedAt = cache.savedAt;
+      this.indexDirty = true;
+      this.usingCachedIndex = pages.length > 0;
+      this.lastError = null;
+      this.notifyIndexListeners();
+      const cacheLoadDiagnostics = {
+        ms: Math.round(performance.now() - startedAt),
+        pages: pages.length,
+        bodyEntries: bodyMetadataCache.size,
+        bytes: raw.length
+      };
+      this.diagnostics.lastCacheLoad = cacheLoadDiagnostics;
+      this.logPerformance("index cache loaded", cacheLoadDiagnostics);
+    } catch (error) {
+      if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
+        return;
+      }
+
+      this.logPerformance("index cache ignored", {
+        reason: "read-or-parse-error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private scheduleIndexCacheWrite(): void {
+    this.cancelScheduledCacheWrite();
+    const sequence = this.cacheWriteSequence;
+
+    this.cacheWriteTimer = window.setTimeout(() => {
+      this.cacheWriteTimer = null;
+      this.cacheWriteIdleCallback = this.requestIdle(() => {
+        this.cacheWriteIdleCallback = null;
+        void this.writeIndexCacheToDisk(sequence);
+      }, CACHE_WRITE_IDLE_TIMEOUT_MS);
+    }, CACHE_WRITE_DELAY_MS);
+  }
+
+  private async writeIndexCacheToDisk(sequence: number): Promise<void> {
+    if (
+      sequence !== this.cacheWriteSequence ||
+      this.unloaded ||
+      this.indexDirty ||
+      this.lastIndexedAt === null
+    ) {
+      return;
+    }
+
+    if (this.cacheWriteInProgress) {
+      this.cacheWritePending = true;
+      return;
+    }
+
+    const cachePath = this.getIndexCachePath();
+    if (!cachePath) {
+      return;
+    }
+
+    const startedAt = performance.now();
+    this.cacheWriteInProgress = true;
+
+    try {
+      const payload = createPersistentIndexCache(
+        this.settings,
+        this.pages,
+        this.bodyMetadataCache,
+        this.lastIndexedAt
+      );
+      const serialized = JSON.stringify(payload);
+      const byteLength = new Blob([serialized]).size;
+      if (byteLength > MAX_INDEX_CACHE_BYTES) {
+        this.logPerformance("index cache save skipped", {
+          reason: "cache-too-large",
+          bytes: byteLength
+        });
+        return;
+      }
+
+      if (
+        sequence !== this.cacheWriteSequence ||
+        this.unloaded ||
+        this.indexDirty
+      ) {
+        return;
+      }
+
+      await this.app.vault.adapter.write(cachePath, serialized);
+      if (!this.unloaded) {
+        const cacheSaveDiagnostics = {
+          ms: Math.round(performance.now() - startedAt),
+          pages: this.pages.length,
+          bodyEntries: this.bodyMetadataCache.size,
+          bytes: byteLength,
+          superseded: sequence !== this.cacheWriteSequence
+        };
+        this.diagnostics.lastCacheSave = cacheSaveDiagnostics;
+        this.logPerformance("index cache saved", cacheSaveDiagnostics);
+      }
+    } catch (error) {
+      if (!this.unloaded) {
+        this.logPerformance("index cache save failed", {
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    } finally {
+      this.cacheWriteInProgress = false;
+      const shouldWriteLatest = this.cacheWritePending;
+      this.cacheWritePending = false;
+
+      if (
+        shouldWriteLatest &&
+        !this.unloaded &&
+        !this.indexDirty &&
+        this.lastIndexedAt !== null
+      ) {
+        this.scheduleIndexCacheWrite();
+      }
+    }
+  }
+
+  private getIndexCachePath(): string | null {
+    return this.manifest.dir
+      ? normalizePath(`${this.manifest.dir}/${INDEX_CACHE_FILENAME}`)
+      : null;
+  }
+
+  private requestIdle(callback: () => void, timeout: number): number {
+    if (typeof window.requestIdleCallback === "function") {
+      return window.requestIdleCallback(callback, { timeout });
+    }
+
+    return window.setTimeout(callback, Math.min(timeout, 250));
+  }
+
+  private cancelIdle(handle: number): void {
+    if (typeof window.cancelIdleCallback === "function") {
+      window.cancelIdleCallback(handle);
+    } else {
+      window.clearTimeout(handle);
+    }
+  }
+
+  private cancelScheduledRebuild(): void {
+    if (this.rebuildTimer !== null) {
+      window.clearTimeout(this.rebuildTimer);
+      this.rebuildTimer = null;
+    }
+
+    if (this.rebuildIdleCallback !== null) {
+      this.cancelIdle(this.rebuildIdleCallback);
+      this.rebuildIdleCallback = null;
+    }
+  }
+
+  private cancelScheduledCacheWrite(): void {
+    this.cacheWriteSequence += 1;
+
+    if (this.cacheWriteTimer !== null) {
+      window.clearTimeout(this.cacheWriteTimer);
+      this.cacheWriteTimer = null;
+    }
+
+    if (this.cacheWriteIdleCallback !== null) {
+      this.cancelIdle(this.cacheWriteIdleCallback);
+      this.cacheWriteIdleCallback = null;
+    }
+  }
+
   private registerIndexEvents(): void {
+    if (this.indexEventsRegistered) {
+      return;
+    }
+
+    this.indexEventsRegistered = true;
+
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
         if (leaf?.view.getViewType() === PALMWIKI_HOME_VIEW_TYPE) {
@@ -335,6 +845,12 @@ export default class PalmWikiHomePlugin extends Plugin {
         this.handleMarkdownFileChange(file, "metadata-change");
       })
     );
+
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        this.requestIndexAfterChange("metadata-resolved");
+      })
+    );
   }
 
   private handleMarkdownFileChange(file: TAbstractFile, reason: string): void {
@@ -344,10 +860,24 @@ export default class PalmWikiHomePlugin extends Plugin {
   }
 
   private requestIndexAfterChange(reason: string): void {
+    this.indexInputGeneration += 1;
+    this.cacheLoadGeneration += 1;
     this.indexDirty = true;
+    this.cancelScheduledCacheWrite();
+
+    if (this.rebuildInProgress) {
+      this.pendingRebuild = {
+        reason,
+        allowBackground: this.settings.indexOnStartup
+      };
+    }
 
     if (this.isHomeViewActive()) {
-      this.scheduleIndexRebuild(reason);
+      if (this.cacheHydrated) {
+        this.scheduleIndexRebuild(reason);
+      } else {
+        void this.prepareIndexForUse(reason, false);
+      }
     } else {
       this.logPerformance("skip rebuild while inactive", { reason });
       this.notifyIndexListeners();
@@ -373,32 +903,28 @@ export default class PalmWikiHomePlugin extends Plugin {
       return;
     }
 
-    if (this.pages.length === 0) {
-      this.scheduleIndexRebuild("active-view-empty", 0);
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        if (this.indexDirty && this.isHomeViewActive()) {
-          this.scheduleIndexRebuild("active-view-dirty", 250);
-        }
-      }, 0);
-    });
+    void this.prepareIndexForUse(
+      this.pages.length === 0 ? "active-view-empty" : "active-view-dirty",
+      false
+    );
   }
 
   private schedulePendingRebuildAfterCurrent(): void {
-    const pendingReason = this.pendingRebuildReason;
-    this.pendingRebuildReason = null;
+    const pendingRebuild = this.pendingRebuild;
+    this.pendingRebuild = null;
 
-    if (!pendingReason) {
+    if (!pendingRebuild) {
       return;
     }
 
     this.indexDirty = true;
 
-    if (this.isHomeViewActive()) {
-      this.scheduleIndexRebuild(pendingReason);
+    if (pendingRebuild.allowBackground || this.isHomeViewActive()) {
+      this.scheduleIndexRebuild(
+        pendingRebuild.reason,
+        OPEN_VIEW_REBUILD_DEBOUNCE_MS,
+        pendingRebuild.allowBackground
+      );
     } else {
       this.notifyIndexListeners();
     }
@@ -447,10 +973,18 @@ export default class PalmWikiHomePlugin extends Plugin {
   }
 
   private async prunePinnedPages(): Promise<void> {
+    if (this.unloaded) {
+      return;
+    }
+
     const markdownPaths = new Set(this.app.vault.getMarkdownFiles().map((file) => file.path));
     const pinnedPages = this.settings.pinnedPages.filter((path) => markdownPaths.has(path));
 
     if (pinnedPages.length === this.settings.pinnedPages.length) {
+      return;
+    }
+
+    if (this.unloaded) {
       return;
     }
 
@@ -459,11 +993,24 @@ export default class PalmWikiHomePlugin extends Plugin {
       pinnedPages
     });
 
-    await this.saveSettings();
+    if (!this.unloaded) {
+      await this.saveSettings();
+    }
   }
 
   private pruneBodyMetadataCache(): void {
-    const markdownPaths = new Set(this.app.vault.getMarkdownFiles().map((file) => file.path));
+    const markdownPaths = new Set(
+      this.app.vault
+        .getMarkdownFiles()
+        .filter((file) =>
+          passesFolderSettings(
+            file.path,
+            this.settings.includeFolders,
+            this.settings.excludeFolders
+          )
+        )
+        .map((file) => file.path)
+    );
 
     for (const path of this.bodyMetadataCache.keys()) {
       if (!markdownPaths.has(path)) {
@@ -496,4 +1043,18 @@ function normalizeSettings(settings: PalmWikiHomeSettings): PalmWikiHomeSettings
     ),
     pageRankDebugPath: (settings.pageRankDebugPath ?? "").trim()
   };
+}
+
+function hasIndexScopeChanged(
+  previous: PalmWikiHomeSettings,
+  next: PalmWikiHomeSettings
+): boolean {
+  return (
+    JSON.stringify(previous.includeFolders) !== JSON.stringify(next.includeFolders) ||
+    JSON.stringify(previous.excludeFolders) !== JSON.stringify(next.excludeFolders) ||
+    JSON.stringify(previous.pageRankIgnoredSourceFolders) !==
+      JSON.stringify(next.pageRankIgnoredSourceFolders) ||
+    JSON.stringify(previous.pageRankIgnoredSourcePathPatterns) !==
+      JSON.stringify(next.pageRankIgnoredSourcePathPatterns)
+  );
 }
