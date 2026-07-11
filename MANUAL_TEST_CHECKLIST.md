@@ -73,9 +73,15 @@
 - `[ ]` Home view を閉じた状態で Markdown を編集すると、即時 full reindex せず stale / dirty 状態になる。
 - `[ ]` Home view が別 tab の裏にある状態で Markdown を編集しても、即時 full rebuild せず stale / dirty 状態になる。
 - `[ ]` Home tab に戻った時、既存 index の UI が先に使える状態になり、その後 dirty rebuild が走る。
+- `[ ]` Obsidian起動直後はPalmWiki Homeの本文索引が始まらず、画面とタブの復元後のidle時に開始する。
+- `[ ]` warm起動では保存済み索引が先に表示され、未変更のMarkdown本文を全件読み直さない。
+- `[ ]` `index-cache.json`が破損または設定不一致でも、エラーで起動不能にならず通常索引へ戻る。
+- `[ ]` 本文読み込みの同時実行数が2件を超えない。
 - `[ ]` Home view を開いた状態で Markdown を編集すると、debounce 後に表示が更新される。
 - `[ ]` Home view を開いた状態で複数の metadata / file change が連続しても、index rebuild が同時に複数本走らない。
 - `[ ]` index rebuild 中に Refresh を押しても、同時 rebuild ではなく follow-up rebuild として処理される。
+- `[ ]` Home表示直後の自動待機中にRefreshしても、完了後に不要な二重rebuildが始まらない。
+- `[ ]` index rebuild 中にpinを切り替えても、build完了後に新しいpin状態が維持される。
 - `[ ]` 既存 Home tab を command / ribbon から開く時、view が再生成されず既存 leaf が reveal される。
 - `[ ]` pin 済み note を rename しても pin が維持される。
 - `[ ]` pin 済みの一時 note を delete しても crash せず、古い pin が削除または無害に無視される。
@@ -97,8 +103,9 @@
 - `[ ]` link target filter の候補popoverが入力欄の下に出て、隣接controlやtoolbar layoutを崩さない。
 - `[ ]` link target filter の候補popoverが Escape / outside click / selection で閉じる。
 - `[ ]` folder / tag / quick / link target filters が AND 条件として組み合わさる。
+- `[ ]` filter結果が0件でも、保存済み索引がある場合は索引開始待ちと誤表示されない。
 - `[ ]` 大きく絞り込んだ後でも card/table virtualization の visible range が壊れず、空白表示にならない。
-- `[ ]` `Performance debug logging` が PalmWiki Home 設定の `Index on startup` 直下に表示される。
+- `[ ]` `Index on startup` の下に永続索引キャッシュの保存内容説明と `Performance debug logging` が表示される。
 - `[ ]` `Performance debug logging` を ON にすると `[PalmWiki Home perf]` の timing log が出る。
 - `[ ]` `Performance debug logging` を ON にすると `graph build` と `page rank` の timing log が出る。
 - `[ ]` `PageRank debug path` を設定して rebuild すると、top authority contributors が debug log に出る。

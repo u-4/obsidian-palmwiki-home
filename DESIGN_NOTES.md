@@ -28,7 +28,9 @@ Phase 2 adds graph-derived fields to each `PageRecord`: `outlinks`, `inlinks`, `
 
 Index data is cached in plugin state. React components render from that cached index and do not call `cachedRead()` per card or table row. Rebuilds are triggered by view open, refresh command, toolbar refresh, startup only when explicitly enabled, settings changes that affect indexed pages, and relevant vault/metadata events while the Home view is open.
 
-By default, the plugin does not run a full body index on Obsidian startup. The index starts dirty and is built lazily when PalmWiki Home is opened or when a refresh command/button is used. The optional `indexOnStartup` setting can restore startup indexing, but it defaults to `false`.
+By default, the plugin does not run a full body index on Obsidian startup. The index starts dirty and is built lazily when PalmWiki Home is opened or when a refresh command/button is used. Automatic work is gated by `Workspace.onLayoutReady()`, two animation frames, a short delay, and `requestIdleCallback()`. The optional `indexOnStartup` setting still waits for layout readiness and idle time, and defaults to `false`.
+
+Vault and metadata event handlers are registered only after `Workspace.onLayoutReady()` so the plugin does not treat every existing file announced during Vault startup as a new change. Automatic rebuild reservations are cancelled and coalesced when newer events arrive. If the Home view becomes inactive before an automatic build starts, the build remains dirty instead of running in the background unless `indexOnStartup` is enabled. Explicit Refresh actions remain immediate.
 
 When Markdown files or metadata change while the Home view is closed or present in an inactive tab, the plugin marks the index dirty and does not immediately reread the vault. When the Home view is the active view, those changes schedule a debounced rebuild after 1500 ms. Manual refresh remains immediate, but still respects single-flight rebuild protection.
 
@@ -40,11 +42,17 @@ Rebuilds are guarded by a sequence number so stale async results do not overwrit
 
 ## Body metadata cache
 
-The body-derived fields `lineCount`, `charCount`, and `description` are cached in memory by `path`, `mtime`, and `size`. If those values match on a later index pass, the plugin reuses the cached body-derived metadata and avoids another `cachedRead()` for that file. When performance debug logging is enabled, index builds report total milliseconds plus body cache hit/read counts.
+The body-derived fields `lineCount`, `charCount`, and `description` are cached by `path`, `mtime`, and `size`, both in memory and in the Vault-local persistent index cache. If those values match on a later index pass or plugin restart, the plugin reuses the cached body-derived metadata and avoids another `cachedRead()` for that file. When performance debug logging is enabled, index builds report total milliseconds plus body cache hit/read counts.
 
 Metadata-cache-derived fields are still refreshed on every index pass, including title, aliases, tags, first image, link counts, timestamps, and pinned status.
 
-Body reads are concurrency-limited to 8 files at a time to avoid launching thousands of simultaneous `cachedRead()` calls in large vaults.
+Body reads are concurrency-limited to 2 files at a time to reduce contention with Obsidian and other full-Vault plugins. Workers yield to the event loop after each 16 processed files so cache-heavy rebuilds also leave time for tab rendering and input.
+
+## Persistent index cache
+
+After a successful rebuild, the plugin saves `PageRecord` data and body-derived metadata to `index-cache.json` inside its Vault plugin directory. The write runs after the UI update and waits for idle time. It stores derived titles, tags, short descriptions, link metadata, and body statistics, not full Markdown bodies.
+
+Cache entries include a schema version, save time, and a fingerprint of index-affecting settings. Invalid JSON, an old schema, or a settings mismatch is ignored without preventing plugin startup. At load time, records for missing Markdown files are removed, body metadata is reused only when path, mtime, and size still match, and current pin settings are overlaid. Cached pages are deliberately treated as stale: they can render first, then an idle rebuild revalidates current metadata, links, and PageRank.
 
 ## Graph index
 
@@ -170,7 +178,7 @@ Phase 2 adds numeric sort keys for Page rank, Inlinks, and Outlinks. Default sor
 
 ## Performance debug
 
-The `performanceDebug` setting defaults to `false`. When enabled, the plugin logs timing and count information with the prefix `[PalmWiki Home perf]`, including graph build time, page rank time, index build time, body cache hits/reads, filter time, sort time, visible result count, mounted card window size, mounted table window size, view mode changes, image URL cache hit/miss counts, view activation, and skipped inactive rebuilds.
+The `performanceDebug` setting defaults to `false`. When enabled, the plugin logs timing and count information with the prefix `[PalmWiki Home perf]`, including persistent cache load/save time and size, graph build time, page rank time, index build time, body cache hits/reads, filter time, sort time, visible result count, mounted card window size, mounted table window size, view mode changes, image URL cache hit/miss counts, view activation, and skipped inactive rebuilds.
 
 ## Deferred work
 

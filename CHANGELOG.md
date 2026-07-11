@@ -12,3 +12,5 @@ The project uses versions from `manifest.json`. It has not made a public release
 - Added pinned-first sorting, folder/tag/quick filters, and link-target filtering.
 - Added resolved-link graph metadata, Inlinks/Outlinks sorts, and PageRank-like scoring.
 - Added PageRank hub dampening, ignored-source settings, and performance diagnostics.
+- Deferred automatic indexing until workspace layout and idle time, limited body reads to two concurrent files, and added a persistent derived-metadata index cache.
+- Added automated coverage for cache validation and bounded-concurrency mapping.

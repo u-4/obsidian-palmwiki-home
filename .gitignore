@@ -16,3 +16,4 @@ npm-debug.log*
 
 # Obsidian runtime data
 data.json
+index-cache.json

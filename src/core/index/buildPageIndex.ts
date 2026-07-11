@@ -20,7 +20,8 @@ import type { PageRecord } from "./PageRecord";
 import type { PalmWikiHomeSettings } from "../../settings/Settings";
 import { isPathInFolder, passesFolderSettings } from "../filters/filterPages";
 
-const DEFAULT_BODY_READ_CONCURRENCY = 8;
+const DEFAULT_BODY_READ_CONCURRENCY = 2;
+const DEFAULT_YIELD_EVERY = 16;
 
 export interface BodyMetadataCacheEntry extends BodyDerivedMetadata {
   path: string;
@@ -33,6 +34,8 @@ export type BodyMetadataCache = Map<string, BodyMetadataCacheEntry>;
 export interface BuildPageIndexStats {
   bodyCacheHits: number;
   bodyReads: number;
+  activeBodyReads?: number;
+  maxConcurrentBodyReads?: number;
   graphBuild?: {
     ms: number;
     nodes: number;
@@ -80,6 +83,8 @@ export async function buildPageIndex(
     };
   }
 
+  await yieldToEventLoop();
+
   const pageRankStartedAt = performance.now();
   const pageRank = computePageRank(
     pageRankGraph,
@@ -103,6 +108,8 @@ export async function buildPageIndex(
     };
   }
 
+  await yieldToEventLoop();
+
   const records = await mapWithConcurrency(
     markdownFiles,
     options.concurrency ?? DEFAULT_BODY_READ_CONCURRENCY,
@@ -116,7 +123,8 @@ export async function buildPageIndex(
         pageRank.ranks,
         index,
         options.stats
-      )
+      ),
+    DEFAULT_YIELD_EVERY
   );
 
   return records.filter((record): record is PageRecord => record !== null);
@@ -235,6 +243,14 @@ async function getBodyMetadata(
     return cached;
   }
 
+  if (stats) {
+    stats.activeBodyReads = (stats.activeBodyReads ?? 0) + 1;
+    stats.maxConcurrentBodyReads = Math.max(
+      stats.maxConcurrentBodyReads ?? 0,
+      stats.activeBodyReads
+    );
+  }
+
   try {
     const body = await app.vault.cachedRead(file);
     if (stats) {
@@ -252,6 +268,10 @@ async function getBodyMetadata(
     return bodyMetadata;
   } catch (error) {
     return null;
+  } finally {
+    if (stats) {
+      stats.activeBodyReads = Math.max(0, (stats.activeBodyReads ?? 1) - 1);
+    }
   }
 }
 
@@ -263,23 +283,38 @@ function emptyBodyMetadata(): BodyDerivedMetadata {
   };
 }
 
-async function mapWithConcurrency<T, R>(
+export async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
-  worker: (item: T, index: number) => Promise<R>
+  worker: (item: T, index: number) => Promise<R>,
+  yieldEvery = 0
 ): Promise<R[]> {
   const results: R[] = new Array<R>(items.length);
   let nextIndex = 0;
   const workerCount = Math.max(1, Math.min(concurrency, items.length));
 
   async function runWorker(): Promise<void> {
+    let completedSinceYield = 0;
+
     while (nextIndex < items.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
       results[currentIndex] = await worker(items[currentIndex], currentIndex);
+      completedSinceYield += 1;
+
+      if (yieldEvery > 0 && completedSinceYield >= yieldEvery) {
+        completedSinceYield = 0;
+        await yieldToEventLoop();
+      }
     }
   }
 
   await Promise.all(Array.from({ length: workerCount }, runWorker));
   return results;
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, 0);
+  });
 }
