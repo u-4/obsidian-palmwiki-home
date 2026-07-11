@@ -32,15 +32,7 @@ When `Performance debug logging` is enabled, expected Phase 2 logs include:
 
 ## Copied Real-Vault Observation
 
-Before Phase 2, testing used a copied real vault with roughly 7,000 Markdown pages. Phase 1 virtualized card/table switching and sorting were reported smooth.
-
-Phase 2 has not yet been manually retested in Obsidian after this implementation. The next copied-vault check should confirm:
-
-- tab return remains smooth,
-- Card/Table switching remains smooth,
-- PageRank/Inlinks/Outlinks sorting remains smooth,
-- link-target typing and suggestion display remain responsive,
-- graph/PageRank logs occur only on index rebuild.
+Before Phase 2, testing used a copied real vault with roughly 7,000 Markdown pages. Phase 1 virtualized card/table switching and sorting were reported smooth. The final idle/persistent-index candidate was retested in Obsidian with Computer Use on 2026-07-12; aggregate results are recorded below.
 
 ## 2026-07-12 Local Cache Benchmark
 
@@ -54,6 +46,22 @@ Using only aggregate timing and counts from the copied test Vault, without print
 - PageRank computation: 15.3 ms.
 
 These are isolated local command-line measurements, not a substitute for the final Obsidian UI test. They indicate that the synchronous cache, graph, and PageRank phases are tens of milliseconds rather than the multi-second tab delay under investigation.
+
+## 2026-07-12 Obsidian UI Verification
+
+The copied test Vault was opened as a new Obsidian window with `indexOnStartup` disabled. No note titles, paths, or bodies were retained in the test record.
+
+- Three restored Markdown tabs opened without a `File not found` state.
+- The persistent cache timestamp did not change before PalmWiki Home was opened, confirming no startup full-index write while Home was inactive.
+- Saved-state transition: 7,145 cached pages became available before the validating rebuild started; the observed gap was about 0.77 seconds.
+- Final warm run: cache load 76 ms, 7,145 page records, 7,145 valid body entries.
+- Final validating rebuild: 1,198 ms, 7,145 body cache hits, 0 body reads, maximum concurrent body reads 0.
+- Cache save after validation: 68 ms.
+- Toolbar Refresh: 1,175 ms, 7,145 cache hits, 0 body reads, no pending follow-up rebuild.
+- Card/Table, PageRank/Inlinks/Outlinks, Asc/Desc, and an empty-result Quick filter switched without indexing, error, or missing-file state.
+- Opening a card and returning through the ribbon selected the existing Home view successfully.
+
+An earlier run with exactly one file identity changed reused 7,144 body entries and read only that one file, with maximum concurrent body reads 1. Together with the bounded-concurrency unit test, this is consistent with the configured maximum of 2.
 
 ## Known Risk
 

@@ -14,4 +14,5 @@ The project uses versions from `manifest.json`. It has not made a public release
 - Added PageRank hub dampening, ignored-source settings, and performance diagnostics.
 - Deferred automatic indexing until workspace layout and idle time, limited body reads to two concurrent files, and added a persistent derived-metadata index cache.
 - Added cooperative cancellation for inactive view-triggered builds and preserved background intent when rebuild requests are coalesced.
+- Kept ordinary metadata events from aborting the stale-first cache load, and made ribbon/command opening focus an existing Home leaf.
 - Added automated coverage for cache validation, bounded-concurrency mapping, rebuild-request merging, and file-snapshot guards.

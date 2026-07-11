@@ -34,7 +34,7 @@ Vault and metadata event handlers are registered only after `Workspace.onLayoutR
 
 When Markdown files or metadata change while the Home view is closed or present in an inactive tab, the plugin marks the index dirty and does not immediately reread the vault. When the Home view is the active view, those changes schedule a debounced rebuild after 1500 ms. Manual refresh remains immediate, but still respects single-flight rebuild protection.
 
-Opening an already-existing Home leaf reveals that leaf directly and does not call `setViewState()` again, avoiding unnecessary view reconstruction.
+Opening an already-existing Home leaf reveals and explicitly activates that leaf without calling `setViewState()` again, avoiding unnecessary view reconstruction while ensuring the ribbon/command action actually selects Home.
 
 When the Home tab becomes active and the index is dirty, the existing cached index is allowed to render first. A delayed rebuild is then scheduled after the first paint so returning to the tab does not synchronously block on a full rebuild.
 
@@ -52,7 +52,7 @@ Body reads are concurrency-limited to 2 files at a time to reduce contention wit
 
 After a successful rebuild, the plugin saves `PageRecord` data and body-derived metadata to `index-cache.json` inside its Vault plugin directory. The write runs after the UI update and waits for idle time. It stores derived titles, tags, short descriptions, link metadata, and body statistics, not full Markdown bodies.
 
-Cache entries include a schema version, save time, and a fingerprint of index-affecting settings. Invalid JSON, an old schema, or a settings mismatch is ignored without preventing plugin startup. At load time, records for missing Markdown files are removed, body metadata is reused only when path, mtime, and size still match, and current pin settings are overlaid. Cached pages are deliberately treated as stale: they can render first, then an idle rebuild revalidates current metadata, links, and PageRank.
+Cache entries include a schema version, save time, and a fingerprint of index-affecting settings. Invalid JSON, an old schema, or a settings mismatch is ignored without preventing plugin startup. At load time, records for missing Markdown files are removed, body metadata is reused only when path, mtime, and size still match, and current pin settings are overlaid. Cached pages are deliberately treated as stale: they can render first, then an idle rebuild revalidates current metadata, links, and PageRank. Ordinary vault/metadata notifications therefore mark the index dirty but do not abort an in-progress cache read; manual Refresh, scope-setting changes, and unload still invalidate that read when applying it would conflict with newer work.
 
 ## Graph index
 
