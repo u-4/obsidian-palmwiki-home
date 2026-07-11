@@ -140,3 +140,11 @@
 - `[x]` virtual table導入後、Card/Table切り替えに目立つ引っかかりがない。
 - `[x]` sort操作も軽快に動作する。
 - `[x]` plugin backupを`.obsidian/plugins/`の外へ置くことで、古いplugin候補の誤検出を防げる。
+- `[x]` `Index on startup` OFFで新規Vaultウィンドウを開き、復元Markdownタブ3枚に「ファイルがありません」が出ない。
+- `[x]` Homeを開く前にfull index/cache writeが始まらず、保存済み7,145ページが検証buildより先に表示される。
+- `[x]` warm検証buildで7,145件すべてを再利用し、本文read 0件、最大同時read 0件で完了する。
+- `[x]` 1ファイルだけ状態が変わった時は7,144件を再利用し、本文read 1件だけで完了する。
+- `[x]` toolbar Refreshが1回で完了し、pending follow-upや本文再readを発生させない。
+- `[x]` Card/Table、PageRank/Inlinks/Outlinks、Asc/Descの切替でindex rebuildやerrorが発生しない。
+- `[x]` Quick filterが0件の時に、索引開始待ちではなく「No pages match the current filters.」を表示する。
+- `[x]` cardからnoteを開いた後、ribbon操作で既存Home leafが選択状態へ戻る。

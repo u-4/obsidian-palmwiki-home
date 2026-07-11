@@ -151,6 +151,7 @@ export default class PalmWikiHomePlugin extends Plugin {
     const existingLeaf = this.app.workspace.getLeavesOfType(PALMWIKI_HOME_VIEW_TYPE)[0];
     if (existingLeaf) {
       await this.app.workspace.revealLeaf(existingLeaf);
+      this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
       return;
     }
 
@@ -160,7 +161,8 @@ export default class PalmWikiHomePlugin extends Plugin {
       active: true
     });
 
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async openPage(path: string): Promise<void> {
@@ -922,7 +924,11 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   private requestIndexAfterChange(reason: string): void {
     this.indexInputGeneration += 1;
-    this.cacheLoadGeneration += 1;
+    // The persisted pages are intentionally allowed to render stale before the
+    // follow-up rebuild. Ordinary vault/metadata events must not abort an
+    // in-flight cache read; current paths and body file snapshots are filtered
+    // when the cache is applied. Manual builds, scope changes, and unload still
+    // invalidate cache loading explicitly.
     this.indexDirty = true;
     this.cancelScheduledCacheWrite();
 
