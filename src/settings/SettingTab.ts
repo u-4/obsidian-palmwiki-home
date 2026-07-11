@@ -161,7 +161,7 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Persistent index cache")
       .setDesc(
-        "PalmWiki Home stores derived page metadata in index-cache.json inside this Vault's plugin folder, including titles, paths, tags, links, statistics, and up to 180 characters of body-derived description per note. It does not store full note bodies, and the cache is rebuilt safely when settings or files change."
+        "PalmWiki Home stores derived page metadata in index-cache.json inside this Vault's plugin folder, including titles, paths, tags, links, statistics, and an approximately 180-character body-derived description per note. It does not store full note bodies, and the cache is rebuilt safely when settings or files change."
       );
 
     new Setting(containerEl)

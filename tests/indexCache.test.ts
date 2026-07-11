@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildIndexSettingsKey,
   createPersistentIndexCache,
   parsePersistentIndexCache
 } from "../src/core/index/IndexCache";
@@ -86,7 +87,7 @@ test("persistent index cache is rejected when its structure is invalid", () => {
     parsePersistentIndexCache(
       {
         schemaVersion: 1,
-        settingsKey: "invalid",
+        settingsKey: buildIndexSettingsKey(settings),
         savedAt: 1234,
         pages: [{}],
         bodyMetadata: []

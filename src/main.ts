@@ -1,6 +1,7 @@
 import { normalizePath, Plugin, TAbstractFile, TFile } from "obsidian";
 import {
   buildPageIndex,
+  IndexBuildCancelledError,
   type BuildPageIndexStats,
   type BodyMetadataCache
 } from "./core/index/buildPageIndex";
@@ -10,6 +11,11 @@ import {
   createPersistentIndexCache,
   parsePersistentIndexCache
 } from "./core/index/IndexCache";
+import {
+  canRunScheduledRebuild,
+  mergeRebuildRequest,
+  type RebuildRequest
+} from "./core/index/RebuildRequest";
 import { PalmWikiHomeSettingTab } from "./settings/SettingTab";
 import {
   DEFAULT_SETTINGS,
@@ -46,11 +52,6 @@ const BODY_READ_CONCURRENCY = 2;
 const INDEX_CACHE_FILENAME = "index-cache.json";
 const MAX_INDEX_CACHE_BYTES = 64 * 1024 * 1024;
 
-interface PendingRebuild {
-  reason: string;
-  allowBackground: boolean;
-}
-
 export default class PalmWikiHomePlugin extends Plugin {
   settings: PalmWikiHomeSettings;
 
@@ -72,7 +73,8 @@ export default class PalmWikiHomePlugin extends Plugin {
   private rebuildSequence = 0;
   private indexInputGeneration = 0;
   private rebuildInProgress = false;
-  private pendingRebuild: PendingRebuild | null = null;
+  private scheduledRebuild: RebuildRequest | null = null;
+  private pendingRebuild: RebuildRequest | null = null;
   private cacheLoadPromise: Promise<void> | null = null;
   private cacheLoadGeneration = 0;
   private preparationPromise: Promise<void> | null = null;
@@ -221,31 +223,44 @@ export default class PalmWikiHomePlugin extends Plugin {
     this.notifyIndexListeners();
 
     if (this.rebuildInProgress) {
-      this.pendingRebuild = { reason, allowBackground };
+      this.pendingRebuild = mergeRebuildRequest(this.pendingRebuild, {
+        reason,
+        allowBackground
+      });
       return;
     }
 
+    const scheduledRebuild = mergeRebuildRequest(this.scheduledRebuild, {
+      reason,
+      allowBackground
+    });
     this.cancelScheduledRebuild();
+    this.scheduledRebuild = scheduledRebuild;
 
     this.rebuildTimer = window.setTimeout(() => {
       this.rebuildTimer = null;
       this.rebuildIdleCallback = this.requestIdle(
         () => {
           this.rebuildIdleCallback = null;
+          const scheduled = this.scheduledRebuild;
+          this.scheduledRebuild = null;
+
+          if (!scheduled) {
+            return;
+          }
 
           if (
             this.unloaded ||
-            (!allowBackground && !this.isHomeViewActive()) ||
-            (allowBackground &&
-              !this.settings.indexOnStartup &&
-              !this.isHomeViewActive())
+            !canRunScheduledRebuild(scheduled, this.isHomeViewActive())
           ) {
-            this.logPerformance("skip scheduled rebuild while inactive", { reason });
+            this.logPerformance("skip scheduled rebuild while inactive", {
+              reason: scheduled.reason
+            });
             this.notifyIndexListeners();
             return;
           }
 
-          void this.rebuildIndex(reason, allowBackground);
+          void this.rebuildIndex(scheduled.reason, scheduled.allowBackground);
         },
         INDEX_IDLE_TIMEOUT_MS
       );
@@ -264,7 +279,10 @@ export default class PalmWikiHomePlugin extends Plugin {
     this.indexDirty = true;
 
     if (this.rebuildInProgress) {
-      this.pendingRebuild = { reason: _reason, allowBackground };
+      this.pendingRebuild = mergeRebuildRequest(this.pendingRebuild, {
+        reason: _reason,
+        allowBackground
+      });
       this.notifyIndexListeners();
       return;
     }
@@ -287,7 +305,12 @@ export default class PalmWikiHomePlugin extends Plugin {
       const pages = await buildPageIndex(this.app, this.settings, {
         bodyMetadataCache: this.bodyMetadataCache,
         stats,
-        concurrency: BODY_READ_CONCURRENCY
+        concurrency: BODY_READ_CONCURRENCY,
+        shouldAbort: () =>
+          this.unloaded ||
+          inputGeneration !== this.indexInputGeneration ||
+          this.pendingRebuild !== null ||
+          (!allowBackground && !this.isHomeViewActive())
       });
 
       if (
@@ -358,7 +381,16 @@ export default class PalmWikiHomePlugin extends Plugin {
 
       this.isIndexing = false;
       this.indexDirty = true;
-      this.lastError = error instanceof Error ? error.message : String(error);
+      if (error instanceof IndexBuildCancelledError) {
+        this.logPerformance("cancel index build", {
+          reason: _reason,
+          inactive: !allowBackground && !this.isHomeViewActive(),
+          inputChanged: inputGeneration !== this.indexInputGeneration,
+          pendingReason: this.pendingRebuild?.reason ?? null
+        });
+      } else {
+        this.lastError = error instanceof Error ? error.message : String(error);
+      }
       this.notifyIndexListeners();
     } finally {
       if (sequence === this.rebuildSequence) {
@@ -392,10 +424,10 @@ export default class PalmWikiHomePlugin extends Plugin {
       this.cancelScheduledCacheWrite();
 
       if (this.rebuildInProgress) {
-        this.pendingRebuild = {
+        this.pendingRebuild = mergeRebuildRequest(this.pendingRebuild, {
           reason: "settings-scope-changed",
           allowBackground: this.settings.indexOnStartup
-        };
+        });
       }
     }
 
@@ -414,6 +446,16 @@ export default class PalmWikiHomePlugin extends Plugin {
 
     await this.saveSettings();
     this.notifyIndexListeners();
+
+    if (
+      patch.indexOnStartup === false &&
+      !rebuildIndex &&
+      !this.rebuildInProgress &&
+      this.indexDirty &&
+      this.isHomeViewActive()
+    ) {
+      void this.prepareIndexForUse("startup-index-disabled", false);
+    }
 
     if (rebuildIndex) {
       if (patch.indexOnStartup === true) {
@@ -473,13 +515,26 @@ export default class PalmWikiHomePlugin extends Plugin {
       await this.preparationPromise;
 
       if (
-        !this.unloaded &&
-        workGeneration === this.automaticWorkGeneration &&
-        this.indexDirty &&
-        (allowBackground || this.isHomeViewActive())
+        this.unloaded ||
+        workGeneration !== this.automaticWorkGeneration
       ) {
-        this.scheduleIndexRebuild(reason, VIEW_OPEN_IDLE_DELAY_MS, allowBackground);
+        return;
       }
+
+      if (!this.cacheHydrated) {
+        await this.hydrateIndexCache();
+      }
+
+      if (
+        this.unloaded ||
+        workGeneration !== this.automaticWorkGeneration ||
+        !this.indexDirty ||
+        (!allowBackground && !this.isHomeViewActive())
+      ) {
+        return;
+      }
+
+      this.scheduleIndexRebuild(reason, VIEW_OPEN_IDLE_DELAY_MS, allowBackground);
       return;
     }
 
@@ -547,30 +602,34 @@ export default class PalmWikiHomePlugin extends Plugin {
   private async loadIndexCacheFromDisk(): Promise<void> {
     const loadGeneration = this.cacheLoadGeneration;
     const cachePath = this.getIndexCachePath();
-    if (!cachePath || !(await this.app.vault.adapter.exists(cachePath))) {
-      return;
-    }
-
-    if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
-      return;
-    }
-
-    const cacheStat = await this.app.vault.adapter.stat(cachePath);
-    if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
-      return;
-    }
-
-    if (cacheStat && cacheStat.size > MAX_INDEX_CACHE_BYTES) {
-      this.logPerformance("index cache ignored", {
-        reason: "cache-too-large",
-        bytes: cacheStat.size
-      });
+    if (!cachePath) {
       return;
     }
 
     const startedAt = performance.now();
 
     try {
+      if (!(await this.app.vault.adapter.exists(cachePath))) {
+        return;
+      }
+
+      if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
+        return;
+      }
+
+      const cacheStat = await this.app.vault.adapter.stat(cachePath);
+      if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
+        return;
+      }
+
+      if (cacheStat && cacheStat.size > MAX_INDEX_CACHE_BYTES) {
+        this.logPerformance("index cache ignored", {
+          reason: "cache-too-large",
+          bytes: cacheStat.size
+        });
+        return;
+      }
+
       const raw = await this.app.vault.adapter.read(cachePath);
       if (this.unloaded || loadGeneration !== this.cacheLoadGeneration) {
         return;
@@ -643,7 +702,7 @@ export default class PalmWikiHomePlugin extends Plugin {
       }
 
       this.logPerformance("index cache ignored", {
-        reason: "read-or-parse-error",
+        reason: "cache-io-or-parse-error",
         message: error instanceof Error ? error.message : String(error)
       });
     }
@@ -776,6 +835,8 @@ export default class PalmWikiHomePlugin extends Plugin {
       this.cancelIdle(this.rebuildIdleCallback);
       this.rebuildIdleCallback = null;
     }
+
+    this.scheduledRebuild = null;
   }
 
   private cancelScheduledCacheWrite(): void {
@@ -866,10 +927,10 @@ export default class PalmWikiHomePlugin extends Plugin {
     this.cancelScheduledCacheWrite();
 
     if (this.rebuildInProgress) {
-      this.pendingRebuild = {
+      this.pendingRebuild = mergeRebuildRequest(this.pendingRebuild, {
         reason,
         allowBackground: this.settings.indexOnStartup
-      };
+      });
     }
 
     if (this.isHomeViewActive()) {
