@@ -8,6 +8,7 @@
 ## Project Scope
 
 - This repository contains the PalmWiki Home Obsidian plugin.
+- Read `PROJECT_CONTEXT.md` before planning a new phase or public release.
 - Keep it independent from `2hop-links-plus`; do not add a runtime dependency.
 - Vault notes, attachments, personal paths, runtime data, and review archives stay outside Git.
 
