@@ -29,6 +29,12 @@ export interface BodyMetadataCacheEntry extends BodyDerivedMetadata {
   size: number;
 }
 
+export interface FileSnapshot {
+  path: string;
+  mtime: number;
+  size: number;
+}
+
 export type BodyMetadataCache = Map<string, BodyMetadataCacheEntry>;
 
 export interface BuildPageIndexStats {
@@ -56,6 +62,14 @@ export interface BuildPageIndexOptions {
   bodyMetadataCache: BodyMetadataCache;
   stats?: BuildPageIndexStats;
   concurrency?: number;
+  shouldAbort?: () => boolean;
+}
+
+export class IndexBuildCancelledError extends Error {
+  constructor() {
+    super("Index build cancelled");
+    this.name = "IndexBuildCancelledError";
+  }
 }
 
 export async function buildPageIndex(
@@ -63,6 +77,8 @@ export async function buildPageIndex(
   settings: PalmWikiHomeSettings,
   options: BuildPageIndexOptions
 ): Promise<PageRecord[]> {
+  const shouldAbort = createLatchedPredicate(options.shouldAbort);
+  throwIfIndexBuildCancelled(shouldAbort);
   const pinnedPages = new Set(settings.pinnedPages);
   const markdownFiles = app.vault
     .getMarkdownFiles()
@@ -84,6 +100,7 @@ export async function buildPageIndex(
   }
 
   await yieldToEventLoop();
+  throwIfIndexBuildCancelled(shouldAbort);
 
   const pageRankStartedAt = performance.now();
   const pageRank = computePageRank(
@@ -109,6 +126,7 @@ export async function buildPageIndex(
   }
 
   await yieldToEventLoop();
+  throwIfIndexBuildCancelled(shouldAbort);
 
   const records = await mapWithConcurrency(
     markdownFiles,
@@ -124,8 +142,11 @@ export async function buildPageIndex(
         index,
         options.stats
       ),
-    DEFAULT_YIELD_EVERY
+    DEFAULT_YIELD_EVERY,
+    shouldAbort
   );
+
+  throwIfIndexBuildCancelled(shouldAbort);
 
   return records.filter((record): record is PageRecord => record !== null);
 }
@@ -251,6 +272,12 @@ async function getBodyMetadata(
     );
   }
 
+  const snapshot: FileSnapshot = {
+    path: file.path,
+    mtime: file.stat.mtime,
+    size: file.stat.size
+  };
+
   try {
     const body = await app.vault.cachedRead(file);
     if (stats) {
@@ -258,12 +285,18 @@ async function getBodyMetadata(
     }
 
     const bodyMetadata = extractBodyMetadata(body);
-    bodyMetadataCache.set(file.path, {
+    const currentSnapshot: FileSnapshot = {
       path: file.path,
       mtime: file.stat.mtime,
-      size: file.stat.size,
-      ...bodyMetadata
-    });
+      size: file.stat.size
+    };
+
+    if (matchesFileSnapshot(currentSnapshot, snapshot)) {
+      bodyMetadataCache.set(snapshot.path, {
+        ...snapshot,
+        ...bodyMetadata
+      });
+    }
 
     return bodyMetadata;
   } catch (error) {
@@ -273,6 +306,31 @@ async function getBodyMetadata(
       stats.activeBodyReads = Math.max(0, (stats.activeBodyReads ?? 1) - 1);
     }
   }
+}
+
+export function matchesFileSnapshot(
+  current: FileSnapshot,
+  expected: FileSnapshot
+): boolean {
+  return (
+    current.path === expected.path &&
+    current.mtime === expected.mtime &&
+    current.size === expected.size
+  );
+}
+
+export function createLatchedPredicate(
+  predicate: (() => boolean) | undefined
+): () => boolean {
+  let latched = false;
+
+  return () => {
+    if (!latched && predicate?.()) {
+      latched = true;
+    }
+
+    return latched;
+  };
 }
 
 function emptyBodyMetadata(): BodyDerivedMetadata {
@@ -287,7 +345,8 @@ export async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
   worker: (item: T, index: number) => Promise<R>,
-  yieldEvery = 0
+  yieldEvery = 0,
+  shouldStop?: () => boolean
 ): Promise<R[]> {
   const results: R[] = new Array<R>(items.length);
   let nextIndex = 0;
@@ -296,7 +355,7 @@ export async function mapWithConcurrency<T, R>(
   async function runWorker(): Promise<void> {
     let completedSinceYield = 0;
 
-    while (nextIndex < items.length) {
+    while (nextIndex < items.length && !shouldStop?.()) {
       const currentIndex = nextIndex;
       nextIndex += 1;
       results[currentIndex] = await worker(items[currentIndex], currentIndex);
@@ -311,6 +370,12 @@ export async function mapWithConcurrency<T, R>(
 
   await Promise.all(Array.from({ length: workerCount }, runWorker));
   return results;
+}
+
+function throwIfIndexBuildCancelled(shouldAbort: (() => boolean) | undefined): void {
+  if (shouldAbort?.()) {
+    throw new IndexBuildCancelledError();
+  }
 }
 
 function yieldToEventLoop(): Promise<void> {

@@ -30,7 +30,7 @@ Index data is cached in plugin state. React components render from that cached i
 
 By default, the plugin does not run a full body index on Obsidian startup. The index starts dirty and is built lazily when PalmWiki Home is opened or when a refresh command/button is used. Automatic work is gated by `Workspace.onLayoutReady()`, two animation frames, a short delay, and `requestIdleCallback()`. The optional `indexOnStartup` setting still waits for layout readiness and idle time, and defaults to `false`.
 
-Vault and metadata event handlers are registered only after `Workspace.onLayoutReady()` so the plugin does not treat every existing file announced during Vault startup as a new change. Automatic rebuild reservations are cancelled and coalesced when newer events arrive. If the Home view becomes inactive before an automatic build starts, the build remains dirty instead of running in the background unless `indexOnStartup` is enabled. Explicit Refresh actions remain immediate.
+Vault and metadata event handlers are registered only after `Workspace.onLayoutReady()` so the plugin does not treat every existing file announced during Vault startup as a new change. Automatic rebuild reservations are cancelled and coalesced when newer events arrive, while an existing background-capable request cannot be downgraded by a later interactive-only request. If the Home view becomes inactive, an interactive automatic build remains dirty or stops cooperatively at the next phase/file boundary instead of continuing in the background. `indexOnStartup` and explicit Refresh work are allowed to finish because they represent explicit background or user intent. Explicit Refresh actions remain immediate.
 
 When Markdown files or metadata change while the Home view is closed or present in an inactive tab, the plugin marks the index dirty and does not immediately reread the vault. When the Home view is the active view, those changes schedule a debounced rebuild after 1500 ms. Manual refresh remains immediate, but still respects single-flight rebuild protection.
 
@@ -38,11 +38,11 @@ Opening an already-existing Home leaf reveals that leaf directly and does not ca
 
 When the Home tab becomes active and the index is dirty, the existing cached index is allowed to render first. A delayed rebuild is then scheduled after the first paint so returning to the tab does not synchronously block on a full rebuild.
 
-Rebuilds are guarded by a sequence number so stale async results do not overwrite newer index state. Rebuilds are also single-flight: if a rebuild request arrives while `buildPageIndex()` is already running, the plugin records a pending rebuild reason instead of starting a second concurrent full rebuild. After the current rebuild finishes, a single follow-up rebuild is scheduled with the normal debounce if the Home view is still open.
+Rebuilds are guarded by a sequence number so stale async results do not overwrite newer index state. Rebuilds are also single-flight: if a rebuild request arrives while `buildPageIndex()` is already running, the plugin records a merged pending rebuild instead of starting a second concurrent full rebuild. After the current rebuild finishes or cancels, one follow-up is scheduled with the normal debounce when the Home view is active or a background-capable request remains.
 
 ## Body metadata cache
 
-The body-derived fields `lineCount`, `charCount`, and `description` are cached by `path`, `mtime`, and `size`, both in memory and in the Vault-local persistent index cache. If those values match on a later index pass or plugin restart, the plugin reuses the cached body-derived metadata and avoids another `cachedRead()` for that file. When performance debug logging is enabled, index builds report total milliseconds plus body cache hit/read counts.
+The body-derived fields `lineCount`, `charCount`, and `description` are cached by `path`, `mtime`, and `size`, both in memory and in the Vault-local persistent index cache. If those values match on a later index pass or plugin restart, the plugin reuses the cached body-derived metadata and avoids another `cachedRead()` for that file. A body read captures the file identity before I/O and caches its result only if path, mtime, and size are still unchanged afterward. When performance debug logging is enabled, index builds report total milliseconds plus body cache hit/read counts.
 
 Metadata-cache-derived fields are still refreshed on every index pass, including title, aliases, tags, first image, link counts, timestamps, and pinned status.
 

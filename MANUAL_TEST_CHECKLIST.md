@@ -72,6 +72,9 @@
 - `[ ]` PalmWiki Home を開くと、index が dirty または空の場合に indexing が始まる。
 - `[ ]` Home view を閉じた状態で Markdown を編集すると、即時 full reindex せず stale / dirty 状態になる。
 - `[ ]` Home view が別 tab の裏にある状態で Markdown を編集しても、即時 full rebuild せず stale / dirty 状態になる。
+- `[ ]` Home表示を契機に始まった自動build中に別tabへ移ると、次の処理区切りで停止し、Homeへ戻った時に再開される。
+- `[ ]` `Index on startup`をONにしたbuildと手動Refreshは、別tabへ移っても意図どおり完了する。
+- `[ ]` 起動時索引の待機中に`Index on startup`をOFFへ戻しても、Home表示中なら保存済み索引を再利用して通常のidle更新へ移る。
 - `[ ]` Home tab に戻った時、既存 index の UI が先に使える状態になり、その後 dirty rebuild が走る。
 - `[ ]` Obsidian起動直後はPalmWiki Homeの本文索引が始まらず、画面とタブの復元後のidle時に開始する。
 - `[ ]` warm起動では保存済み索引が先に表示され、未変更のMarkdown本文を全件読み直さない。

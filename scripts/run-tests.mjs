@@ -10,8 +10,10 @@ const workDir = await mkdtemp(join(tmpdir(), "palmwiki-home-tests-"));
 try {
   await esbuild.build({
     entryPoints: [
+      "tests/fileSnapshot.test.ts",
       "tests/indexCache.test.ts",
-      "tests/mapWithConcurrency.test.ts"
+      "tests/mapWithConcurrency.test.ts",
+      "tests/rebuildRequest.test.ts"
     ],
     bundle: true,
     external: ["obsidian"],
@@ -26,8 +28,10 @@ try {
     process.execPath,
     [
       "--test",
+      join(workDir, "fileSnapshot.test.js"),
       join(workDir, "indexCache.test.js"),
-      join(workDir, "mapWithConcurrency.test.js")
+      join(workDir, "mapWithConcurrency.test.js"),
+      join(workDir, "rebuildRequest.test.js")
     ],
     { stdio: "inherit" }
   );
