@@ -1,0 +1,18 @@
+node_modules/
+main.js
+*.map
+.DS_Store
+review_bundle/
+review_bundle.zip
+
+# Local development and review records
+CHANGE_SUMMARY.md
+USER_FEEDBACK_*.md
+_local-*/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+
+# Obsidian runtime data
+data.json

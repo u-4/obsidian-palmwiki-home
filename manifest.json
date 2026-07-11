@@ -1,0 +1,10 @@
+{
+  "id": "palmwiki-home",
+  "name": "PalmWiki Home",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "A Cosense-like home view for browsing Markdown pages in the current vault.",
+  "author": "ytamai",
+  "authorUrl": "https://github.com/u-4",
+  "isDesktopOnly": false
+}

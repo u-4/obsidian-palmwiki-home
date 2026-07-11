@@ -1,0 +1,40 @@
+{
+  "name": "obsidian-palmwiki-home",
+  "version": "0.1.0",
+  "description": "Cosense-like home view for Obsidian.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "typecheck": "tsc -noEmit -skipLibCheck",
+    "build": "npm run typecheck && node esbuild.config.mjs production",
+    "eslint": "npm run typecheck"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "cosense",
+    "scrapbox"
+  ],
+  "author": "ytamai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/u-4/obsidian-palmwiki-home.git"
+  },
+  "bugs": {
+    "url": "https://github.com/u-4/obsidian-palmwiki-home/issues"
+  },
+  "homepage": "https://github.com/u-4/obsidian-palmwiki-home#readme",
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "esbuild": "^0.24.2",
+    "obsidian": "latest",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
