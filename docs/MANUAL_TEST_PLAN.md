@@ -1,5 +1,22 @@
 # Manual Test Plan
 
+## Compatibility scope
+
+- Verified environment: Obsidian Desktop 1.12.7 on macOS, including the `PalmWiki_LocalTest` smoke and regression checks recorded in `MANUAL_TEST_CHECKLIST.md`.
+- Not yet verified: Windows, Linux, iOS, and Android. Do not describe these environments as supported until an actual Obsidian installation has passed the relevant checks.
+- iPhone Mirroring from macOS may be used for an early visual and basic-tap smoke test when available. It is supplementary only and cannot replace native iOS testing for touch, keyboard, background restoration, file operations, performance, or lifecycle behavior.
+- Before a future compatibility claim, record OS/device, Obsidian version, plugin version, theme, core Page preview state, related plugins, approximate Vault size, result, and sanitized evidence.
+
+### Desktop compatibility pass
+
+- Repeat installation, enable/disable, restart, split, pop-out, Live Preview, Reading view, Card/Table, same-leaf navigation, Home-button ownership, and preview-mode checks on the minimum supported desktop version and the current Stable version.
+- Run the same checks with and without `2hop-links-plus`; its controls and DOM must remain unchanged.
+
+### iOS preflight and native confirmation
+
+- A mirrored iPhone can be used before native testing to detect obvious layout, launch, tap, and scrolling problems.
+- Native iOS confirmation must separately cover installation, plugin lifecycle, restored tabs, touch-only Card/Table operation, indexing states, settings, file selection, rotation, background/foreground transitions, and memory/performance.
+
 ## Build Checks
 
 - Run `npm run build`.

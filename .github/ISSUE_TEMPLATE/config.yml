@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability report
+    url: https://github.com/u-4/obsidian-palmwiki-home/security/advisories/new
+    about: 公開Issueには秘密情報を書かず、脆弱性は非公開で報告してください。

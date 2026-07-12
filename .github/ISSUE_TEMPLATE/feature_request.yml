@@ -1,0 +1,28 @@
+name: Feature request
+description: PalmWiki Homeへの機能提案を送ります。
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        既存のIssueを確認してから、目的と利用場面を記載してください。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したいこと
+      description: どのような不便や目的がありますか？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案する動作
+      description: 期待する画面や操作を具体的に書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 代替案や補足
+    validations:
+      required: false

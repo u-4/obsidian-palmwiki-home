@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  release-validate:
     runs-on: ubuntu-latest
     steps:
       - name: Check out release tag
@@ -59,7 +59,7 @@ jobs:
           retention-days: 1
 
   prepare-draft:
-    needs: validate
+    needs: release-validate
     permissions:
       contents: write
     runs-on: ubuntu-latest

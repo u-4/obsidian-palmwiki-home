@@ -1,6 +1,7 @@
 # Known Limitations
 
-- Version 0.2.1 targets Obsidian Desktop 1.12.7 or later and has been verified on Obsidian 1.12.7 for macOS. iOS and Android support will be evaluated after 0.2.1.
+- Version 0.2.1 targets Obsidian Desktop 1.12.7 or later and has been verified only on Obsidian 1.12.7 for macOS. Windows and Linux are not yet verified.
+- iOS and Android are not supported or verified yet. macOS iPhone Mirroring with Computer Use can provide a supplementary screen and basic-tap smoke test, but cannot establish native iOS compatibility, background restoration, touch/keyboard behavior, or file-operation compatibility. Native iOS testing is planned after search work.
 - Full-text body search, OCR search, multi-vault search, and related-page scoring are not implemented.
 - PageRank is a static vault-ranking heuristic based on resolved links and modification times, not Google PageRank.
 - Tags, unresolved links, non-Markdown embeds, and OCR content do not affect PageRank.

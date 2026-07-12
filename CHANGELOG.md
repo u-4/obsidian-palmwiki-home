@@ -6,6 +6,9 @@ The project uses versions from `manifest.json`.
 
 ## [Unreleased]
 
+- Strengthened public-repository governance with protected `main`, CI-required Pull Requests, Dependabot, Secret scanning, Push protection, private vulnerability reporting, and contributor/security documentation.
+- Recorded that macOS Desktop is the only verified environment; iOS remains a future native-device check after search work, with iPhone Mirroring treated as supplementary only.
+
 ## [0.2.1] - 2026-07-12
 
 - Fixed Home-button loss in a normal Markdown leaf when Hover Editor attaches its transient popover state to that source leaf; actual Hover Editor, Hover Preview, and popover containers remain excluded.
