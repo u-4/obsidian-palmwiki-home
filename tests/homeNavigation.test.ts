@@ -263,6 +263,43 @@ test("Home navigation manager avoids duplicates, updates labels, and cleans up",
   assert.equal(container.findByClass(PALMWIKI_HOME_BUTTON_CLASS).length, 0);
 });
 
+test("Home navigation ignores actual hover containers without hiding their source leaf", () => {
+  const document = new FakeDocument();
+  const container = document.createElement("div");
+  const headerLeft = document.createElement("div");
+  container.classList.add("workspace-leaf-content");
+  headerLeft.classList.add("view-header-left");
+  container.appendChild(headerLeft);
+
+  const view = {
+    containerEl: container as unknown as HTMLElement,
+    getViewType: () => "markdown",
+    hoverPopover: { state: "open" }
+  } as unknown as View;
+  const leaf = {
+    getViewState: () => ({ type: "markdown" }),
+    hoverPopover: { state: "open" },
+    isHoverPopover: true,
+    view
+  } as unknown as WorkspaceLeaf;
+  const manager = new HomeNavigationManager({
+    getDisplayName: () => "My Vault",
+    getMarkdownActionDescription: () => "Open PalmWiki Home in this tab",
+    onHomeActivate: () => undefined,
+    onMarkdownActivate: async () => undefined,
+    palmWikiHomeViewType: "palmwiki-home-view"
+  });
+
+  manager.syncLeaves([leaf]);
+  assert.equal(container.findByClass(PALMWIKI_HOME_BUTTON_CLASS).length, 1);
+
+  const hoverPopover = document.createElement("div");
+  hoverPopover.classList.add("hover-popover");
+  hoverPopover.appendChild(container);
+  manager.syncLeaves([leaf]);
+  assert.equal(container.findByClass(PALMWIKI_HOME_BUTTON_CLASS).length, 0);
+});
+
 test("Home navigation preserves Back/Forward order in a compatible nested header", () => {
   const document = new FakeDocument();
   const container = document.createElement("div");
@@ -490,7 +527,14 @@ class FakeElement {
   }
 
   closest(_selector: string): FakeElement | null {
-    return null;
+    if (
+      this.classes.has("hover-popover") ||
+      this.classes.has("popover") ||
+      this.classes.has("hover-editor")
+    ) {
+      return this;
+    }
+    return this.parentElement?.closest(_selector) ?? null;
   }
 
   addEventListener(type: string, listener: EventListener): void {
