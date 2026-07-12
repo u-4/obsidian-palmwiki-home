@@ -24,6 +24,13 @@
 - 公開Release: [PalmWiki Home 0.2.1](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.2.1)
 - 公開成果物のSHA-256: `main.js` `aa9ba96b…fd45`、`manifest.json` `ea12c27f…f831`、`styles.css` `23bfeced…8c90`
 
+## Compatibility status
+
+- `[x]` macOS版Obsidian Desktop 1.12.7で0.2.1の基本機能、Homeボタン、Card/Table、同一タブ遷移、Card previewを確認した。
+- `[ ]` Windows / Linuxの実機確認は未実施。確認するまで対応環境と記載しない。
+- `[ ]` iOS実機のネイティブ確認は未実施。検索機能対応後に、インストール、復元、タッチ、設定、ファイル操作、バックグラウンド復帰を確認する。
+- `[ ]` macOSのiPhoneミラーリングとComputer Useは、利用可能な場合に予備的な表示・タップ確認へ使用できる。ただしiOS対応判定の証拠にはしない。
+
 ## 0.2.0 リリース判定
 
 確認環境:

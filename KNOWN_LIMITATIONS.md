@@ -1,6 +1,7 @@
 # 既知の制限
 
-- 0.2.1はObsidian Desktop 1.12.7以上を対象とし、macOS版1.12.7で確認しています。iOS / Android対応は今後検証します。
+- 0.2.1はObsidian Desktop 1.12.7以上を対象とし、macOS版1.12.7で確認しています。Windows / Linuxは未確認です。
+- iOS / Androidは未対応・未確認です。macOSのiPhoneミラーリングとComputer Useは画面・基本タップの予備確認には使えますが、iOS版Obsidianのネイティブ互換性を証明しないため、正式な対応判定は実機で行います。検索機能対応後にiOS実機確認を予定します。
 - 本文全文検索、OCR検索、複数Vault検索、関連ページスコアは未実装です。
 - PageRankはGoogle PageRankそのものではなく、Vault内のリンクと更新日時を利用した静的な重要度指標です。
 - PageRankは解決済みのMarkdown間リンクだけを使用します。タグ、未解決リンク、Markdown以外の埋め込み、OCR本文は対象外です。
