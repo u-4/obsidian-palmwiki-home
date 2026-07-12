@@ -12,7 +12,8 @@
 確認環境:
 
 - 日付: 2026-07-12
-- Git commit: `codex/release-0.1.0-prep` のリリースPR head（GitHub CIで固定）
+- Release tag commit: `ee4d684`（タグ`0.1.0`）
+- Release workflow fix: `0bd3554`（PR #5、`main`へ反映済み）
 - Obsidian: Desktop 1.12.7 / macOS
 - テストVault: `PalmWiki_LocalTest`（コピーVault）
 
@@ -43,12 +44,16 @@ Obsidian実画面:
 公開物:
 
 - `[x]` README、既知の制限、CHANGELOG、desktop-only表記を最終確認する。
-- `[x]` Release workflowはタグ`0.1.0`（`v`なし）だけを受け付け、Releaseを下書きで作成する。
+- `[x]` Release verifierはタグ`0.1.0`（`v`なし）を受け付け、不正な形式をRelease作成前に拒否する。
 - `[x]` Release workflowが添付する成果物は`main.js`、`manifest.json`、`styles.css`の3点だけである。
-- `[ ]` 実際のタグと下書きReleaseを作成し、GitHub画面で添付物を確認する。
-- `[ ]` Public化とRelease公開は利用者の明示承認後にだけ行う。
+- `[x]` 実際のタグと下書きReleaseを作成し、GitHub画面で添付物を確認する。
+- `[x]` Public化とRelease公開を利用者の明示承認後に実行する。
+- `[x]` 公開URLから3成果物を再取得し、SHA-256と内容が検証済みArtifactに一致する。
+- `[x]` `main.js`に同梱ライブラリのMIT許諾文が埋め込まれ、source mapがない。
 
-最後の2項目はリリース候補の品質不足ではなく、公開承認後にだけ行う外部操作のため意図的に未実施。
+公開結果: [PalmWiki Home 0.1.0](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.1.0)
+
+初回の自動下書き作成は、書き込みジョブにローカルGit checkoutがないためGitHub CLIのリポジトリ判定に失敗した。検証・build・監査・Artifact保存は成功していたため、その検証済みArtifactから下書きを作成して全項目を再確認した。PR #5で`--repo`を明示し、同じ失敗を防止済み。
 
 ## Build check
 
