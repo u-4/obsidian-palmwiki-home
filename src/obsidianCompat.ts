@@ -1,4 +1,4 @@
-import type { App, Command, UserEvent } from "obsidian";
+import type { App, Command, UserEvent, Workspace } from "obsidian";
 
 export type RuntimeCommandInfo = Pick<Command, "id" | "name">;
 
@@ -18,6 +18,26 @@ type RuntimeCommandManager = {
 type RuntimeCommandApp = App & {
   commands?: RuntimeCommandManager;
 };
+
+type RuntimeHoverWorkspace = Workspace & {
+  unregisterHoverLinkSource?: (sourceId: string) => void;
+};
+
+export function unregisterHoverLinkSourceCompat(
+  workspace: Workspace,
+  sourceId: string
+): boolean {
+  try {
+    const unregister = (workspace as RuntimeHoverWorkspace).unregisterHoverLinkSource;
+    if (typeof unregister !== "function") {
+      return false;
+    }
+    unregister.call(workspace, sourceId);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function listCommandsCompat(app: App): RuntimeCommandInfo[] {
   try {

@@ -50,14 +50,6 @@ interface HomeNavigationManagerOptions {
   palmWikiHomeViewType: string;
 }
 
-type RuntimeWorkspaceLeaf = WorkspaceLeaf & {
-  isHoverPopover?: boolean;
-};
-
-type RuntimeView = View & {
-  hoverPopover?: unknown;
-};
-
 export function resolveHomeButtonLabel(configuredLabel: string, vaultName: string): string {
   return configuredLabel.trim() || vaultName.trim() || PALMWIKI_HOME_NAME;
 }
@@ -588,21 +580,11 @@ function findHeaderPlacement(containerEl: HTMLElement): HeaderPlacement | null {
 }
 
 function shouldIgnoreLeaf(leaf: WorkspaceLeaf): boolean {
-  const runtimeLeaf = leaf as RuntimeWorkspaceLeaf;
-  const runtimeView = leaf.view as RuntimeView;
-  const containerEl = runtimeView.containerEl;
-  const viewType = runtimeView.getViewType();
+  const containerEl = leaf.view.containerEl;
+  const viewType = leaf.view.getViewType();
 
   if (viewType === "hover-editor" || viewType === "markdown-hover") {
     return true;
   }
-  if (runtimeLeaf.hoverPopover || runtimeLeaf.isHoverPopover || runtimeView.hoverPopover) {
-    return true;
-  }
-  if (containerEl.closest?.(".hover-popover, .popover, .hover-editor")) {
-    return true;
-  }
-  return !!containerEl.parentElement?.closest?.(
-    ".hover-popover, .popover, .hover-editor"
-  );
+  return !!containerEl.closest?.(".hover-popover, .popover, .hover-editor");
 }

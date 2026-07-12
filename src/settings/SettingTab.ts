@@ -9,6 +9,10 @@ import {
 import type PalmWikiHomePlugin from "../main";
 import { listCommandsCompat, type RuntimeCommandInfo } from "../obsidianCompat";
 import {
+  CARD_PREVIEW_MODE_OPTIONS,
+  isCardPreviewMode
+} from "../cardPreview";
+import {
   formatFolderListInput,
   formatLineListInput,
   parseFolderListInput,
@@ -238,6 +242,25 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.cardSize)
           .onChange(async (value) => {
             await this.plugin.updateSettings({ cardSize: value as PalmWikiCardSize }, false);
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Card preview")
+      .setDesc(
+        "Show Obsidian's standard page preview from cards. Pin buttons never open a preview. The page preview core plugin must be enabled."
+      )
+      .addDropdown((dropdown) => {
+        for (const [value, label] of Object.entries(CARD_PREVIEW_MODE_OPTIONS)) {
+          dropdown.addOption(value, label);
+        }
+        dropdown
+          .setValue(this.plugin.settings.cardPreviewMode)
+          .onChange(async (value) => {
+            if (!isCardPreviewMode(value)) {
+              return;
+            }
+            await this.plugin.updateSettings({ cardPreviewMode: value }, false);
           });
       });
 

@@ -136,6 +136,8 @@ Card view renders a responsive Cosense-like grid with title, optional thumbnail,
 
 Card activation receives the owning `PalmWikiHomeView.leaf` explicitly and opens the selected existing Markdown file in that same leaf. Table opening retains its previous workspace-selected-leaf path. Both Card and Table virtualizers locate scroll parents through the shared owner-document-aware helper.
 
+Card preview uses Obsidian's registered hover-link source rather than reading or rendering the target note itself. `modifier` and `hover` use separate source IDs so Obsidian can retain the correct native modifier behavior for each mode; `off` emits no hover-link event. The active source is registered by the plugin and removed through the guarded compatibility boundary when the mode changes or the plugin unloads. Card title/body emit previews, while the Pin button owns no preview handler. Preview settings do not invalidate or rebuild the page index.
+
 Table view renders the requested columns: Page, Image, Description, Created, Updated, PageRank, Inlinks, Outlinks, Lines, Chars, Folder, and Tags. It is implemented as a div/CSS-grid virtual table with ARIA table roles rather than a native `<table>`, so only the visible rows plus overscan are mounted.
 
 The outer card is a non-keyboard-interactive article. A dedicated title/body open area handles keyboard activation, and the pin button is a sibling control so keyboard pinning does not accidentally open the page.

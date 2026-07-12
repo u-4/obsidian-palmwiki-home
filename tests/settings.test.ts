@@ -39,6 +39,7 @@ test("saved settings are normalized and deduplicated", () => {
       showFoldersOnCards: false,
       showTagsOnCards: false,
       cardSize: "large",
+      cardPreviewMode: "hover",
       indexOnStartup: true,
       performanceDebug: true,
       pageRankIgnoredSourceFolders: ["/Daily/", "Daily"],
@@ -59,6 +60,7 @@ test("saved settings are normalized and deduplicated", () => {
       showFoldersOnCards: false,
       showTagsOnCards: false,
       cardSize: "large",
+      cardPreviewMode: "hover",
       indexOnStartup: true,
       performanceDebug: true,
       pageRankIgnoredSourceFolders: ["Daily"],
@@ -73,12 +75,14 @@ test("unknown enum values and non-boolean flags are rejected", () => {
     defaultSortKey: "unknown",
     defaultSortDirection: 1,
     cardSize: "huge",
+    cardPreviewMode: "always",
     performanceDebug: 1
   });
 
   assert.equal(settings.defaultSortKey, DEFAULT_SETTINGS.defaultSortKey);
   assert.equal(settings.defaultSortDirection, DEFAULT_SETTINGS.defaultSortDirection);
   assert.equal(settings.cardSize, DEFAULT_SETTINGS.cardSize);
+  assert.equal(settings.cardPreviewMode, DEFAULT_SETTINGS.cardPreviewMode);
   assert.equal(settings.performanceDebug, DEFAULT_SETTINGS.performanceDebug);
 });
 
@@ -93,6 +97,7 @@ test("version 0.1.0 settings gain Home button defaults without losing saved valu
   assert.equal(settings.homeButtonAction, "palmwikiHome");
   assert.equal(settings.homeButtonPagePath, "");
   assert.equal(settings.homeButtonCommandId, "");
+  assert.equal(settings.cardPreviewMode, "modifier");
   assert.deepEqual(settings.includeFolders, ["Notes"]);
   assert.equal(settings.defaultViewMode, "table");
   assert.equal(settings.showTagsOnCards, false);
@@ -101,5 +106,11 @@ test("version 0.1.0 settings gain Home button defaults without losing saved valu
 test("all supported Home button actions are preserved", () => {
   for (const action of ["palmwikiHome", "page", "command"] as const) {
     assert.equal(normalizeSettings({ homeButtonAction: action }).homeButtonAction, action);
+  }
+});
+
+test("all supported Card preview modes are preserved", () => {
+  for (const mode of ["off", "modifier", "hover"] as const) {
+    assert.equal(normalizeSettings({ cardPreviewMode: mode }).cardPreviewMode, mode);
   }
 });

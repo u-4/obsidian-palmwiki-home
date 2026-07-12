@@ -1,6 +1,6 @@
 # Known Limitations
 
-- Version 0.2.0 targets Obsidian Desktop 1.12.7 or later and has been verified on Obsidian 1.12.7 for macOS. iOS and Android support will be evaluated after 0.2.0.
+- Version 0.2.1 targets Obsidian Desktop 1.12.7 or later and has been verified on Obsidian 1.12.7 for macOS. iOS and Android support will be evaluated after 0.2.1.
 - Full-text body search, OCR search, multi-vault search, and related-page scoring are not implemented.
 - PageRank is a static vault-ranking heuristic based on resolved links and modification times, not Google PageRank.
 - Tags, unresolved links, non-Markdown embeds, and OCR content do not affect PageRank.
@@ -15,3 +15,5 @@
 - The upper-left Home button has no dedicated public Obsidian API, so its isolated placement module depends on Obsidian's left header DOM structure. A future header redesign could make only this button unavailable until compatibility is updated.
 - Command discovery and execution use a guarded runtime compatibility layer because Obsidian's command manager is not part of the public `App` type. Unsupported, disabled, missing, or context-inapplicable commands leave the current view unchanged and show a Notice.
 - Immediately after workspace restoration, an inactive deferred tab may not yet expose its current Markdown file or command context. Manually entered relative pages, local headings, and Markdown-context commands can remain unavailable until that tab finishes loading; exact Vault-relative paths saved by the page chooser are unaffected.
+- Card preview uses Obsidian's Page preview core plugin and remains unavailable while that core plugin is disabled. If the `PalmWiki Home cards` modifier requirement is changed in Obsidian's Page preview settings, that core setting is the final authority for whether a modifier is required.
+- Removing a Card preview source uses a guarded workspace compatibility call because source removal is not included in Obsidian's public type declarations. Unsupported versions keep Card clicks working and stop emitting preview requests safely.
