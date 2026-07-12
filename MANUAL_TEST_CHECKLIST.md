@@ -11,6 +11,10 @@
 
 - 日付: 2026-07-12
 - Release branch: `codex/home-button-ownership`
+- Pull Request: [#7](https://github.com/u-4/obsidian-palmwiki-home/pull/7)
+- Release tag commit: `62e7876`（タグ`0.2.0`）
+- Main CI: [29191162028](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29191162028)
+- Release workflow: [29191216958](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29191216958)
 - Obsidian: Desktop 1.12.7 / macOS
 - テストVault: `PalmWiki_LocalTest`（コピーVault）
 
@@ -21,9 +25,23 @@
 - `[x]` 左ヘッダーが「戻る・進む」→PalmWiki Homeボタン→ノートタイトルの順で表示される。
 - `[x]` PalmWiki Homeタブの中央タイトル文字が非表示になり、将来の検索欄用領域が残る。
 - `[x]` production build、公式Obsidian ESLint、自動テスト50件、metadata検証、差分空白検査が成功する。
+- `[x]` `npm ci`と`npm audit --audit-level=moderate`が成功し、既知の脆弱性が0件である。
 - `[x]` 配布した`main.js`、`manifest.json`、`styles.css`のSHA-256が開発元と一致し、`data.json`と索引キャッシュを上書きしない。
+- `[x]` PR CIとmain CIが成功し、タグ`0.2.0`がmainコミット`62e7876`を指す。
+- `[x]` Release workflowが検証済みの3成果物だけを下書きへ添付し、全jobが成功する。
+- `[x]` 下書きを通常のLatest Releaseとして公開し、公開URLから3成果物を再取得してSHA-256を照合する。
 - `[ ]` ポップアウト、Hover Preview / Hover Editor、reduced motionなどの特殊条件は、下記の回帰確認項目として継続する。
 - `[ ]` 起動直後の未読込・非アクティブ復元タブにおける相対ページ、ローカル見出し、文脈依存コマンドは継続確認とする。
+
+公開結果: [PalmWiki Home 0.2.0](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.2.0)
+
+公開成果物のSHA-256:
+
+```text
+c825710cf55057c86f2fed92de07f6ff77971648f1dc80ab111f9193f07088b3  main.js
+13354511f0c91b881dd3f63e7e6f7e21a84ab6196d7b4b7f74c47a4a9a72aefd  manifest.json
+23bfeced70b7f1c73e2a9efcbb16919c95ca1a7008d5bae14d4e5a2367e08c90  styles.css
+```
 
 ## 0.1.0 リリース判定（必須）
 
