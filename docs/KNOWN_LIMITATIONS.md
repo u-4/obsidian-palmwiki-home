@@ -1,6 +1,6 @@
 # Known Limitations
 
-- Version 0.2.0 targets Obsidian Desktop 1.12.7 or later and has been verified on Obsidian 1.12.7 for macOS. iOS and Android support will be evaluated after 0.2.0.
+- Version 0.2.1 targets Obsidian Desktop 1.12.7 or later and has been verified on Obsidian 1.12.7 for macOS. iOS and Android support will be evaluated after 0.2.1.
 - Full-text body search, OCR search, multi-vault search, and related-page scoring are not implemented.
 - PageRank is a static vault-ranking heuristic based on resolved links and modification times, not Google PageRank.
 - Tags, unresolved links, non-Markdown embeds, and OCR content do not affect PageRank.

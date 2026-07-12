@@ -5,7 +5,7 @@
 - `[x]` 自動確認またはObsidian実画面で確認済み
 - `[ ]` 未実施、または公開操作時にだけ確認する項目
 
-## Unreleased Card preview verification
+## 0.2.1 Release verification
 
 - `[x]` 設定に`Off`、`Cmd/Ctrl + hover`、`Hover`が表示され、既存設定の既定値は`Cmd/Ctrl + hover`になる。
 - `[x]` `Hover`でCardの正しいMarkdownページがObsidian標準プレビューに表示され、pointerを外すと閉じる。
@@ -13,7 +13,7 @@
 - `[x]` Obsidianのページプレビュー設定に`PalmWiki Home cards`が修飾キー対象として登録される。
 - `[x]` Pin上ではプレビューもPin状態変更も起きず、通常クリックは同じHomeタブだけをMarkdownへ置き換える。
 - `[x]` 設定切替後も索引は維持され、56件の自動テスト、build、公式lint、metadata、diff checkが成功する。
-- `[ ]` 利用者操作でCard上にpointerを置き、Cmdを押し続けたときに正しいプレビューが表示されることを最終確認する。
+- `[x]` 利用者操作でCard上にpointerを置き、Cmdを押し続けたときに正しいプレビューが表示されることを確認した。
 
 ## 0.2.0 リリース判定
 
