@@ -32,7 +32,7 @@ styles.css
 1. 左側リボンのホームアイコン、またはコマンドパレットの`PalmWiki Home: Open home`を選びます。
 2. 通常のMarkdownタブでは左上のVault名ボタンからHomeへ戻れます。設定で、同じタブに特定ページを開く動作、または選択したObsidianコマンドを実行する動作へ変更できます。
 3. PalmWiki Homeタブで同じ左上ボタンを押すと、Card / TableのどちらでもHomeの最上部へ戻ります。
-4. `Card` / `Table`で表示方法を切り替えます。Cardをクリックすると、そのHomeタブが選択したMarkdownページへ置き換わり、新しいタブは増えません。
+4. `Card` / `Table`で表示方法を切り替えます。Cardをクリックすると、そのHomeタブが選択したMarkdownページへ置き換わり、新しいタブは増えません。`Card preview`設定では、カードのページプレビューを無効、Cmd/Ctrl＋hover、hoverのみから選べます。
 5. 並べ替え、昇順・降順、フォルダー、タグ、Quick filter、`Links to page`を組み合わせて絞り込みます。
 6. `Pin`で重要なページを先頭グループに固定します。
 7. 最新状態をすぐ確認したい場合は`Refresh`を選びます。
@@ -60,6 +60,7 @@ Home上部には、次の状態を常に表示します。
 - MarkdownとPalmWiki Homeの各タブを対象にした左上Homeボタン
 - Homeを開く、既存ページを開く、Obsidianコマンドを実行する3種類のHomeボタン動作
 - Cardからクリック元のHomeタブへMarkdownページを開く同一タブ遷移
+- CardからObsidian標準のページプレビューを開く3段階設定
 - 更新日時、作成日時、タイトル、行数、文字数による並べ替え
 - PageRank風スコア、被リンク数、リンク数による並べ替え
 - ページのピン留め

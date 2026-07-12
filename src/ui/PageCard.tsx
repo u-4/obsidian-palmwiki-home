@@ -1,10 +1,15 @@
 import React from "react";
-import type { PageActionHandler, PageRecord } from "./PalmWikiHomeView";
+import type {
+  PageActionHandler,
+  PagePreviewHandler,
+  PageRecord
+} from "./PalmWikiHomeView";
 import { formatDate } from "./components/format";
 
 interface PageCardProps {
   imageUrl?: string;
   onOpenPage: PageActionHandler;
+  onPreviewPage?: PagePreviewHandler;
   onTogglePinned: PageActionHandler;
   page: PageRecord;
   showFolder: boolean;
@@ -14,12 +19,16 @@ interface PageCardProps {
 export const PageCard = React.memo(function PageCard({
   imageUrl,
   onOpenPage,
+  onPreviewPage,
   onTogglePinned,
   page,
   showFolder,
   showTags
 }: PageCardProps): React.JSX.Element {
   const openPage = (): void => onOpenPage(page.path);
+  const previewPage = (event: React.MouseEvent<HTMLElement>): void => {
+    onPreviewPage?.(page.path, event.currentTarget, event.nativeEvent);
+  };
   const activateOpenArea = (event: React.KeyboardEvent): void => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -41,6 +50,7 @@ export const PageCard = React.memo(function PageCard({
             openPage();
           }}
           onKeyDown={activateOpenArea}
+          onMouseEnter={previewPage}
           role="button"
           tabIndex={0}
         >
@@ -70,6 +80,7 @@ export const PageCard = React.memo(function PageCard({
           openPage();
         }}
         onKeyDown={activateOpenArea}
+        onMouseEnter={previewPage}
         role="button"
         tabIndex={0}
       >

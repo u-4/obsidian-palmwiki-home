@@ -10,6 +10,7 @@ const workDir = await mkdtemp(join(tmpdir(), "palmwiki-home-tests-"));
 try {
   await esbuild.build({
     entryPoints: [
+      "tests/cardPreview.test.ts",
       "tests/filterPages.test.ts",
       "tests/fileSnapshot.test.ts",
       "tests/homeNavigation.test.ts",
@@ -38,6 +39,7 @@ try {
     process.execPath,
     [
       "--test",
+      join(workDir, "cardPreview.test.js"),
       join(workDir, "filterPages.test.js"),
       join(workDir, "fileSnapshot.test.js"),
       join(workDir, "homeNavigation.test.js"),

@@ -18,6 +18,12 @@ import { PageTable } from "./PageTable";
 
 export const PALMWIKI_HOME_VIEW_TYPE = "palmwiki-home-view";
 
+export type PagePreviewHandler = (
+  path: string,
+  targetEl: HTMLElement,
+  event: MouseEvent
+) => void;
+
 export class PalmWikiHomeView extends ItemView {
   private plugin: PalmWikiHomePlugin;
   private root: Root | null = null;
@@ -244,6 +250,13 @@ function PalmWikiHomeRoot({ leaf, plugin }: PalmWikiHomeRootProps): React.JSX.El
     [plugin]
   );
 
+  const previewCardPage = useCallback(
+    (path: string, targetEl: HTMLElement, event: MouseEvent) => {
+      plugin.previewCardPage(path, leaf, targetEl, event);
+    },
+    [leaf, plugin]
+  );
+
   const togglePinned = useCallback(
     (path: string) => {
       void plugin.togglePinnedPage(path);
@@ -358,6 +371,9 @@ function PalmWikiHomeRoot({ leaf, plugin }: PalmWikiHomeRootProps): React.JSX.El
           cardSize={plugin.settings.cardSize}
           getImageCacheStats={getImageCacheStats}
           onOpenPage={openCardPage}
+          onPreviewPage={
+            plugin.settings.cardPreviewMode === "off" ? undefined : previewCardPage
+          }
           onTogglePinned={togglePinned}
           pages={visiblePages}
           performanceDebug={performanceDebug}

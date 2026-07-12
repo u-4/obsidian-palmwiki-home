@@ -35,6 +35,18 @@
 - Confirm the Card pin button still changes only pin state and does not open the page.
 - Switch to Table and confirm its existing page-opening behavior has not regressed.
 
+## Card Preview Checks
+
+- Confirm the Page preview core plugin is enabled.
+- Select `Off`, hover Card title/body, and press Cmd/Ctrl while hovering. Confirm no preview appears.
+- Select `Cmd/Ctrl + hover`. Confirm ordinary hover does not preview, then hold Cmd on macOS or Ctrl on Windows/Linux while hovering and confirm the correct existing Markdown page appears.
+- Select `Hover` and confirm the correct page appears without a modifier.
+- Confirm hovering or clicking the Pin button never opens a preview and changes only pin state.
+- Confirm clicking a preview-enabled Card still replaces that same Home leaf, without creating another tab.
+- Repeat in a pop-out window and confirm the preview is owned by that window and is removed when the pointer leaves.
+- Change only `Card preview` with performance logging enabled and confirm no index rebuild or full-Vault body read starts.
+- Disable the Page preview core plugin and confirm Card hover fails silently while Card click still works.
+
 ## PageRank Real-Vault Checks
 
 - Open PalmWiki Home in a copied test vault with realistic data volume.

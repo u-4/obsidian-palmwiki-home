@@ -7,6 +7,7 @@ The project uses versions from `manifest.json`.
 ## [Unreleased]
 
 - Fixed Home-button loss in a normal Markdown leaf when Hover Editor attaches its transient popover state to that source leaf; actual Hover Editor, Hover Preview, and popover containers remain excluded.
+- Added configurable Card previews using Obsidian's standard Page preview, with Off, Cmd/Ctrl + hover, and hover-only modes while preserving Pin and same-leaf Card clicks.
 
 ## [0.2.0] - 2026-07-12
 

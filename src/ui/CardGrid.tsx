@@ -5,6 +5,7 @@ import type {
   PageActionHandler,
   PageImageCacheStatsGetter,
   PageImageResolver,
+  PagePreviewHandler,
   PageRecord
 } from "./PalmWikiHomeView";
 import { PageCard } from "./PageCard";
@@ -22,6 +23,7 @@ interface CardGridProps {
   cardSize: PalmWikiCardSize;
   getImageCacheStats: PageImageCacheStatsGetter;
   onOpenPage: PageActionHandler;
+  onPreviewPage?: PagePreviewHandler;
   onTogglePinned: PageActionHandler;
   pages: PageRecord[];
   performanceDebug: boolean;
@@ -34,6 +36,7 @@ export function CardGrid({
   cardSize,
   getImageCacheStats,
   onOpenPage,
+  onPreviewPage,
   onTogglePinned,
   pages,
   performanceDebug,
@@ -194,6 +197,7 @@ export function CardGrid({
               imageUrl={resolveImageUrl(page.firstImagePath)}
               key={page.path}
               onOpenPage={onOpenPage}
+              onPreviewPage={onPreviewPage}
               onTogglePinned={onTogglePinned}
               page={page}
               showFolder={showFolders}

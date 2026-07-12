@@ -31,13 +31,21 @@ import {
 } from "./settings/Settings";
 import { deriveIndexPhase, type IndexPhase } from "./core/index/IndexPhase";
 import {
+  createCardPreviewEventPayload,
+  getCardPreviewSource
+} from "./cardPreview";
+import {
   getHomeButtonActionDescription,
   HomeNavigationManager,
   resolveExistingHomePage,
   resolveHomeButtonLabel,
   scrollPalmWikiHomeToTop
 } from "./homeNavigation";
-import { executeCommandByIdCompat, listCommandsCompat } from "./obsidianCompat";
+import {
+  executeCommandByIdCompat,
+  listCommandsCompat,
+  unregisterHoverLinkSourceCompat
+} from "./obsidianCompat";
 import { PalmWikiHomeView, PALMWIKI_HOME_VIEW_TYPE } from "./ui/PalmWikiHomeView";
 
 export interface PalmWikiHomeIndexState {
@@ -105,10 +113,12 @@ export default class PalmWikiHomePlugin extends Plugin {
   private indexRequested = false;
   private indexEventsRegistered = false;
   private homeNavigation: HomeNavigationManager | null = null;
+  private cardPreviewSourceId: string | null = null;
   private unloaded = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.syncCardPreviewSource();
 
     this.homeNavigation = new HomeNavigationManager({
       getDisplayName: () =>
@@ -173,6 +183,7 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   onunload(): void {
     this.unloaded = true;
+    this.removeCardPreviewSource();
     this.homeNavigation?.removeAll();
     this.homeNavigation = null;
     this.indexInputGeneration += 1;
@@ -227,6 +238,35 @@ export default class PalmWikiHomePlugin extends Plugin {
       abstractFile,
       undefined,
       `Could not open PalmWiki Home page: ${path}`
+    );
+  }
+
+  previewCardPage(
+    path: string,
+    leaf: WorkspaceLeaf,
+    targetEl: HTMLElement,
+    event: MouseEvent
+  ): void {
+    const source = getCardPreviewSource(this.settings.cardPreviewMode);
+    const abstractFile = this.app.vault.getAbstractFileByPath(path);
+    if (
+      !source ||
+      source.id !== this.cardPreviewSourceId ||
+      !(abstractFile instanceof TFile) ||
+      abstractFile.extension.toLocaleLowerCase() !== "md"
+    ) {
+      return;
+    }
+
+    this.app.workspace.trigger(
+      "hover-link",
+      createCardPreviewEventPayload({
+        event,
+        hoverParent: leaf,
+        path: abstractFile.path,
+        source,
+        targetEl
+      })
     );
   }
 
@@ -680,6 +720,9 @@ export default class PalmWikiHomePlugin extends Plugin {
       ...this.settings,
       ...patch
     });
+    if (previousSettings.cardPreviewMode !== this.settings.cardPreviewMode) {
+      this.syncCardPreviewSource();
+    }
     this.homeNavigation?.updateLabels();
 
     const indexScopeChanged = hasIndexScopeChanged(previousSettings, this.settings);
@@ -767,6 +810,33 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   private async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  private syncCardPreviewSource(): void {
+    const source = getCardPreviewSource(this.settings.cardPreviewMode);
+    if (this.cardPreviewSourceId === source?.id) {
+      return;
+    }
+
+    this.removeCardPreviewSource();
+    if (!source) {
+      return;
+    }
+
+    try {
+      this.registerHoverLinkSource(source.id, source.info);
+      this.cardPreviewSourceId = source.id;
+    } catch (error) {
+      console.error("Could not register PalmWiki Home Card preview", error);
+    }
+  }
+
+  private removeCardPreviewSource(): void {
+    if (!this.cardPreviewSourceId) {
+      return;
+    }
+    unregisterHoverLinkSourceCompat(this.app.workspace, this.cardPreviewSourceId);
+    this.cardPreviewSourceId = null;
   }
 
   private async prepareIndexForUse(

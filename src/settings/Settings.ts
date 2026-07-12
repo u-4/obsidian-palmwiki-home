@@ -1,4 +1,5 @@
 import type { HomeButtonAction } from "../homeNavigation";
+import type { CardPreviewMode } from "../cardPreview";
 
 export type PalmWikiViewMode = "card" | "table";
 
@@ -30,6 +31,7 @@ export interface PalmWikiHomeSettings {
   showFoldersOnCards: boolean;
   showTagsOnCards: boolean;
   cardSize: PalmWikiCardSize;
+  cardPreviewMode: CardPreviewMode;
   indexOnStartup: boolean;
   performanceDebug: boolean;
   pageRankIgnoredSourceFolders: string[];
@@ -51,6 +53,7 @@ export const DEFAULT_SETTINGS: PalmWikiHomeSettings = {
   showFoldersOnCards: true,
   showTagsOnCards: true,
   cardSize: "medium",
+  cardPreviewMode: "modifier",
   indexOnStartup: false,
   performanceDebug: false,
   pageRankIgnoredSourceFolders: [],
@@ -83,6 +86,11 @@ export function normalizeSettings(value: unknown): PalmWikiHomeSettings {
     showFoldersOnCards: readBoolean(settings.showFoldersOnCards, true),
     showTagsOnCards: readBoolean(settings.showTagsOnCards, true),
     cardSize: readEnum(settings.cardSize, ["small", "medium", "large"], "medium"),
+    cardPreviewMode: readEnum(
+      settings.cardPreviewMode,
+      ["off", "modifier", "hover"],
+      "modifier"
+    ),
     indexOnStartup: readBoolean(settings.indexOnStartup, false),
     performanceDebug: readBoolean(settings.performanceDebug, false),
     pageRankIgnoredSourceFolders: normalizeFolderList(
