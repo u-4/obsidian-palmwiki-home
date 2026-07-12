@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { findClosestVerticalScrollContainer } from "../homeNavigation";
 import type { PalmWikiCardSize } from "../settings/Settings";
 import type {
   PageActionHandler,
@@ -64,7 +65,12 @@ export function CardGrid({
       return;
     }
 
-    const resizeObserver = new ResizeObserver(([entry]) => {
+    const ownerWindow = element.ownerDocument.defaultView;
+    if (!ownerWindow) {
+      return;
+    }
+
+    const resizeObserver = new ownerWindow.ResizeObserver(([entry]) => {
       setContainerWidth(entry.contentRect.width);
     });
 
@@ -80,19 +86,24 @@ export function CardGrid({
       return;
     }
 
-    const scrollParent = findScrollParent(element);
+    const ownerWindow = element.ownerDocument.defaultView;
+    if (!ownerWindow) {
+      return;
+    }
+
+    const scrollParent = findClosestVerticalScrollContainer(element) ?? ownerWindow;
     let frame = 0;
 
     const updateVisibleRows = (): void => {
       if (frame !== 0) {
-        window.cancelAnimationFrame(frame);
+        ownerWindow.cancelAnimationFrame(frame);
       }
 
-      frame = window.requestAnimationFrame(() => {
+      frame = ownerWindow.requestAnimationFrame(() => {
         const containerRect = element.getBoundingClientRect();
         const viewportRect =
-          scrollParent === window
-            ? { top: 0, height: window.innerHeight }
+          scrollParent === ownerWindow
+            ? { top: 0, height: ownerWindow.innerHeight }
             : (scrollParent as HTMLElement).getBoundingClientRect();
         const visibleTop = Math.max(0, viewportRect.top - containerRect.top);
         const visibleBottom = Math.min(
@@ -120,15 +131,15 @@ export function CardGrid({
 
     updateVisibleRows();
     scrollParent.addEventListener("scroll", updateVisibleRows, { passive: true });
-    window.addEventListener("resize", updateVisibleRows);
+    ownerWindow.addEventListener("resize", updateVisibleRows);
 
     return () => {
       if (frame !== 0) {
-        window.cancelAnimationFrame(frame);
+        ownerWindow.cancelAnimationFrame(frame);
       }
 
       scrollParent.removeEventListener("scroll", updateVisibleRows);
-      window.removeEventListener("resize", updateVisibleRows);
+      ownerWindow.removeEventListener("resize", updateVisibleRows);
     };
   }, [columns, pages.length, rowCount, rowStride, totalHeight]);
 
@@ -193,19 +204,4 @@ export function CardGrid({
       </div>
     </section>
   );
-}
-
-function findScrollParent(element: HTMLElement): HTMLElement | Window {
-  let parent = element.parentElement;
-
-  while (parent) {
-    const style = window.getComputedStyle(parent);
-    if (/(auto|scroll)/.test(`${style.overflowY}${style.overflow}`)) {
-      return parent;
-    }
-
-    parent = parent.parentElement;
-  }
-
-  return window;
 }

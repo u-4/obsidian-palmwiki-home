@@ -1,5 +1,13 @@
-import { PluginSettingTab, Setting } from "obsidian";
+import { App, FuzzySuggestModal, PluginSettingTab, Setting, TFile } from "obsidian";
+import {
+  HOME_BUTTON_ACTION_OPTIONS,
+  HOME_BUTTON_SETTING_DESCRIPTION,
+  HOME_COMMAND_SETTING_DESCRIPTION,
+  HOME_PAGE_SETTING_DESCRIPTION,
+  isHomeButtonAction
+} from "../homeNavigation";
 import type PalmWikiHomePlugin from "../main";
+import { listCommandsCompat, type RuntimeCommandInfo } from "../obsidianCompat";
 import {
   formatFolderListInput,
   formatLineListInput,
@@ -11,6 +19,52 @@ import {
   type PalmWikiViewMode
 } from "./Settings";
 
+class HomePageSuggestModal extends FuzzySuggestModal<TFile> {
+  constructor(
+    app: App,
+    private files: TFile[],
+    private onChoose: (file: TFile) => Promise<void>
+  ) {
+    super(app);
+    this.setPlaceholder("Choose a home page…");
+  }
+
+  getItems(): TFile[] {
+    return this.files;
+  }
+
+  getItemText(file: TFile): string {
+    return file.path;
+  }
+
+  onChooseItem(file: TFile): void {
+    void this.onChoose(file);
+  }
+}
+
+class HomeCommandSuggestModal extends FuzzySuggestModal<RuntimeCommandInfo> {
+  constructor(
+    app: App,
+    private commands: RuntimeCommandInfo[],
+    private onChoose: (command: RuntimeCommandInfo) => Promise<void>
+  ) {
+    super(app);
+    this.setPlaceholder("Choose a home command…");
+  }
+
+  getItems(): RuntimeCommandInfo[] {
+    return this.commands;
+  }
+
+  getItemText(command: RuntimeCommandInfo): string {
+    return `${command.name} (${command.id})`;
+  }
+
+  onChooseItem(command: RuntimeCommandInfo): void {
+    void this.onChoose(command);
+  }
+}
+
 export class PalmWikiHomeSettingTab extends PluginSettingTab {
   private plugin: PalmWikiHomePlugin;
 
@@ -20,8 +74,52 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
   }
 
   display(): void {
+    this.renderSettings();
+  }
+
+  private renderSettings(): void {
     const { containerEl } = this;
     containerEl.empty();
+
+    new Setting(containerEl).setName("Home button").setHeading();
+
+    new Setting(containerEl)
+      .setName("Home button label")
+      .setDesc(
+        "Text shown at the upper-left of Markdown and PalmWiki Home tabs. Leave blank to use the current vault name."
+      )
+      .addText((text) => {
+        text
+          .setPlaceholder(this.app.vault.getName())
+          .setValue(this.plugin.settings.homeButtonLabel)
+          .onChange(async (value) => {
+            await this.plugin.updateSettings({ homeButtonLabel: value }, false);
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Home button action")
+      .setDesc(HOME_BUTTON_SETTING_DESCRIPTION)
+      .addDropdown((dropdown) => {
+        for (const [value, label] of Object.entries(HOME_BUTTON_ACTION_OPTIONS)) {
+          dropdown.addOption(value, label);
+        }
+        dropdown
+          .setValue(this.plugin.settings.homeButtonAction)
+          .onChange(async (value) => {
+            if (!isHomeButtonAction(value)) {
+              return;
+            }
+            await this.plugin.updateSettings({ homeButtonAction: value }, false);
+            this.redisplay();
+          });
+      });
+
+    if (this.plugin.settings.homeButtonAction === "page") {
+      this.createHomePageSetting();
+    } else if (this.plugin.settings.homeButtonAction === "command") {
+      this.createHomeCommandSetting();
+    }
 
     new Setting(containerEl)
       .setName("Include folders")
@@ -222,5 +320,93 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
             await this.plugin.updateSettings({ pageRankDebugPath: value.trim() }, true);
           });
       });
+  }
+
+  private createHomePageSetting(): void {
+    const setting = new Setting(this.containerEl)
+      .setName("Home page")
+      .setDesc(HOME_PAGE_SETTING_DESCRIPTION)
+      .addText((text) => {
+        text
+          .setPlaceholder("Home or folder/Home.md")
+          .setValue(this.plugin.settings.homeButtonPagePath)
+          .onChange(async (value) => {
+            await this.plugin.updateSettings({ homeButtonPagePath: value }, false);
+          });
+      })
+      .addButton((button) => {
+        button.setButtonText("Choose page…").onClick(() => {
+          const files = [...this.app.vault.getMarkdownFiles()].sort((left, right) =>
+            left.path.localeCompare(right.path)
+          );
+          new HomePageSuggestModal(this.app, files, async (file) => {
+            await this.plugin.updateSettings({ homeButtonPagePath: file.path }, false);
+            this.redisplay();
+          }).open();
+        });
+      });
+
+    if (this.plugin.settings.homeButtonPagePath) {
+      setting.addExtraButton((button) => {
+        button
+          .setIcon("x")
+          .setTooltip("Clear home page")
+          .onClick(async () => {
+            await this.plugin.updateSettings({ homeButtonPagePath: "" }, false);
+            this.redisplay();
+          });
+      });
+    }
+  }
+
+  private createHomeCommandSetting(): void {
+    const commands = listCommandsCompat(this.app);
+    const selectedId = this.plugin.settings.homeButtonCommandId;
+    const selectedCommand = commands.find((command) => command.id === selectedId);
+    const selectionDescription = selectedId
+      ? selectedCommand
+        ? `Selected: ${selectedCommand.name}.`
+        : `The selected command is currently unavailable: ${selectedId}.`
+      : commands.length === 0
+        ? "The command list is unavailable in this Obsidian version."
+        : "No command is selected yet.";
+
+    const setting = new Setting(this.containerEl)
+      .setName("Home command")
+      .setDesc(`${HOME_COMMAND_SETTING_DESCRIPTION} ${selectionDescription}`)
+      .addButton((button) => {
+        button
+          .setButtonText(selectedId ? "Change command…" : "Choose command…")
+          .setDisabled(commands.length === 0)
+          .onClick(() => {
+            new HomeCommandSuggestModal(
+              this.app,
+              listCommandsCompat(this.app),
+              async (command) => {
+                await this.plugin.updateSettings(
+                  { homeButtonCommandId: command.id },
+                  false
+                );
+                this.redisplay();
+              }
+            ).open();
+          });
+      });
+
+    if (selectedId) {
+      setting.addExtraButton((button) => {
+        button
+          .setIcon("x")
+          .setTooltip("Clear home command")
+          .onClick(async () => {
+            await this.plugin.updateSettings({ homeButtonCommandId: "" }, false);
+            this.redisplay();
+          });
+      });
+    }
+  }
+
+  private redisplay(): void {
+    this.renderSettings();
   }
 }

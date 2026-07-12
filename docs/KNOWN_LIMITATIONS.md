@@ -1,6 +1,6 @@
 # Known Limitations
 
-- Version 0.1.0 targets Obsidian Desktop 1.12.7 or later and has been verified on Obsidian 1.12.7 for macOS. iOS and Android support will be evaluated after 0.1.0.
+- Version 0.2.0 targets Obsidian Desktop 1.12.7 or later and has been verified on Obsidian 1.12.7 for macOS. iOS and Android support will be evaluated after 0.2.0.
 - Full-text body search, OCR search, multi-vault search, and related-page scoring are not implemented.
 - PageRank is a static vault-ranking heuristic based on resolved links and modification times, not Google PageRank.
 - Tags, unresolved links, non-Markdown embeds, and OCR content do not affect PageRank.
@@ -12,3 +12,6 @@
 - The first run, an invalid cache, or an index-scope setting change requires a rebuild whose duration depends on Vault size.
 - The derived index is stored in the Vault-local plugin folder. Small image URL and date-label caches remain in memory only.
 - Display performance and primary controls have been checked on a copied Vault with approximately 7,000 pages, but PageRank usefulness depends on each Vault's link structure.
+- The upper-left Home button has no dedicated public Obsidian API, so its isolated placement module depends on Obsidian's left header DOM structure. A future header redesign could make only this button unavailable until compatibility is updated.
+- Command discovery and execution use a guarded runtime compatibility layer because Obsidian's command manager is not part of the public `App` type. Unsupported, disabled, missing, or context-inapplicable commands leave the current view unchanged and show a Notice.
+- Immediately after workspace restoration, an inactive deferred tab may not yet expose its current Markdown file or command context. Manually entered relative pages, local headings, and Markdown-context commands can remain unavailable until that tab finishes loading; exact Vault-relative paths saved by the page chooser are unaffected.

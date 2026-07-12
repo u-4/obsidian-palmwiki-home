@@ -5,6 +5,26 @@
 - `[x]` 自動確認またはObsidian実画面で確認済み
 - `[ ]` 未実施、または公開操作時にだけ確認する項目
 
+## 0.2.0 リリース判定
+
+確認環境:
+
+- 日付: 2026-07-12
+- Release branch: `codex/home-button-ownership`
+- Obsidian: Desktop 1.12.7 / macOS
+- テストVault: `PalmWiki_LocalTest`（コピーVault）
+
+確認結果:
+
+- `[x]` 利用者がテストVaultで基本機能とインターフェースに問題がないことを確認した。
+- `[x]` Cardクリックが同じHomeタブでMarkdownページを開く。
+- `[x]` 左ヘッダーが「戻る・進む」→PalmWiki Homeボタン→ノートタイトルの順で表示される。
+- `[x]` PalmWiki Homeタブの中央タイトル文字が非表示になり、将来の検索欄用領域が残る。
+- `[x]` production build、公式Obsidian ESLint、自動テスト50件、metadata検証、差分空白検査が成功する。
+- `[x]` 配布した`main.js`、`manifest.json`、`styles.css`のSHA-256が開発元と一致し、`data.json`と索引キャッシュを上書きしない。
+- `[ ]` ポップアウト、Hover Preview / Hover Editor、reduced motionなどの特殊条件は、下記の回帰確認項目として継続する。
+- `[ ]` 起動直後の未読込・非アクティブ復元タブにおける相対ページ、ローカル見出し、文脈依存コマンドは継続確認とする。
+
 ## 0.1.0 リリース判定（必須）
 
 この節を0.1.0の公開可否判定に使用する。後続の詳細一覧は回帰確認用の項目集であり、未確認項目が自動的に0.1.0の公開停止を意味するものではない。
@@ -62,6 +82,27 @@ Obsidian実画面:
 - `[x]` `npm run eslint` を実行する。Obsidian公式の型情報付きESLint。
 - `[x]` `git diff --check` を実行する。
 
+## 左上Homeボタン所有機能（今回の手動確認）
+
+- `[ ]` Live Preview、Reading view、複数split、非アクティブsplitの通常Markdownタブに、タイトルより前の左上ボタンが各1個だけ表示される。
+- `[ ]` 左ヘッダーが「戻る・進む」→PalmWiki Homeボタン→ノートタイトルの順に表示される。
+- `[ ]` PalmWiki Homeタブでは中央の`PalmWiki Home`タイトル文字が表示されず、中央ヘッダー領域が空いたまま残る。
+- `[ ]` Canvas、設定、他のカスタムビュー、Hover Preview、Hover Editor、popoverには左上ボタンが表示されない。
+- `[ ]` ラベル空欄では現在のVault名、任意ラベルではその文字列になり、表示・tooltip・読み上げ名が全対象タブへ即時反映される。
+- `[ ]` `Open PalmWiki Home`で、クリック元MarkdownタブだけがHomeへ置き換わり、新規タブや別の既存Homeへ移動しない。
+- `[ ]` `Open a page`で、既存ページがクリック元タブに開く。ノート名、Vault相対パス、`.md`、Wiki link、alias、headingを確認する。
+- `[ ]` 空欄または存在しないHome pageでは、ファイルを作らず元のMarkdown表示を維持し、Noticeを表示する。
+- `[ ]` command chooserで選択しただけでは実行されず、左上ボタンクリック時はクリック元splitがactiveになってから実行される。
+- `[ ]` 未選択、無効、現在の文脈で実行不能なcommandでは表示を変えずNoticeを表示する。
+- `[ ]` Home設定だけを変更しても、索引再構築やVault本文の全件読み込みが始まらない。
+- `[ ]` PalmWiki HomeのCard/Tableを下へscroll後、左上ボタンで同じHomeの最上部へ戻る。reduced motion有効時も確認する。
+- `[ ]` ポップアウトウィンドウでも左上ボタンの表示、動作、最上部移動が正しい。
+- `[ ]` leaf close、plugin disable/reload後にPalmWikiボタンやeventが残らず、再有効化後も二重表示にならない。
+- `[ ]` 2Hop Links Plus併用時も右上2-hopボタンが変化せず、2Hopを無効化してもPalmWikiの左上ボタンが機能する。
+- `[ ]` Cardクリックで、そのCardを表示していたHomeタブが正しいMarkdownページへ置き換わり、タブ数と他splitは変わらない。
+- `[ ]` Cardのtitle/bodyをEnter / Spaceで操作した場合も同一タブで開き、pin buttonはpinだけを切り替える。
+- `[ ]` Tableの既存ページ表示動作に回帰がない。
+
 ## テスト Vault での smoke test
 
 - `[ ]` プラグインをテスト Vault にインストールする。
@@ -69,7 +110,7 @@ Obsidian実画面:
 - `[ ]` command palette から `PalmWiki Home: Open home` を実行する。
 - `[ ]` Home view が開くことを確認する。
 - `[ ]` Markdown ページが card として表示されることを確認する。
-- `[ ]` card をクリックすると正しい note が開くことを確認する。
+- `[ ]` card をクリックすると、そのHomeタブが正しい note へ置き換わり、新しいタブが増えないことを確認する。
 - `[ ]` Table view に切り替える。
 - `[ ]` 同じ note が table 形式で表示されることを確認する。
 - `[ ]` updated time descending で sort する。
@@ -138,9 +179,9 @@ Obsidian実画面:
 - `[ ]` 既存 Home tab を command / ribbon から開く時、view が再生成されず既存 leaf が reveal される。
 - `[ ]` pin 済み note を rename しても pin が維持される。
 - `[ ]` pin 済みの一時 note を delete しても crash せず、古い pin が削除または無害に無視される。
-- `[ ]` card 本体を mouse click すると note が開く。
+- `[ ]` card 本体を mouse click すると、そのCardを表示していたHomeタブでnoteが開く。
 - `[ ]` pin button を mouse click すると pin だけが切り替わり、note は開かない。
-- `[ ]` card の title / body open area を keyboard で Enter / Space 操作すると note が開く。
+- `[ ]` card の title / body open area を keyboard で Enter / Space 操作すると同じHomeタブでnoteが開く。
 - `[ ]` pin button を keyboard で Enter / Space 操作すると pin だけが切り替わり、note は開かない。
 - `[ ]` card view は `Load more` なしで全 filtered page を scroll できる。
 - `[ ]` card view では mounted card 数が visible range + overscan 程度に抑えられる。

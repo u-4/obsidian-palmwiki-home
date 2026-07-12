@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { findClosestVerticalScrollContainer } from "../homeNavigation";
 import type {
   PageActionHandler,
   PageImageCacheStatsGetter,
@@ -60,19 +61,24 @@ export function PageTable({
       return;
     }
 
-    const scrollParent = findScrollParent(container);
+    const ownerWindow = container.ownerDocument.defaultView;
+    if (!ownerWindow) {
+      return;
+    }
+
+    const scrollParent = findClosestVerticalScrollContainer(container) ?? ownerWindow;
     let frame = 0;
 
     const updateVisibleRows = (): void => {
       if (frame !== 0) {
-        window.cancelAnimationFrame(frame);
+        ownerWindow.cancelAnimationFrame(frame);
       }
 
-      frame = window.requestAnimationFrame(() => {
+      frame = ownerWindow.requestAnimationFrame(() => {
         const bodyRect = body.getBoundingClientRect();
         const viewportRect =
-          scrollParent === window
-            ? { top: 0, height: window.innerHeight }
+          scrollParent === ownerWindow
+            ? { top: 0, height: ownerWindow.innerHeight }
             : (scrollParent as HTMLElement).getBoundingClientRect();
         const visibleTop = Math.max(0, viewportRect.top - bodyRect.top);
         const visibleBottom = Math.min(
@@ -98,15 +104,15 @@ export function PageTable({
 
     updateVisibleRows();
     scrollParent.addEventListener("scroll", updateVisibleRows, { passive: true });
-    window.addEventListener("resize", updateVisibleRows);
+    ownerWindow.addEventListener("resize", updateVisibleRows);
 
     return () => {
       if (frame !== 0) {
-        window.cancelAnimationFrame(frame);
+        ownerWindow.cancelAnimationFrame(frame);
       }
 
       scrollParent.removeEventListener("scroll", updateVisibleRows);
-      window.removeEventListener("resize", updateVisibleRows);
+      ownerWindow.removeEventListener("resize", updateVisibleRows);
     };
   }, [pages.length, totalHeight]);
 
@@ -302,18 +308,3 @@ const VirtualPageTableRow = React.memo(function VirtualPageTableRow({
     </div>
   );
 });
-
-function findScrollParent(element: HTMLElement): HTMLElement | Window {
-  let parent = element.parentElement;
-
-  while (parent) {
-    const style = window.getComputedStyle(parent);
-    if (/(auto|scroll)/.test(`${style.overflowY}${style.overflow}`)) {
-      return parent;
-    }
-
-    parent = parent.parentElement;
-  }
-
-  return window;
-}

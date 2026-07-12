@@ -4,6 +4,8 @@
 
 `PalmWiki Home` is implemented as a standalone Obsidian community-plugin-style repository. It does not import or modify `2hop-links-plus`.
 
+The adjacent 2Hop prototype was consulted read-only for behavioral risks. PalmWiki's leaf-owned manager and resolution behavior were substantially reworked for this specification, but general header-placement and guarded command-compatibility patterns were adapted from that MIT-licensed reference. Its complete notices are preserved in `THIRD_PARTY_NOTICES.md` and the production bundle. PalmWiki contains no 2Hop selector, settings access, import, or runtime integration.
+
 The runtime entrypoint is `src/main.ts`. The code is split into:
 
 - `src/core/index/` for `PageRecord` construction from vault files and metadata cache.
@@ -13,6 +15,8 @@ The runtime entrypoint is `src/main.ts`. The code is split into:
 - `src/core/search/` for query normalization.
 - `src/settings/` for persisted plugin settings and the settings tab.
 - `src/ui/` for the React-based custom view.
+- `src/homeNavigation.ts` for Home target parsing, page resolution, left-header placement, button lifecycle, and Home scroll ownership.
+- `src/obsidianCompat.ts` for the minimal runtime-checked boundary around Obsidian's command manager.
 
 ## PageRecord fields
 
@@ -101,13 +105,21 @@ PageRank-only ignored source settings allow broad diary/journal/MOC sources to s
 
 ## Settings
 
-Settings are persisted through Obsidian plugin data and normalized after load/update. The Phase 1 settings include include/exclude folders, pinned page paths, default view/sort preferences, card display options, and card size.
+Settings are persisted through Obsidian plugin data and normalized after load/update. The Phase 1 settings include include/exclude folders, pinned page paths, default view/sort preferences, card display options, and card size. Home navigation adds `homeButtonLabel`, `homeButtonAction`, `homeButtonPagePath`, and `homeButtonCommandId`; missing 0.1.0 values receive safe defaults. These navigation-only settings do not change the index fingerprint or request a Vault rebuild.
 
 The folder settings UI uses one folder path per line or comma-separated paths. Empty include folders means all folders; exclude folders win over include folders.
 
 ## UI
 
 The custom view type is `palmwiki-home-view`, with display name `PalmWiki Home`.
+
+`HomeNavigationManager` owns exactly one `.palmwiki-vault-home-button` per eligible Markdown or PalmWiki Home leaf. It enumerates split leaves on layout and active-leaf changes, excludes hover/popover contexts and all unrelated view types, updates label/title/ARIA state after settings changes, and removes its listeners and elements on view close or plugin unload. The unavoidable `.view-header-left` / title-container DOM placement is isolated in that module. Element creation, computed style, animation, and reduced-motion checks use each target element's `ownerDocument` and `defaultView` so pop-out windows do not use the main window accidentally.
+
+Within the left header, the button is inserted immediately before `.view-header-title-container`, leaving Obsidian's Back/Forward controls to its left. PalmWiki Home adds a view-scoped container class that hides only `.view-header-title`; the title container remains available for a future search control.
+
+On Markdown leaves, the button either replaces the clicked leaf with `palmwiki-home-view`, opens a resolved existing Markdown file in that leaf, or activates that leaf and asks Obsidian's guarded command manager to execute the selected command. ViewState and ephemeral state are captured before Home/page transitions and restored best-effort on failure. Page resolution tries exact paths before interpreting Wiki alias/heading delimiters, never calls a file-creation API, and supports aliases from cached frontmatter. Ribbon and `Open home` command behavior remains separate: it still reveals an existing Home leaf or creates one only when none exists.
+
+On PalmWiki Home leaves, the same button ignores the Markdown action setting and scrolls the nearest actual vertical Home container to the top. Reduced-motion preference selects immediate scrolling; otherwise smooth scrolling is allowed. The manager neither queries nor changes any 2Hop Links Plus class or DOM.
 
 The toolbar contains:
 
@@ -121,6 +133,8 @@ The toolbar contains:
 - Refresh button
 
 Card view renders a responsive Cosense-like grid with title, optional thumbnail, description, tags, folder/path, updated date, and pin button. Cards use a lightweight virtual grid so only the visible rows plus 3 overscan rows are mounted.
+
+Card activation receives the owning `PalmWikiHomeView.leaf` explicitly and opens the selected existing Markdown file in that same leaf. Table opening retains its previous workspace-selected-leaf path. Both Card and Table virtualizers locate scroll parents through the shared owner-document-aware helper.
 
 Table view renders the requested columns: Page, Image, Description, Created, Updated, PageRank, Inlinks, Outlinks, Lines, Chars, Folder, and Tags. It is implemented as a div/CSS-grid virtual table with ARIA table roles rather than a native `<table>`, so only the visible rows plus overscan are mounted.
 
@@ -182,4 +196,4 @@ The `performanceDebug` setting defaults to `false`. When enabled, the plugin log
 
 ## Deferred work
 
-The implementation intentionally defers full-text body search, related scoring, OCR search, multi-vault search, recent-page search focus UI, and any permanent top bar injected into Markdown views.
+The implementation intentionally defers full-text body search, related scoring, OCR search, multi-vault search, and recent-page search focus UI.

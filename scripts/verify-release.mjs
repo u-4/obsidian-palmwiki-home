@@ -31,9 +31,7 @@ assert(
   versions[expectedVersion] === manifest.minAppVersion,
   "versions.json must map the release to manifest.minAppVersion"
 );
-if (expectedVersion === "0.1.0") {
-  assert(manifest.isDesktopOnly === true, "0.1.0 must be marked desktop-only");
-}
+assert(manifest.isDesktopOnly === true, "The release must be marked desktop-only");
 
 const hasDatedChangelogEntry = new RegExp(
   `^## \\[${escapeRegex(expectedVersion)}\\] - \\d{4}-\\d{2}-\\d{2}$`,
