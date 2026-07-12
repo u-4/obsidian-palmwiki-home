@@ -1,4 +1,12 @@
-import { normalizePath, Plugin, TAbstractFile, TFile } from "obsidian";
+import {
+  normalizePath,
+  Notice,
+  Plugin,
+  TAbstractFile,
+  TFile,
+  type ViewState,
+  type WorkspaceLeaf
+} from "obsidian";
 import {
   buildPageIndex,
   IndexBuildCancelledError,
@@ -22,6 +30,14 @@ import {
   type PalmWikiHomeSettings
 } from "./settings/Settings";
 import { deriveIndexPhase, type IndexPhase } from "./core/index/IndexPhase";
+import {
+  getHomeButtonActionDescription,
+  HomeNavigationManager,
+  resolveExistingHomePage,
+  resolveHomeButtonLabel,
+  scrollPalmWikiHomeToTop
+} from "./homeNavigation";
+import { executeCommandByIdCompat, listCommandsCompat } from "./obsidianCompat";
 import { PalmWikiHomeView, PALMWIKI_HOME_VIEW_TYPE } from "./ui/PalmWikiHomeView";
 
 export interface PalmWikiHomeIndexState {
@@ -88,10 +104,28 @@ export default class PalmWikiHomePlugin extends Plugin {
   private layoutReady = false;
   private indexRequested = false;
   private indexEventsRegistered = false;
+  private homeNavigation: HomeNavigationManager | null = null;
   private unloaded = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    this.homeNavigation = new HomeNavigationManager({
+      getDisplayName: () =>
+        resolveHomeButtonLabel(
+          this.settings.homeButtonLabel,
+          this.app.vault.getName()
+        ),
+      getMarkdownActionDescription: () => this.getHomeButtonActionDescription(),
+      onHomeActivate: (leaf) => {
+        this.app.workspace.setActiveLeaf(leaf, { focus: true });
+        scrollPalmWikiHomeToTop(leaf.view.containerEl);
+      },
+      onMarkdownActivate: async (leaf, event) => {
+        await this.activateMarkdownHomeButton(leaf, event);
+      },
+      palmWikiHomeViewType: PALMWIKI_HOME_VIEW_TYPE
+    });
 
     this.registerView(
       PALMWIKI_HOME_VIEW_TYPE,
@@ -119,12 +153,14 @@ export default class PalmWikiHomePlugin extends Plugin {
     });
 
     this.addSettingTab(new PalmWikiHomeSettingTab(this));
+    this.registerHomeNavigationEvents();
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) {
         return;
       }
 
       this.layoutReady = true;
+      this.syncHomeNavigationButtons();
       this.registerIndexEvents();
 
       if (this.settings.indexOnStartup) {
@@ -137,6 +173,8 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   onunload(): void {
     this.unloaded = true;
+    this.homeNavigation?.removeAll();
+    this.homeNavigation = null;
     this.indexInputGeneration += 1;
     this.cacheLoadGeneration += 1;
     this.automaticWorkGeneration += 1;
@@ -150,6 +188,7 @@ export default class PalmWikiHomePlugin extends Plugin {
     if (existingLeaf) {
       await this.app.workspace.revealLeaf(existingLeaf);
       this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+      this.syncHomeNavigationButtons();
       return;
     }
 
@@ -161,6 +200,7 @@ export default class PalmWikiHomePlugin extends Plugin {
 
     await this.app.workspace.revealLeaf(leaf);
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    this.syncHomeNavigationButtons();
   }
 
   async openPage(path: string): Promise<void> {
@@ -170,6 +210,226 @@ export default class PalmWikiHomePlugin extends Plugin {
     }
 
     await this.app.workspace.getLeaf(false).openFile(abstractFile);
+  }
+
+  async openPageInLeaf(path: string, leaf: WorkspaceLeaf): Promise<void> {
+    const abstractFile = this.app.vault.getAbstractFileByPath(path);
+    if (
+      !(abstractFile instanceof TFile) ||
+      abstractFile.extension.toLocaleLowerCase() !== "md"
+    ) {
+      new Notice(`PalmWiki Home page not found: ${path}`);
+      return;
+    }
+
+    await this.openMarkdownFileInLeaf(
+      leaf,
+      abstractFile,
+      undefined,
+      `Could not open PalmWiki Home page: ${path}`
+    );
+  }
+
+  syncHomeNavigationForLeaf(leaf: WorkspaceLeaf): void {
+    this.homeNavigation?.ensureLeaf(leaf);
+  }
+
+  removeHomeNavigationForLeaf(leaf: WorkspaceLeaf): void {
+    this.homeNavigation?.removeLeaf(leaf);
+  }
+
+  private getHomeButtonActionDescription(): string {
+    let commandLabel = "";
+    if (this.settings.homeButtonAction === "command") {
+      const commandId = this.settings.homeButtonCommandId;
+      commandLabel = commandId
+        ? listCommandsCompat(this.app).find((command) => command.id === commandId)?.name ??
+          commandId
+        : "";
+    }
+
+    return getHomeButtonActionDescription(
+      this.settings.homeButtonAction,
+      this.settings.homeButtonPagePath,
+      commandLabel
+    );
+  }
+
+  private async activateMarkdownHomeButton(
+    leaf: WorkspaceLeaf,
+    event: MouseEvent
+  ): Promise<void> {
+    switch (this.settings.homeButtonAction) {
+      case "page":
+        await this.openConfiguredHomePage(leaf);
+        return;
+      case "command":
+        this.runConfiguredHomeCommand(leaf, event);
+        return;
+      case "palmwikiHome":
+      default:
+        await this.openPalmWikiHomeInLeaf(leaf);
+    }
+  }
+
+  private async openConfiguredHomePage(leaf: WorkspaceLeaf): Promise<void> {
+    const configuredTarget = this.settings.homeButtonPagePath;
+    if (!configuredTarget) {
+      new Notice("Choose a home page in the PalmWiki Home settings.");
+      return;
+    }
+
+    const sourceFile = (leaf.view as { file?: TFile | null }).file;
+    const resolvedPage = resolveExistingHomePage(
+      this.app,
+      sourceFile instanceof TFile ? sourceFile.path : "",
+      configuredTarget
+    );
+    if (!resolvedPage) {
+      new Notice(`Home page not found: ${configuredTarget}`);
+      return;
+    }
+
+    await this.openMarkdownFileInLeaf(
+      leaf,
+      resolvedPage.file,
+      resolvedPage.subpath ? { subpath: resolvedPage.subpath } : undefined,
+      `Could not open Home page: ${resolvedPage.file.path}`
+    );
+  }
+
+  private runConfiguredHomeCommand(leaf: WorkspaceLeaf, event: MouseEvent): void {
+    const commandId = this.settings.homeButtonCommandId;
+    if (!commandId) {
+      new Notice("Choose a home command in the PalmWiki Home settings.");
+      return;
+    }
+
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    const result = executeCommandByIdCompat(this.app, commandId, event);
+    if (result === "executed") {
+      return;
+    }
+    if (result === "unsupported") {
+      new Notice("Obsidian command access is unavailable in this version.");
+      return;
+    }
+    new Notice(`Home command is unavailable in the current context: ${commandId}`);
+  }
+
+  private async openPalmWikiHomeInLeaf(leaf: WorkspaceLeaf): Promise<void> {
+    const previousViewState = leaf.getViewState();
+    const previousEphemeralState: unknown = leaf.getEphemeralState();
+
+    try {
+      await leaf.setViewState({
+        type: PALMWIKI_HOME_VIEW_TYPE,
+        active: true
+      });
+      if (leaf.view.getViewType() !== PALMWIKI_HOME_VIEW_TYPE) {
+        throw new Error("PalmWiki Home view type was not activated");
+      }
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
+      this.syncHomeNavigationButtons();
+    } catch (error) {
+      console.error("Could not open PalmWiki Home in the current tab", error);
+      await this.restoreLeafAfterNavigationFailure(
+        leaf,
+        previousViewState,
+        previousEphemeralState
+      );
+      new Notice("Could not open PalmWiki Home in this tab.");
+    }
+  }
+
+  private async openMarkdownFileInLeaf(
+    leaf: WorkspaceLeaf,
+    file: TFile,
+    eState: Record<string, unknown> | undefined,
+    failureNotice: string
+  ): Promise<void> {
+    const previousViewState = leaf.getViewState();
+    const previousEphemeralState: unknown = leaf.getEphemeralState();
+
+    try {
+      await leaf.openFile(file, { active: true, eState });
+      if (leaf.view.getViewType() !== "markdown") {
+        throw new Error("Markdown view type was not activated");
+      }
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
+      this.syncHomeNavigationButtons();
+    } catch (error) {
+      console.error(`Could not open Markdown page ${file.path}`, error);
+      await this.restoreLeafAfterNavigationFailure(
+        leaf,
+        previousViewState,
+        previousEphemeralState
+      );
+      new Notice(failureNotice);
+    }
+  }
+
+  private async restoreLeafAfterNavigationFailure(
+    leaf: WorkspaceLeaf,
+    viewState: ViewState,
+    ephemeralState: unknown
+  ): Promise<void> {
+    try {
+      await leaf.setViewState(viewState, ephemeralState);
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    } catch (restoreError) {
+      console.error("Could not restore the previous tab after navigation failed", restoreError);
+    } finally {
+      this.syncHomeNavigationButtons();
+    }
+  }
+
+  private registerHomeNavigationEvents(): void {
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => {
+        this.syncHomeNavigationButtons();
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        this.syncHomeNavigationButtons();
+        if (leaf?.isDeferred) {
+          void leaf
+            .loadIfDeferred()
+            .then(() => {
+              if (!this.unloaded) {
+                this.syncHomeNavigationButtons();
+              }
+            })
+            .catch((error: unknown) => {
+              console.error("Could not load the active deferred tab", error);
+            });
+        }
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("window-open", (_workspaceWindow, ownerWindow) => {
+        ownerWindow.requestAnimationFrame(() => {
+          this.syncHomeNavigationButtons();
+        });
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("window-close", () => {
+        this.syncHomeNavigationButtons();
+      })
+    );
+  }
+
+  private syncHomeNavigationButtons(): void {
+    if (this.unloaded || !this.homeNavigation) {
+      return;
+    }
+
+    this.homeNavigation.syncLeaves([
+      ...this.app.workspace.getLeavesOfType("markdown"),
+      ...this.app.workspace.getLeavesOfType(PALMWIKI_HOME_VIEW_TYPE)
+    ]);
   }
 
   ensureIndexForView(): void {
@@ -420,6 +680,7 @@ export default class PalmWikiHomePlugin extends Plugin {
       ...this.settings,
       ...patch
     });
+    this.homeNavigation?.updateLabels();
 
     const indexScopeChanged = hasIndexScopeChanged(previousSettings, this.settings);
     if (indexScopeChanged) {
@@ -454,6 +715,7 @@ export default class PalmWikiHomePlugin extends Plugin {
     }
 
     await this.saveSettings();
+    this.syncHomeNavigationButtons();
     this.notifyIndexListeners();
 
     if (

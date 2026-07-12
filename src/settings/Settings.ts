@@ -1,3 +1,5 @@
+import type { HomeButtonAction } from "../homeNavigation";
+
 export type PalmWikiViewMode = "card" | "table";
 
 export type PalmWikiSortKey =
@@ -15,6 +17,10 @@ export type PalmWikiSortDirection = "asc" | "desc";
 export type PalmWikiCardSize = "small" | "medium" | "large";
 
 export interface PalmWikiHomeSettings {
+  homeButtonLabel: string;
+  homeButtonAction: HomeButtonAction;
+  homeButtonPagePath: string;
+  homeButtonCommandId: string;
   includeFolders: string[];
   excludeFolders: string[];
   pinnedPages: string[];
@@ -32,6 +38,10 @@ export interface PalmWikiHomeSettings {
 }
 
 export const DEFAULT_SETTINGS: PalmWikiHomeSettings = {
+  homeButtonLabel: "",
+  homeButtonAction: "palmwikiHome",
+  homeButtonPagePath: "",
+  homeButtonCommandId: "",
   includeFolders: [],
   excludeFolders: [],
   pinnedPages: [],
@@ -52,6 +62,14 @@ export function normalizeSettings(value: unknown): PalmWikiHomeSettings {
   const settings = isRecord(value) ? value : {};
 
   return {
+    homeButtonLabel: readTrimmedString(settings.homeButtonLabel),
+    homeButtonAction: readEnum(
+      settings.homeButtonAction,
+      ["palmwikiHome", "page", "command"],
+      "palmwikiHome"
+    ),
+    homeButtonPagePath: readTrimmedString(settings.homeButtonPagePath),
+    homeButtonCommandId: readTrimmedString(settings.homeButtonCommandId),
     includeFolders: normalizeFolderList(readStringArray(settings.includeFolders)),
     excludeFolders: normalizeFolderList(readStringArray(settings.excludeFolders)),
     pinnedPages: uniqueNonEmptyStrings(settings.pinnedPages),
@@ -73,10 +91,7 @@ export function normalizeSettings(value: unknown): PalmWikiHomeSettings {
     pageRankIgnoredSourcePathPatterns: normalizeLineList(
       readStringArray(settings.pageRankIgnoredSourcePathPatterns)
     ),
-    pageRankDebugPath:
-      typeof settings.pageRankDebugPath === "string"
-        ? settings.pageRankDebugPath.trim()
-        : ""
+    pageRankDebugPath: readTrimmedString(settings.pageRankDebugPath)
   };
 }
 
@@ -154,6 +169,10 @@ function uniqueNonEmptyStrings(value: unknown): string[] {
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function readTrimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function readEnum<const T extends string>(

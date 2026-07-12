@@ -10,6 +10,10 @@ test("missing or invalid saved settings fall back to safe defaults", () => {
   assert.deepEqual(normalizeSettings("invalid"), DEFAULT_SETTINGS);
   assert.deepEqual(
     normalizeSettings({
+      homeButtonLabel: 42,
+      homeButtonAction: "elsewhere",
+      homeButtonPagePath: [],
+      homeButtonCommandId: false,
       includeFolders: 42,
       defaultViewMode: "grid",
       indexOnStartup: "yes",
@@ -22,6 +26,10 @@ test("missing or invalid saved settings fall back to safe defaults", () => {
 test("saved settings are normalized and deduplicated", () => {
   assert.deepEqual(
     normalizeSettings({
+      homeButtonLabel: " My Vault Home ",
+      homeButtonAction: "command",
+      homeButtonPagePath: " Notes/Home.md ",
+      homeButtonCommandId: " workspace:close ",
       includeFolders: ["/Notes/", "Notes", " Projects\\"],
       excludeFolders: [" Archive/", "Archive"],
       pinnedPages: ["Notes/A.md", "Notes/A.md", ""],
@@ -38,6 +46,10 @@ test("saved settings are normalized and deduplicated", () => {
       pageRankDebugPath: " Notes/Target.md "
     }),
     {
+      homeButtonLabel: "My Vault Home",
+      homeButtonAction: "command",
+      homeButtonPagePath: "Notes/Home.md",
+      homeButtonCommandId: "workspace:close",
       includeFolders: ["Notes", "Projects"],
       excludeFolders: ["Archive"],
       pinnedPages: ["Notes/A.md"],
@@ -68,4 +80,26 @@ test("unknown enum values and non-boolean flags are rejected", () => {
   assert.equal(settings.defaultSortDirection, DEFAULT_SETTINGS.defaultSortDirection);
   assert.equal(settings.cardSize, DEFAULT_SETTINGS.cardSize);
   assert.equal(settings.performanceDebug, DEFAULT_SETTINGS.performanceDebug);
+});
+
+test("version 0.1.0 settings gain Home button defaults without losing saved values", () => {
+  const settings = normalizeSettings({
+    includeFolders: ["Notes"],
+    defaultViewMode: "table",
+    showTagsOnCards: false
+  });
+
+  assert.equal(settings.homeButtonLabel, "");
+  assert.equal(settings.homeButtonAction, "palmwikiHome");
+  assert.equal(settings.homeButtonPagePath, "");
+  assert.equal(settings.homeButtonCommandId, "");
+  assert.deepEqual(settings.includeFolders, ["Notes"]);
+  assert.equal(settings.defaultViewMode, "table");
+  assert.equal(settings.showTagsOnCards, false);
+});
+
+test("all supported Home button actions are preserved", () => {
+  for (const action of ["palmwikiHome", "page", "command"] as const) {
+    assert.equal(normalizeSettings({ homeButtonAction: action }).homeButtonAction, action);
+  }
 });

@@ -2,7 +2,7 @@
 
 ## Scope
 
-Phase 2 adds resolved Markdown graph metadata, static PageRank-like scoring, graph sort keys, and a link-target filter. It intentionally does not add body full-text search, OCR, multi-vault search, related-score computation, or MarkdownView top-bar injection.
+Phase 2 adds resolved Markdown graph metadata, static PageRank-like scoring, graph sort keys, and a link-target filter. It intentionally did not add body full-text search, OCR, multi-vault search, or related-score computation. A later Unreleased navigation phase adds an isolated left-header Home button without changing Phase 2 graph or index paths.
 
 ## Performance Design
 

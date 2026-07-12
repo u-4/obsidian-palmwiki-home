@@ -6,6 +6,15 @@ The project uses versions from `manifest.json`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-12
+
+- Added a PalmWiki-owned upper-left Home button to normal Markdown and PalmWiki Home tabs, with configurable Home, existing-page, and Obsidian-command actions for Markdown.
+- Added same-leaf rollback for header navigation, guarded command discovery/execution, searchable page and command choosers, and Home-view scroll-to-top behavior.
+- Changed Card clicks in PalmWiki Home to replace the clicked Home tab with the selected Markdown page instead of selecting another tab.
+- Added navigation, compatibility, settings-migration, scroll, cleanup, and no-file-creation tests without adding dependencies.
+- Preserved the complete MIT notices for the adjacent 2Hop reference whose general header-placement and command-compatibility patterns informed this implementation; no runtime dependency was added.
+- Placed the Home button after Obsidian's Back/Forward controls and hid the PalmWiki Home header title to reserve the center header area for future search UI.
+
 ## [0.1.0] - 2026-07-12
 
 - Added the PalmWiki Home custom view, ribbon action, and command.

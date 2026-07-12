@@ -40,6 +40,7 @@ export class PalmWikiHomeView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.containerEl.addClass("palmwiki-home-container");
     this.contentEl.empty();
     this.contentEl.addClass("palmwiki-home-view");
 
@@ -48,22 +49,26 @@ export class PalmWikiHomeView extends ItemView {
     });
 
     this.root = createRoot(rootEl);
-    this.root.render(<PalmWikiHomeRoot plugin={this.plugin} />);
+    this.root.render(<PalmWikiHomeRoot leaf={this.leaf} plugin={this.plugin} />);
+    this.plugin.syncHomeNavigationForLeaf(this.leaf);
     this.plugin.ensureIndexForView();
   }
 
   async onClose(): Promise<void> {
+    this.plugin.removeHomeNavigationForLeaf(this.leaf);
     this.root?.unmount();
     this.root = null;
+    this.containerEl.removeClass("palmwiki-home-container");
     this.contentEl.removeClass("palmwiki-home-view");
   }
 }
 
 interface PalmWikiHomeRootProps {
+  leaf: WorkspaceLeaf;
   plugin: PalmWikiHomePlugin;
 }
 
-function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): React.JSX.Element {
+function PalmWikiHomeRoot({ leaf, plugin }: PalmWikiHomeRootProps): React.JSX.Element {
   const [indexState, setIndexState] = useState<PalmWikiHomeIndexState>(
     plugin.getIndexState()
   );
@@ -225,7 +230,14 @@ function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): React.JSX.Element 
     });
   }, [indexState.lastIndexedAt, plugin]);
 
-  const openPage = useCallback(
+  const openCardPage = useCallback(
+    (path: string) => {
+      void plugin.openPageInLeaf(path, leaf);
+    },
+    [leaf, plugin]
+  );
+
+  const openTablePage = useCallback(
     (path: string) => {
       void plugin.openPage(path);
     },
@@ -345,7 +357,7 @@ function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): React.JSX.Element 
         <CardGrid
           cardSize={plugin.settings.cardSize}
           getImageCacheStats={getImageCacheStats}
-          onOpenPage={openPage}
+          onOpenPage={openCardPage}
           onTogglePinned={togglePinned}
           pages={visiblePages}
           performanceDebug={performanceDebug}
@@ -358,7 +370,7 @@ function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): React.JSX.Element 
       {visiblePages.length > 0 && viewMode === "table" ? (
         <PageTable
           getImageCacheStats={getImageCacheStats}
-          onOpenPage={openPage}
+          onOpenPage={openTablePage}
           onTogglePinned={togglePinned}
           pages={visiblePages}
           performanceDebug={performanceDebug}

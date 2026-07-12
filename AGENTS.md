@@ -30,7 +30,8 @@
 
 ## Vault Deployment
 
-- Confirm the target Vault before each deployment.
+- The user-designated `PalmWiki_LocalTest` Vault is the standing test target. After verified feature updates, deployment there is pre-authorized without asking again.
+- Confirm the target before deploying to any other Vault.
 - Back up an existing plugin installation outside `.obsidian/plugins/` before replacing it.
 - Deploy only `main.js`, `manifest.json`, and `styles.css` unless explicitly required.
 - Verify checksums after copying and never copy Vault notes into this repository.
