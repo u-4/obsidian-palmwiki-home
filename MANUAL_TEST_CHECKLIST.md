@@ -15,6 +15,15 @@
 - `[x]` 設定切替後も索引は維持され、56件の自動テスト、build、公式lint、metadata、diff checkが成功する。
 - `[x]` 利用者操作でCard上にpointerを置き、Cmdを押し続けたときに正しいプレビューが表示されることを確認した。
 
+公開結果:
+
+- Pull Request: [#9](https://github.com/u-4/obsidian-palmwiki-home/pull/9)
+- Release tag commit: `a27bc67`（タグ`0.2.1`）
+- Main CI / PR CI: [29194543903](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29194543903)
+- Release workflow: [29194603482](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29194603482)
+- 公開Release: [PalmWiki Home 0.2.1](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.2.1)
+- 公開成果物のSHA-256: `main.js` `aa9ba96b…fd45`、`manifest.json` `ea12c27f…f831`、`styles.css` `23bfeced…8c90`
+
 ## 0.2.0 リリース判定
 
 確認環境:
