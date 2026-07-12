@@ -23,8 +23,6 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "PalmWiki Home" });
-
     new Setting(containerEl)
       .setName("Include folders")
       .setDesc("One folder path per line, or comma-separated. Empty means all folders.")

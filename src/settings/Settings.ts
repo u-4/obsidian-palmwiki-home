@@ -48,6 +48,38 @@ export const DEFAULT_SETTINGS: PalmWikiHomeSettings = {
   pageRankDebugPath: ""
 };
 
+export function normalizeSettings(value: unknown): PalmWikiHomeSettings {
+  const settings = isRecord(value) ? value : {};
+
+  return {
+    includeFolders: normalizeFolderList(readStringArray(settings.includeFolders)),
+    excludeFolders: normalizeFolderList(readStringArray(settings.excludeFolders)),
+    pinnedPages: uniqueNonEmptyStrings(settings.pinnedPages),
+    defaultViewMode: readEnum(settings.defaultViewMode, ["card", "table"], "card"),
+    defaultSortKey: readEnum(
+      settings.defaultSortKey,
+      ["modified", "created", "title", "lines", "chars", "pageRank", "inlinks", "outlinks"],
+      "modified"
+    ),
+    defaultSortDirection: readEnum(settings.defaultSortDirection, ["asc", "desc"], "desc"),
+    showFoldersOnCards: readBoolean(settings.showFoldersOnCards, true),
+    showTagsOnCards: readBoolean(settings.showTagsOnCards, true),
+    cardSize: readEnum(settings.cardSize, ["small", "medium", "large"], "medium"),
+    indexOnStartup: readBoolean(settings.indexOnStartup, false),
+    performanceDebug: readBoolean(settings.performanceDebug, false),
+    pageRankIgnoredSourceFolders: normalizeFolderList(
+      readStringArray(settings.pageRankIgnoredSourceFolders)
+    ),
+    pageRankIgnoredSourcePathPatterns: normalizeLineList(
+      readStringArray(settings.pageRankIgnoredSourcePathPatterns)
+    ),
+    pageRankDebugPath:
+      typeof settings.pageRankDebugPath === "string"
+        ? settings.pageRankDebugPath.trim()
+        : ""
+  };
+}
+
 export function normalizeFolderPath(path: string): string {
   return path
     .trim()
@@ -104,4 +136,30 @@ export function parseLineListInput(input: string): string[] {
 
 export function formatLineListInput(values: string[]): string {
   return normalizeLineList(values).join("\n");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function uniqueNonEmptyStrings(value: unknown): string[] {
+  return Array.from(new Set(readStringArray(value).filter((item) => item.length > 0)));
+}
+
+function readBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readEnum<const T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  return typeof value === "string" && allowed.includes(value as T) ? (value as T) : fallback;
 }

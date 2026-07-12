@@ -18,14 +18,14 @@ import {
 } from "./core/index/RebuildRequest";
 import { PalmWikiHomeSettingTab } from "./settings/SettingTab";
 import {
-  DEFAULT_SETTINGS,
-  normalizeLineList,
-  normalizeFolderList,
+  normalizeSettings,
   type PalmWikiHomeSettings
 } from "./settings/Settings";
+import { deriveIndexPhase, type IndexPhase } from "./core/index/IndexPhase";
 import { PalmWikiHomeView, PALMWIKI_HOME_VIEW_TYPE } from "./ui/PalmWikiHomeView";
 
 export interface PalmWikiHomeIndexState {
+  indexPhase: IndexPhase;
   pages: PageRecord[];
   isIndexing: boolean;
   indexDirty: boolean;
@@ -103,16 +103,16 @@ export default class PalmWikiHomePlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "open-palmwiki-home",
-      name: "Open PalmWiki Home",
+      id: "open-home",
+      name: "Open home",
       callback: () => {
         void this.openHomeView();
       }
     });
 
     this.addCommand({
-      id: "refresh-palmwiki-home-index",
-      name: "Refresh PalmWiki Home Index",
+      id: "refresh-index",
+      name: "Refresh index",
       callback: () => {
         void this.rebuildIndex("command");
       }
@@ -143,8 +143,6 @@ export default class PalmWikiHomePlugin extends Plugin {
     this.pendingRebuild = null;
     this.cancelScheduledRebuild();
     this.cancelScheduledCacheWrite();
-
-    this.app.workspace.detachLeavesOfType(PALMWIKI_HOME_VIEW_TYPE);
   }
 
   async openHomeView(): Promise<void> {
@@ -177,6 +175,10 @@ export default class PalmWikiHomePlugin extends Plugin {
   ensureIndexForView(): void {
     this.indexRequested = true;
 
+    if (!this.cacheHydrated && !this.unloaded) {
+      void this.hydrateIndexCache();
+    }
+
     if (this.layoutReady && (this.indexDirty || this.pages.length === 0)) {
       void this.prepareIndexForUse("view-open", false);
     }
@@ -184,6 +186,11 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   getIndexState(): PalmWikiHomeIndexState {
     return {
+      indexPhase: deriveIndexPhase({
+        indexDirty: this.indexDirty,
+        isIndexing: this.isIndexing,
+        lastError: this.lastError
+      }),
       pages: this.pages,
       isIndexing: this.isIndexing,
       indexDirty: this.indexDirty,
@@ -492,10 +499,8 @@ export default class PalmWikiHomePlugin extends Plugin {
   }
 
   private async loadSettings(): Promise<void> {
-    this.settings = normalizeSettings({
-      ...DEFAULT_SETTINGS,
-      ...(await this.loadData())
-    });
+    const loadedSettings: unknown = await this.loadData();
+    this.settings = normalizeSettings(loadedSettings);
   }
 
   private async saveSettings(): Promise<void> {
@@ -1093,23 +1098,6 @@ export default class PalmWikiHomePlugin extends Plugin {
       listener(state);
     }
   }
-}
-
-function normalizeSettings(settings: PalmWikiHomeSettings): PalmWikiHomeSettings {
-  return {
-    ...DEFAULT_SETTINGS,
-    ...settings,
-    includeFolders: normalizeFolderList(settings.includeFolders ?? []),
-    excludeFolders: normalizeFolderList(settings.excludeFolders ?? []),
-    pinnedPages: Array.from(new Set(settings.pinnedPages ?? [])).filter(Boolean),
-    pageRankIgnoredSourceFolders: normalizeFolderList(
-      settings.pageRankIgnoredSourceFolders ?? []
-    ),
-    pageRankIgnoredSourcePathPatterns: normalizeLineList(
-      settings.pageRankIgnoredSourcePathPatterns ?? []
-    ),
-    pageRankDebugPath: (settings.pageRankDebugPath ?? "").trim()
-  };
 }
 
 function hasIndexScopeChanged(

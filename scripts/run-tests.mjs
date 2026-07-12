@@ -10,10 +10,15 @@ const workDir = await mkdtemp(join(tmpdir(), "palmwiki-home-tests-"));
 try {
   await esbuild.build({
     entryPoints: [
+      "tests/filterPages.test.ts",
       "tests/fileSnapshot.test.ts",
+      "tests/indexPhase.test.ts",
       "tests/indexCache.test.ts",
       "tests/mapWithConcurrency.test.ts",
-      "tests/rebuildRequest.test.ts"
+      "tests/pageRank.test.ts",
+      "tests/rebuildRequest.test.ts",
+      "tests/settings.test.ts",
+      "tests/sortPages.test.ts"
     ],
     bundle: true,
     external: ["obsidian"],
@@ -21,17 +26,25 @@ try {
     logLevel: "silent",
     outdir: workDir,
     platform: "node",
-    target: "node22"
+    target: "node22",
+    banner: {
+      js: "const window = globalThis;"
+    }
   });
 
   const result = spawnSync(
     process.execPath,
     [
       "--test",
+      join(workDir, "filterPages.test.js"),
       join(workDir, "fileSnapshot.test.js"),
+      join(workDir, "indexPhase.test.js"),
       join(workDir, "indexCache.test.js"),
       join(workDir, "mapWithConcurrency.test.js"),
-      join(workDir, "rebuildRequest.test.js")
+      join(workDir, "pageRank.test.js"),
+      join(workDir, "rebuildRequest.test.js"),
+      join(workDir, "settings.test.js"),
+      join(workDir, "sortPages.test.js")
     ],
     { stdio: "inherit" }
   );

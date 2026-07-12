@@ -63,7 +63,7 @@ interface PalmWikiHomeRootProps {
   plugin: PalmWikiHomePlugin;
 }
 
-function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): JSX.Element {
+function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): React.JSX.Element {
   const [indexState, setIndexState] = useState<PalmWikiHomeIndexState>(
     plugin.getIndexState()
   );
@@ -311,14 +311,18 @@ function PalmWikiHomeRoot({ plugin }: PalmWikiHomeRootProps): JSX.Element {
         <div className="palmwiki-state palmwiki-state-error">{indexState.lastError}</div>
       ) : null}
 
-      {indexState.usingCachedIndex && !indexState.isIndexing ? (
+      {indexState.usingCachedIndex && indexState.indexPhase === "waiting" ? (
         <div className="palmwiki-state">
-          Showing the saved index. Refresh will start when Obsidian is idle.
+          Showing the saved index while the update waits for Obsidian to become idle.
         </div>
       ) : null}
 
-      {indexState.isIndexing ? (
-        <div className="palmwiki-state">Indexing pages...</div>
+      {indexState.indexPhase === "indexing" ? (
+        <div className="palmwiki-state">
+          {indexState.usingCachedIndex
+            ? "Updating the index. Saved pages remain available while this finishes."
+            : "Indexing pages..."}
+        </div>
       ) : null}
 
       {!indexState.isIndexing && indexState.indexDirty && indexState.pages.length === 0 ? (

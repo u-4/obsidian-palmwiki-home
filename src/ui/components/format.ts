@@ -39,7 +39,10 @@ function getCachedDateLabel(
   cache.set(timestamp, label);
 
   if (cache.size > MAX_FORMAT_CACHE_ENTRIES) {
-    cache.delete(cache.keys().next().value);
+    for (const oldestTimestamp of cache.keys()) {
+      cache.delete(oldestTimestamp);
+      break;
+    }
   }
 
   return label;

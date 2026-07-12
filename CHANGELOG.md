@@ -2,9 +2,11 @@
 
 All notable changes to PalmWiki Home will be documented in this file.
 
-The project uses versions from `manifest.json`. It has not made a public release yet.
+The project uses versions from `manifest.json`.
 
-## 0.1.0 - Unreleased
+## [Unreleased]
+
+## [0.1.0] - 2026-07-12
 
 - Added the PalmWiki Home custom view, ribbon action, and command.
 - Added cached Markdown indexing with include/exclude folder settings.
@@ -16,3 +18,7 @@ The project uses versions from `manifest.json`. It has not made a public release
 - Added cooperative cancellation for inactive view-triggered builds and preserved background intent when rebuild requests are coalesced.
 - Kept ordinary metadata events from aborting the stale-first cache load, and made ribbon/command opening focus an existing Home leaf.
 - Added automated coverage for cache validation, bounded-concurrency mapping, rebuild-request merging, and file-snapshot guards.
+- Loaded the saved index as soon as Home opens while retaining idle-delayed validation, and added visible Waiting, Indexing, Complete, and Update failed states.
+- Declared the initial release desktop-only with Obsidian Desktop 1.12.7 as the verified minimum.
+- Added the official Obsidian ESLint rules, lifecycle and saved-data hardening, release metadata verification, and a draft-only release workflow.
+- Added automated coverage for PageRank hub damping, filters, pinned sorting, saved settings, and index status transitions.

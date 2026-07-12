@@ -19,7 +19,7 @@
   - `npm run build`
   - `npm run eslint`
   - `git diff --check`
-- `npm run eslint` currently runs the TypeScript type checker; it is not a rule-based ESLint setup.
+- `npm run eslint` runs the official type-aware Obsidian ESLint rules. `npm run build` also runs the TypeScript type checker.
 
 ## Git And Releases
 

@@ -13,10 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
           cache: npm
@@ -30,11 +32,14 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Type check
+      - name: Obsidian lint
         run: npm run eslint
 
       - name: Test
         run: npm test
+
+      - name: Verify release metadata and assets
+        run: npm run verify:metadata
 
       - name: Check whitespace
         run: git diff --check

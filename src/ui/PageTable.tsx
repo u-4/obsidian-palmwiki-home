@@ -28,7 +28,7 @@ export function PageTable({
   pages,
   performanceDebug,
   resolveImageUrl
-}: PageTableProps): JSX.Element {
+}: PageTableProps): React.JSX.Element {
   const containerRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({
@@ -222,7 +222,7 @@ const VirtualPageTableRow = React.memo(function VirtualPageTableRow({
   onTogglePinned,
   page,
   rowIndex
-}: VirtualPageTableRowProps): JSX.Element {
+}: VirtualPageTableRowProps): React.JSX.Element {
   const visibleTags = page.tags.slice(0, MAX_VISIBLE_TAGS);
   const hiddenTagCount = Math.max(0, page.tags.length - visibleTags.length);
 

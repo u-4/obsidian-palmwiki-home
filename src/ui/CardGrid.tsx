@@ -39,7 +39,7 @@ export function CardGrid({
   resolveImageUrl,
   showFolders,
   showTags
-}: CardGridProps): JSX.Element {
+}: CardGridProps): React.JSX.Element {
   const containerRef = useRef<HTMLElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [visibleRange, setVisibleRange] = useState({ startRow: 0, endRow: 8 });

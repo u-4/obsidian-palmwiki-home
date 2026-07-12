@@ -2,21 +2,66 @@
 
 状態の目安:
 
-- `[x]` 自動 build / static check で確認済み
-- `[ ]` Obsidian UI 上で手動確認が必要
+- `[x]` 自動確認またはObsidian実画面で確認済み
+- `[ ]` 未実施、または公開操作時にだけ確認する項目
+
+## 0.1.0 リリース判定（必須）
+
+この節を0.1.0の公開可否判定に使用する。後続の詳細一覧は回帰確認用の項目集であり、未確認項目が自動的に0.1.0の公開停止を意味するものではない。
+
+確認環境:
+
+- 日付: 2026-07-12
+- Git commit: `codex/release-0.1.0-prep` のリリースPR head（GitHub CIで固定）
+- Obsidian: Desktop 1.12.7 / macOS
+- テストVault: `PalmWiki_LocalTest`（コピーVault）
+
+自動確認:
+
+- `[x]` `npm ci`から`npm run check`まで成功する。
+- `[x]` `npm audit --audit-level=moderate`が既知の脆弱性0件で成功する。
+- `[x]` Obsidian公式ESLintが警告0件で成功する。
+- `[x]` 自動テスト31件が全件成功する。
+- `[x]` `manifest.json`、`package.json`、`package-lock.json`、`versions.json`が0.1.0 / Obsidian 1.12.7で一致する。
+- `[x]` `main.js`、`manifest.json`、`styles.css`が存在し、production build、source mapなし、Git未追跡である。
+
+Obsidian実画面:
+
+- `[x]` 配布前バックアップが`.obsidian/plugins/`の外にあり、配布した3成果物のSHA-256が一致する。
+- `[x]` `Index on startup` OFFで、Homeが非表示の起動時にfull index/cache writeが始まらない。
+- `[x]` プラグイン再読み込み後、保存済みページが検証buildより先に表示される。
+- `[x]` 状態が`Waiting`→`Indexing`→`Complete`と変化し、一覧は処理中も利用できる。
+- `[x]` warm検証buildで未変更本文を全件読み直さない。
+- `[x]` 待機中のRefreshが1回だけ実行され、後から不要な二重buildが始まらない。
+- `[x]` Card/Table、PageRank/Inlinks/Outlinks、Asc/Desc、Quick filter 0件、リンク先filterがエラーなく動く。
+- `[x]` PageRank上位が日記など単一hub由来だけで支配されず、PR 1.000の大量同率がない。
+- `[x]` cardからnoteを開き、ribbonで既存Homeへ戻れる。
+- `[x]` pin、include/exclude、表示設定が再読み込み後も保持される。
+- `[x]` 破損した`index-cache.json`から起動不能にならず、再構築で復旧する。
+- `[x]` PalmWiki Home由来の未処理エラー、二重build、`File not found`がない。コンソールの既存1件は別プラグイン由来。
+
+公開物:
+
+- `[x]` README、既知の制限、CHANGELOG、desktop-only表記を最終確認する。
+- `[x]` Release workflowはタグ`0.1.0`（`v`なし）だけを受け付け、Releaseを下書きで作成する。
+- `[x]` Release workflowが添付する成果物は`main.js`、`manifest.json`、`styles.css`の3点だけである。
+- `[ ]` 実際のタグと下書きReleaseを作成し、GitHub画面で添付物を確認する。
+- `[ ]` Public化とRelease公開は利用者の明示承認後にだけ行う。
+
+最後の2項目はリリース候補の品質不足ではなく、公開承認後にだけ行う外部操作のため意図的に未実施。
 
 ## Build check
 
-- `[x]` `npm install` を実行する。
+- `[x]` `npm ci` を実行する。
 - `[x]` `npm run build` を実行する。
-- `[x]` `npm run eslint` を実行する。現在は TypeScript typecheck 相当。
+- `[x]` `npm run eslint` を実行する。Obsidian公式の型情報付きESLint。
 - `[x]` `git diff --check` を実行する。
 
 ## テスト Vault での smoke test
 
 - `[ ]` プラグインをテスト Vault にインストールする。
 - `[ ]` Obsidian でプラグインを有効化する。
-- `[ ]` command palette から `Open PalmWiki Home` を実行する。
+- `[ ]` command palette から `PalmWiki Home: Open home` を実行する。
 - `[ ]` Home view が開くことを確認する。
 - `[ ]` Markdown ページが card として表示されることを確認する。
 - `[ ]` card をクリックすると正しい note が開くことを確認する。

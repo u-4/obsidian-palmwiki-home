@@ -21,7 +21,7 @@ export function extractPageMetadata(
   pinned: boolean,
   indexOrder: number
 ): PageRecord {
-  const frontmatter = cache?.frontmatter;
+  const frontmatter = getFrontmatter(cache);
   const frontmatterTitle = normalizeString(frontmatter?.title);
   const aliases = uniqueStrings([
     ...extractStringList(frontmatter?.aliases),
@@ -100,7 +100,8 @@ function extractTags(cache: CachedMetadata | null): string[] {
     }
   }
 
-  const frontmatterTags = cache?.frontmatter?.tags ?? cache?.frontmatter?.tag;
+  const frontmatter = getFrontmatter(cache);
+  const frontmatterTags = frontmatter?.tags ?? frontmatter?.tag;
   for (const tag of extractFrontmatterTags(frontmatterTags)) {
     const normalized = normalizeTag(tag);
     if (normalized) {
@@ -129,6 +130,15 @@ function normalizeTag(tag: string): string | undefined {
   }
 
   return trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+}
+
+function getFrontmatter(cache: CachedMetadata | null): Record<string, unknown> | undefined {
+  const frontmatter: unknown = cache?.frontmatter;
+  return isRecord(frontmatter) ? frontmatter : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function uniqueStrings(values: string[]): string[] {

@@ -58,13 +58,13 @@ export function HomeToolbar({
   tagFilter,
   totalCount,
   viewMode
-}: HomeToolbarProps): JSX.Element {
+}: HomeToolbarProps): React.JSX.Element {
   const linkTargetFilterRef = useRef<HTMLDivElement | null>(null);
   const [linkTargetPopoverOpen, setLinkTargetPopoverOpen] = useState(false);
   const lastIndexed = indexState.lastIndexedAt
     ? new Date(indexState.lastIndexedAt).toLocaleTimeString()
-    : "Not indexed";
-  const indexStatus = indexState.indexDirty ? `${lastIndexed} · stale` : lastIndexed;
+    : null;
+  const indexStatus = getIndexStatusPresentation(indexState, lastIndexed);
   const showLinkTargetSuggestions =
     linkTargetPopoverOpen && linkTargetSuggestions.length > 0;
 
@@ -98,7 +98,21 @@ export function HomeToolbar({
         <div>
           <h1>PalmWiki Home</h1>
           <div className="palmwiki-toolbar-meta">
-            {resultCount} / {totalCount} pages · {indexStatus}
+            <span>{resultCount} / {totalCount} pages</span>
+            <span
+              aria-atomic="true"
+              aria-live="polite"
+              className="palmwiki-index-status-group"
+              role="status"
+            >
+              <span
+                className={`palmwiki-index-status is-${indexState.indexPhase}`}
+              >
+                <span aria-hidden="true" className="palmwiki-index-status-dot" />
+                {indexStatus.label}
+              </span>
+              <span>{indexStatus.detail}</span>
+            </span>
           </div>
         </div>
         <button
@@ -258,4 +272,45 @@ export interface LinkTargetSuggestion {
   folder: string;
   path: string;
   title: string;
+}
+
+interface IndexStatusPresentation {
+  detail: string;
+  label: string;
+}
+
+function getIndexStatusPresentation(
+  state: PalmWikiHomeIndexState,
+  lastIndexed: string | null
+): IndexStatusPresentation {
+  const savedDetail = lastIndexed ? `saved ${lastIndexed}` : "no saved index";
+
+  switch (state.indexPhase) {
+    case "waiting":
+      return {
+        label: "Waiting",
+        detail: state.usingCachedIndex
+          ? `Showing saved index · ${savedDetail}`
+          : "Waiting for Obsidian to become idle"
+      };
+    case "indexing":
+      return {
+        label: "Indexing",
+        detail: state.usingCachedIndex
+          ? `Saved pages remain available · ${savedDetail}`
+          : "Building the page index"
+      };
+    case "complete":
+      return {
+        label: "Complete",
+        detail: lastIndexed ? `Updated ${lastIndexed}` : "Index is up to date"
+      };
+    case "error":
+      return {
+        label: "Update failed",
+        detail: state.usingCachedIndex
+          ? `Saved pages remain available · ${savedDetail}`
+          : "Use Refresh to try again"
+      };
+  }
 }

@@ -228,7 +228,7 @@ function buildPathPatternMatchers(patterns: string[]): Array<(path: string) => b
     try {
       const regex = new RegExp(pattern);
       return (path: string) => regex.test(path);
-    } catch (_error) {
+    } catch {
       return (path: string) => path.includes(pattern);
     }
   });
@@ -299,7 +299,7 @@ async function getBodyMetadata(
     }
 
     return bodyMetadata;
-  } catch (error) {
+  } catch {
     return null;
   } finally {
     if (stats) {
@@ -380,6 +380,6 @@ function throwIfIndexBuildCancelled(shouldAbort: (() => boolean) | undefined): v
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => {
-    globalThis.setTimeout(resolve, 0);
+    window.setTimeout(resolve, 0);
   });
 }

@@ -46,9 +46,58 @@
 }
 
 .palmwiki-toolbar-meta {
+  align-items: center;
   color: var(--palmwiki-text-muted);
+  display: flex;
+  flex-wrap: wrap;
   font-size: 12px;
+  gap: 6px 10px;
   margin-top: 3px;
+}
+
+.palmwiki-index-status-group,
+.palmwiki-index-status {
+  align-items: center;
+  display: inline-flex;
+}
+
+.palmwiki-index-status-group {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.palmwiki-index-status {
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--palmwiki-border);
+  border-radius: 999px;
+  color: var(--text-normal);
+  font-weight: 600;
+  gap: 5px;
+  line-height: 1.4;
+  padding: 1px 7px;
+}
+
+.palmwiki-index-status-dot {
+  background: currentColor;
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+.palmwiki-index-status.is-waiting {
+  color: var(--text-warning, var(--color-orange));
+}
+
+.palmwiki-index-status.is-indexing {
+  color: var(--interactive-accent);
+}
+
+.palmwiki-index-status.is-complete {
+  color: var(--text-success, var(--color-green));
+}
+
+.palmwiki-index-status.is-error {
+  color: var(--text-error);
 }
 
 .palmwiki-toolbar-controls {

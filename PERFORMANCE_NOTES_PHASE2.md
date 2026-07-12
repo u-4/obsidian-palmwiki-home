@@ -32,7 +32,7 @@ When `Performance debug logging` is enabled, expected Phase 2 logs include:
 
 ## Copied Real-Vault Observation
 
-Before Phase 2, testing used a copied real vault with roughly 7,000 Markdown pages. Phase 1 virtualized card/table switching and sorting were reported smooth. The final idle/persistent-index candidate was retested in Obsidian with Computer Use on 2026-07-12; aggregate results are recorded below.
+Before Phase 2, testing used a copied real vault with roughly 7,000 Markdown pages. Phase 1 virtualized card/table switching and sorting were reported smooth. The current 0.1.0 release candidate was retested in Obsidian with Computer Use on 2026-07-12; aggregate results are recorded below.
 
 ## 2026-07-12 Local Cache Benchmark
 
@@ -60,6 +60,13 @@ The copied test Vault was opened as a new Obsidian window with `indexOnStartup` 
 - Toolbar Refresh: 1,175 ms, 7,145 cache hits, 0 body reads, no pending follow-up rebuild.
 - Card/Table, PageRank/Inlinks/Outlinks, Asc/Desc, and an empty-result Quick filter switched without indexing, error, or missing-file state.
 - Opening a card and returning through the ribbon selected the existing Home view successfully.
+- A link-target filter returned the expected eight synthetic backlink pages and cleared cleanly.
+- Pinning a synthetic page survived a plugin restart, and the pin was then removed.
+- An include-folder setting reduced the index to 42 synthetic pages and survived a plugin restart.
+- An exclude-folder setting reduced the index from 7,145 to 7,103 pages; the default Table setting also survived a plugin restart.
+- A deliberately malformed `index-cache.json` showed `0 / 0` with `Waiting`, then `Indexing`, and recovered automatically to `7,145 / 7,145` with `Complete`.
+- The developer console contained no PalmWiki Home error. One pre-existing error was attributed to another installed plugin.
+- After testing, settings were restored to startup indexing off, performance logging off, no include/exclude folders, no pins, Card view, updated-time descending.
 
 An earlier run with exactly one file identity changed reused 7,144 body entries and read only that one file, with maximum concurrent body reads 1. Together with the bounded-concurrency unit test, this is consistent with the configured maximum of 2.
 

@@ -7,8 +7,11 @@
     "dev": "node esbuild.config.mjs",
     "typecheck": "tsc -noEmit -skipLibCheck",
     "build": "npm run typecheck && node esbuild.config.mjs production",
-    "eslint": "npm run typecheck",
-    "test": "node scripts/run-tests.mjs"
+    "eslint": "eslint src tests package.json manifest.json --max-warnings=0",
+    "test": "node scripts/run-tests.mjs",
+    "verify:metadata": "node scripts/verify-release.mjs --allow-unreleased",
+    "verify:release": "node scripts/verify-release.mjs",
+    "check": "npm run build && npm run eslint && npm test && npm run verify:metadata && git diff --check"
   },
   "keywords": [
     "obsidian",
@@ -27,12 +30,18 @@
   },
   "homepage": "https://github.com/u-4/obsidian-palmwiki-home#readme",
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@eslint/json": "^0.14.0",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "esbuild": "^0.25.12",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.1",
+    "globals": "^17.7.0",
     "obsidian": "latest",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.63.0"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -18,7 +18,7 @@ export const PageCard = React.memo(function PageCard({
   page,
   showFolder,
   showTags
-}: PageCardProps): JSX.Element {
+}: PageCardProps): React.JSX.Element {
   const openPage = (): void => onOpenPage(page.path);
   const activateOpenArea = (event: React.KeyboardEvent): void => {
     if (event.key === "Enter" || event.key === " ") {
