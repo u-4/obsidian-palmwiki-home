@@ -22,3 +22,4 @@ The project uses versions from `manifest.json`.
 - Declared the initial release desktop-only with Obsidian Desktop 1.12.7 as the verified minimum.
 - Added the official Obsidian ESLint rules, lifecycle and saved-data hardening, release metadata verification, and a draft-only release workflow.
 - Added automated coverage for PageRank hub damping, filters, pinned sorting, saved settings, and index status transitions.
+- Embedded the complete MIT notice for bundled React, React DOM, and Scheduler code in the production artifact.

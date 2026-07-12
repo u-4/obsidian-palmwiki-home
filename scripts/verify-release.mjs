@@ -11,6 +11,7 @@ const packageLock = await readJson("package-lock.json");
 const manifest = await readJson("manifest.json");
 const versions = await readJson("versions.json");
 const changelog = await readFile("CHANGELOG.md", "utf8");
+const thirdPartyNotices = (await readFile("THIRD_PARTY_NOTICES.md", "utf8")).trim();
 const allowUnreleased = process.argv.includes("--allow-unreleased");
 const requestedVersion = process.argv.slice(2).find((argument) => !argument.startsWith("--"));
 const expectedVersion = process.env.RELEASE_TAG || requestedVersion || manifest.version;
@@ -61,10 +62,37 @@ for (const asset of RELEASE_ASSETS) {
   checksums.push(`${createHash("sha256").update(contents).digest("hex")}  ${asset}`);
 }
 
+const mainJs = await readFile("main.js", "utf8");
+assert(!/sourceMappingURL/.test(mainJs), "Production main.js must not reference a source map");
 assert(
-  !/sourceMappingURL/.test(await readFile("main.js", "utf8")),
-  "Production main.js must not reference a source map"
+  thirdPartyNotices.includes("Permission is hereby granted") &&
+    thirdPartyNotices.includes("Copyright (c) Facebook, Inc. and its affiliates."),
+  "THIRD_PARTY_NOTICES.md must contain the complete bundled MIT notice"
 );
+assert(
+  mainJs.includes(thirdPartyNotices),
+  "Production main.js must embed THIRD_PARTY_NOTICES.md"
+);
+
+for (const [packageName, noticeName] of [
+  ["react", "React"],
+  ["react-dom", "React DOM"],
+  ["scheduler", "Scheduler"]
+]) {
+  const bundledVersion = packageLock.packages?.[`node_modules/${packageName}`]?.version;
+  assert(typeof bundledVersion === "string", `${packageName} is missing from package-lock.json`);
+  assert(
+    thirdPartyNotices.includes(`${noticeName} ${bundledVersion}`),
+    `THIRD_PARTY_NOTICES.md must list ${noticeName} ${bundledVersion}`
+  );
+  const installedLicense = (
+    await readFile(`node_modules/${packageName}/LICENSE`, "utf8")
+  ).trim();
+  assert(
+    thirdPartyNotices.includes(installedLicense),
+    `THIRD_PARTY_NOTICES.md must include the installed ${noticeName} license verbatim`
+  );
+}
 
 const forbiddenTrackedFiles = runGit([
   "ls-files",

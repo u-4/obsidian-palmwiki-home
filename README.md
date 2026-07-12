@@ -110,4 +110,4 @@ npm run check
 
 ## ライセンス
 
-[MIT License](LICENSE.md)
+PalmWiki Home本体は[MIT License](LICENSE.md)です。配布用`main.js`に同梱するReact系ライブラリのMIT許諾文は、[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)で確認できます。同じ全文をproduction build時に`main.js`へ埋め込みます。
