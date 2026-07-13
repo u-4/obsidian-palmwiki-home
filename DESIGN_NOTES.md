@@ -12,11 +12,13 @@ The runtime entrypoint is `src/main.ts`. The code is split into:
 - `src/core/graph/` for resolved Markdown graph construction and static PageRank-like scoring.
 - `src/core/sort/` for pinned-first stable sorting, including graph-derived sort keys.
 - `src/core/filters/` for include/exclude folder checks and simple UI filters.
-- `src/core/search/` for query normalization.
+- `src/core/search/` for normalization, fuzzy page-name suggestions, full-text ranking, raw-source match resolution, and the independent search-cache schema.
 - `src/settings/` for persisted plugin settings and the settings tab.
 - `src/ui/` for the React-based custom view.
 - `src/homeNavigation.ts` for Home target parsing, page resolution, left-header placement, button lifecycle, and Home scroll ownership.
 - `src/obsidianCompat.ts` for the minimal runtime-checked boundary around Obsidian's command manager.
+- `src/searchIndex.ts` for the lazy, differential full-text index lifecycle.
+- `src/homeSearch.ts` and the search UI components for header placement, safe page-name validation, suggestions, and results.
 
 ## PageRecord fields
 
@@ -57,6 +59,20 @@ Body reads are concurrency-limited to 2 files at a time to reduce contention wit
 After a successful rebuild, the plugin saves `PageRecord` data and body-derived metadata to `index-cache.json` inside its Vault plugin directory. The write runs after the UI update and waits for idle time. It stores derived titles, tags, short descriptions, link metadata, and body statistics, not full Markdown bodies.
 
 Cache entries include a schema version, save time, and a fingerprint of index-affecting settings. Invalid JSON, an old schema, or a settings mismatch is ignored without preventing plugin startup. At load time, records for missing Markdown files are removed, body metadata is reused only when path, mtime, and size still match, and current pin settings are overlaid. Cached pages are deliberately treated as stale: they can render first, then an idle rebuild revalidates current metadata, links, and PageRank. Ordinary vault/metadata notifications therefore mark the index dirty but do not abort an in-progress cache read; manual Refresh, scope-setting changes, and unload still invalidate that read when applying it would conflict with newer work.
+
+## Full-text search index
+
+Full-text search uses a second cache, `search-cache.json`, rather than expanding `index-cache.json`. Each entry stores canonical `TFile.path`, modified time, file size, and a locally normalized Markdown body. The schema, include/exclude fingerprint, 64 MiB persistent-size cap, validation, and failure recovery are independent from the display index. Before reading bodies, the manager rejects a scope containing a file above 8 MiB or more than 64 MiB of Markdown source; it also stops before estimated normalized-text RAM exceeds 128 MiB and never publishes the partial snapshot. Compatibility-normalization output is bounded before allocation/retention so a malformed cache cannot expand past that estimate. Scope changes, relevant modify/delete/rename events, invalid or stale hydration, and explicit full rebuilds purge the previous disk cache so old or newly excluded text is not left behind. Events wholly outside the configured search scope do not invalidate this cache.
+
+The search manager is requested when a Home view opens, but waits for two-stage delay/idle scheduling before loading or reading bodies. Submitting a body search promotes the request to immediate work. Initial and changed-file reads use the same bounded concurrency of two and periodically yield to the event loop. Unchanged entries are reused only when path, modified time, and size match.
+
+File create, modify, delete, rename, scope change, and manual rebuild each advance an input generation. A single-flight work loop discards an obsolete snapshot and repeats once for the newest generation; concurrent callers await the same promise. This prevents an entry removed by a live file event from being reintroduced by an older build. Read failures reach a stable error state and require Refresh or a later file change rather than creating an automatic retry loop.
+
+Disk writes wait for 30 seconds of quiet time plus an idle callback. Persistent size is counted entry by entry before the full payload is serialized, and UTF-8 byte counting does not allocate a second full-size byte array. A pending scope purge is completed after any already-started write so stale full text cannot be the final file on disk. Search logging contains duration and aggregate counts only, never the query or note body.
+
+A sanitized read-only benchmark over 7,147 Markdown pages (19,249,924 source bytes and 11,047,709 characters) estimated a 19,988,906-byte search cache. Standalone sequential read/normalization took about 22.1 seconds, while the three representative prepared-index queries completed in 32.3–64.3 ms. This establishes the expected scale, not UI compatibility; the real plugin still requires idle-build and warm-cache checks in Obsidian.
+
+Query relation traversal is deterministic and bounded per positive term to 20,000 direct-link edge visits and 50,000 two-hop edge visits. This keeps dense hubs from monopolizing the UI thread; performance diagnostics report visits and capped-term counts, while the known limitations disclose that candidates beyond the cap may be omitted.
 
 ## Graph index
 
@@ -115,7 +131,30 @@ The custom view type is `palmwiki-home-view`, with display name `PalmWiki Home`.
 
 `HomeNavigationManager` owns exactly one `.palmwiki-vault-home-button` per eligible Markdown or PalmWiki Home leaf. It enumerates split leaves on layout and active-leaf changes, excludes hover/popover contexts and all unrelated view types, updates label/title/ARIA state after settings changes, and removes its listeners and elements on view close or plugin unload. The unavoidable `.view-header-left` / title-container DOM placement is isolated in that module. Element creation, computed style, animation, and reduced-motion checks use each target element's `ownerDocument` and `defaultView` so pop-out windows do not use the main window accidentally.
 
-Within the left header, the button is inserted immediately before `.view-header-title-container`, leaving Obsidian's Back/Forward controls to its left. PalmWiki Home adds a view-scoped container class that hides only `.view-header-title`; the title container remains available for a future search control.
+Within the left header, the button is inserted immediately before `.view-header-title-container`, leaving Obsidian's Back/Forward controls to its left. PalmWiki Home adds a view-scoped container class that hides only `.view-header-title`; the remaining title container hosts the search control.
+
+That reserved title-container now owns one `.palmwiki-home-search-host` per PalmWiki Home leaf. The host is isolated from hover/popover contexts and is recreated if a leaf moves to another `ownerDocument`, so outside-click listeners and timers bind to the pop-out window. The command `PalmWiki Home: Focus search` exposes Obsidian's normal user-configurable hotkey mechanism.
+
+An empty focused search field displays up to ten paths from `Workspace.getLastOpenFiles()`. Typing computes up to ten title/basename/alias suggestions after a 100 ms delay. Exact, prefix, substring, subsequence, and bounded typo matches are ordered in that sequence; NFKC, case, and hiragana/katakana normalization are shared with exact-page detection. Old suggestions are disabled during the delay, so a fast Arrow/Enter sequence cannot open a candidate from the previous input.
+
+Enter with no selected suggestion submits a body query. Positive whitespace-separated terms are ANDed, quoted terms remain contiguous, and a leading minus excludes a term or quoted phrase. Results are grouped by evidence completeness and then ranked with the following largest-to-smallest weighted contributions:
+
+```text
+0.45 * effective PageRank
+0.35 * direct text/metadata match
+0.15 * direct-link specificity
+0.05 * best two-hop specificity
+```
+
+PageRank is attenuated when direct match quality is weak. Title, basename, alias, tag, path, and body evidence are inspectable in the result. Link specificity is damped by endpoint degree, and only the best path is kept, so multiple broad hubs do not accumulate authority. A pure two-hop candidate without body, page-name, or direct-link evidence is excluded. Pin state is used only after an exact relevance tie and never forces a weaker result above a stronger one.
+
+Results initially render 100 rows and can grow to a hard maximum of 500. Visible body-match rows lazily reread only their current raw source to show an original-text snippet. The same bounded preview cache is reused on click. Before delayed navigation, the source view, state, active leaf, and per-leaf navigation generation are rechecked so an older read cannot overwrite a later user action.
+
+Opening a result replaces the owning Home leaf. The raw body is re-resolved after NFKC normalization with source offsets mapped by normalization clusters. Multiple terms prefer the line containing the most terms. Source mode selects and scrolls the match; Reading view receives a best-effort line state because rendered-text selection has no stable public API.
+
+If no page in the entire Vault has an equivalent title, basename, or alias, results show a create action. It opens an explicit confirmation modal, validates a cross-platform-safe filename, shows the destination returned by `FileManager.getNewFileParent()`, rechecks for races, and creates a blank Markdown file only after confirmation. Search never creates a note merely from Enter.
+
+`PalmWikiHomeView.navigation` is enabled. Query draft/submission, result limit, view/sort/filter state are saved in ViewState, while the actual scroll offset is ephemeral state. Obsidian Back/Forward therefore reconstructs and reruns the saved search. A left-header Home transition supplies no saved state and intentionally starts fresh.
 
 On Markdown leaves, the button either replaces the clicked leaf with `palmwiki-home-view`, opens a resolved existing Markdown file in that leaf, or activates that leaf and asks Obsidian's guarded command manager to execute the selected command. ViewState and ephemeral state are captured before Home/page transitions and restored best-effort on failure. Page resolution tries exact paths before interpreting Wiki alias/heading delimiters, never calls a file-creation API, and supports aliases from cached frontmatter. Ribbon and `Open home` command behavior remains separate: it still reveals an existing Home leaf or creates one only when none exists.
 
@@ -176,7 +215,7 @@ Pinned paths are migrated on Markdown rename when the old path was pinned. Delet
 
 ## Quick filter
 
-The Phase 1 quick filter remains a title/path/folder/alias/tag filter, not full-text body search. It uses NFKC normalization and case folding, then treats whitespace-separated query tokens as AND terms.
+The Phase 1 quick filter remains a lightweight title/path/folder/alias/tag filter separate from the header full-text search. It uses NFKC normalization and case folding, then treats whitespace-separated query tokens as AND terms. Its folder, tag, and link-target controls are also applied to submitted full-text results without rebuilding either index.
 
 `PageRecord` stores precomputed `filterText`, `sortTitle`, `sortPath`, and `indexOrder` values at index-build time. Quick filter checks the tokenized query against `filterText`, avoiding per-render allocation and normalization of title/path/alias/tag field arrays.
 
@@ -194,8 +233,8 @@ Phase 2 adds numeric sort keys for Page rank, Inlinks, and Outlinks. Default sor
 
 ## Performance debug
 
-The `performanceDebug` setting defaults to `false`. When enabled, the plugin logs timing and count information with the prefix `[PalmWiki Home perf]`, including persistent cache load/save time and size, graph build time, page rank time, index build time, body cache hits/reads, filter time, sort time, visible result count, mounted card window size, mounted table window size, view mode changes, image URL cache hit/miss counts, view activation, and skipped inactive rebuilds.
+The `performanceDebug` setting defaults to `false`. When enabled, the plugin logs timing and count information with the prefix `[PalmWiki Home perf]`, including persistent cache load/save time and size, graph build time, page rank time, index build time, search-index reuse/read counts, full-text search time and result count, body cache hits/reads, filter time, sort time, visible result count, mounted card window size, mounted table window size, view mode changes, image URL cache hit/miss counts, view activation, and skipped inactive rebuilds. Full-text query strings and note bodies are not logged.
 
 ## Deferred work
 
-The implementation intentionally defers full-text body search, related scoring, OCR search, multi-vault search, and recent-page search focus UI.
+The implementation intentionally defers OCR/attachment-content search, multi-vault search, vector/AI semantic search, synonym expansion, and native mobile compatibility claims.

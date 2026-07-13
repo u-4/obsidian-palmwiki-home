@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { PalmWikiHomeIndexState } from "../main";
+import type { SearchIndexState } from "../searchIndex";
 import type {
   PalmWikiSortDirection,
   PalmWikiSortKey,
@@ -11,6 +12,7 @@ interface HomeToolbarProps {
   availableTags: string[];
   folderFilter: string;
   indexState: PalmWikiHomeIndexState;
+  searchIndexState: SearchIndexState;
   linkTargetPath: string;
   linkTargetQuery: string;
   linkTargetSuggestions: LinkTargetSuggestion[];
@@ -38,6 +40,7 @@ export function HomeToolbar({
   availableTags,
   folderFilter,
   indexState,
+  searchIndexState,
   linkTargetPath,
   linkTargetQuery,
   linkTargetSuggestions,
@@ -65,6 +68,7 @@ export function HomeToolbar({
     ? new Date(indexState.lastIndexedAt).toLocaleTimeString()
     : null;
   const indexStatus = getIndexStatusPresentation(indexState, lastIndexed);
+  const searchStatus = getSearchStatusPresentation(searchIndexState);
   const showLinkTargetSuggestions =
     linkTargetPopoverOpen && linkTargetSuggestions.length > 0;
 
@@ -75,8 +79,10 @@ export function HomeToolbar({
 
     const closeOnOutsidePointerDown = (event: PointerEvent): void => {
       const target = event.target;
+      const ownerWindow = linkTargetFilterRef.current?.ownerDocument.defaultView;
       if (
-        target instanceof Node &&
+        ownerWindow &&
+        target instanceof ownerWindow.Node &&
         linkTargetFilterRef.current?.contains(target)
       ) {
         return;
@@ -85,12 +91,13 @@ export function HomeToolbar({
       setLinkTargetPopoverOpen(false);
     };
 
-    document.addEventListener("pointerdown", closeOnOutsidePointerDown);
+    const ownerDocument = linkTargetFilterRef.current?.ownerDocument;
+    ownerDocument?.addEventListener("pointerdown", closeOnOutsidePointerDown);
 
     return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointerDown);
+      ownerDocument?.removeEventListener("pointerdown", closeOnOutsidePointerDown);
     };
-  }, [linkTargetPopoverOpen]);
+  });
 
   return (
     <header className="palmwiki-toolbar">
@@ -113,11 +120,27 @@ export function HomeToolbar({
               </span>
               <span>{indexStatus.detail}</span>
             </span>
+            <span
+              aria-atomic="true"
+              aria-live="polite"
+              className="palmwiki-index-status-group"
+              role="status"
+            >
+              <span className={`palmwiki-index-status is-${searchIndexState.phase}`}>
+                <span aria-hidden="true" className="palmwiki-index-status-dot" />
+                {searchStatus.label}
+              </span>
+              <span>{searchStatus.detail}</span>
+            </span>
           </div>
         </div>
         <button
           className="palmwiki-button"
-          disabled={indexState.isIndexing}
+          disabled={
+            indexState.isIndexing ||
+            searchIndexState.phase === "loading" ||
+            searchIndexState.phase === "indexing"
+          }
           onClick={onRefresh}
           type="button"
         >
@@ -311,6 +334,41 @@ function getIndexStatusPresentation(
         detail: state.usingCachedIndex
           ? `Saved pages remain available · ${savedDetail}`
           : "Use Refresh to try again"
+      };
+  }
+}
+
+function getSearchStatusPresentation(
+  state: SearchIndexState
+): IndexStatusPresentation {
+  switch (state.phase) {
+    case "waiting":
+      return {
+        label: "Search waiting",
+        detail:
+          state.indexedCount > 0
+            ? `${state.indexedCount.toLocaleString()} cached pages`
+            : "Starts after PalmWiki Home becomes idle"
+      };
+    case "loading":
+      return {
+        label: "Loading search",
+        detail: "Reading the local search cache"
+      };
+    case "indexing":
+      return {
+        label: "Indexing search",
+        detail: `${state.processedCount.toLocaleString()} / ${state.totalCount.toLocaleString()} pages`
+      };
+    case "ready":
+      return {
+        label: "Search ready",
+        detail: `${state.indexedCount.toLocaleString()} pages`
+      };
+    case "error":
+      return {
+        label: "Search incomplete",
+        detail: `${state.indexedCount.toLocaleString()} / ${state.totalCount.toLocaleString()} pages`
       };
   }
 }

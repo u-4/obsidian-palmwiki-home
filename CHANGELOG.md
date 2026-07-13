@@ -6,6 +6,15 @@ The project uses versions from `manifest.json`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-13
+
+- Added a Cosense-style Home-header search field with recent-page suggestions, fuzzy page-name completion, and an Obsidian-configurable `Focus search` command.
+- Added local full-text search with AND, quoted phrase, and exclusion syntax, plus explainable title/body/tag/path, direct-link, two-hop, and PageRank-assisted ranking.
+- Added a separate lazy differential `search-cache.json`, bounded two-file reads, stale-build cancellation, cache-scope purging, and runtime-data release guards without adding dependencies.
+- Added same-leaf search-result opening, original-text snippets, Source-mode match selection, Back/Forward search-state restoration, and fresh state when returning through the Home button.
+- Added an explicit confirmation flow for blank Markdown page creation in Obsidian's configured new-note location, with whole-Vault duplicate and filename safety checks.
+- Fixed multi-line search results being collapsed to Obsidian's 30px button height, and made each result a distinct row with a one-line title, two-line highlighted snippet, and non-overlapping Pin control.
+- Bounded full-text queries, normalization memory, and dense-graph relation traversal; avoided full-size byte-array duplication during cache sizing; restored scroll only after asynchronous results render; and cancelled stale page creation after its source Home tab changes.
 - Strengthened public-repository governance with protected `main`, CI-required Pull Requests, Dependabot, Secret scanning, Push protection, private vulnerability reporting, and contributor/security documentation.
 - Recorded that macOS Desktop is the only verified environment; iOS remains a future native-device check after search work, with iPhone Mirroring treated as supplementary only.
 

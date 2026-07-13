@@ -1,6 +1,8 @@
 import {
+  MarkdownView,
   normalizePath,
   Notice,
+  parseFrontMatterAliases,
   Plugin,
   TAbstractFile,
   TFile,
@@ -47,6 +49,27 @@ import {
   unregisterHoverLinkSourceCompat
 } from "./obsidianCompat";
 import { PalmWikiHomeView, PALMWIKI_HOME_VIEW_TYPE } from "./ui/PalmWikiHomeView";
+import {
+  SearchIndexManager,
+  type SearchIndexState
+} from "./searchIndex";
+import {
+  findRawBodySearchMatch,
+  getRawBodySearchSnippetFromMatch,
+  MAX_DIRECT_RELATION_EDGE_VISITS_PER_TERM,
+  MAX_TWO_HOP_RELATION_EDGE_VISITS_PER_TERM,
+  parseFullTextQuery,
+  searchFullText,
+  type FullTextSearchDiagnostics,
+  type RawBodySearchMatch,
+  type FullTextSearchResult
+} from "./core/search/fullTextSearch";
+import { CreateSearchPageModal } from "./ui/CreateSearchPageModal";
+import { normalizePageNameText } from "./core/search/titleSuggestions";
+import {
+  captureSearchPageCreationContext,
+  isSearchPageCreationContextCurrent
+} from "./homeSearch";
 
 export interface PalmWikiHomeIndexState {
   indexPhase: IndexPhase;
@@ -65,6 +88,11 @@ export interface PalmWikiHomeDiagnostics {
 }
 
 type IndexListener = (state: PalmWikiHomeIndexState) => void;
+
+interface RawSearchPreview {
+  match: RawBodySearchMatch;
+  snippet: string;
+}
 
 const OPEN_VIEW_REBUILD_DEBOUNCE_MS = 1500;
 const VIEW_OPEN_IDLE_DELAY_MS = 750;
@@ -113,12 +141,28 @@ export default class PalmWikiHomePlugin extends Plugin {
   private indexRequested = false;
   private indexEventsRegistered = false;
   private homeNavigation: HomeNavigationManager | null = null;
+  private searchIndex: SearchIndexManager | null = null;
+  private searchIndexRequested = false;
+  private searchNavigationGeneration = new WeakMap<WorkspaceLeaf, number>();
+  private rawSearchPreviewCache = new Map<string, RawSearchPreview>();
+  private rawSearchPreviewPromises = new Map<
+    string,
+    Promise<RawSearchPreview | null>
+  >();
   private cardPreviewSourceId: string | null = null;
   private unloaded = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.syncCardPreviewSource();
+
+    this.searchIndex = new SearchIndexManager({
+      app: this.app,
+      cacheDirectory: this.manifest.dir ?? null,
+      getSettings: () => this.settings,
+      isHomeActive: () => this.isHomeViewActive(),
+      logPerformance: (label, data) => this.logPerformance(label, data)
+    });
 
     this.homeNavigation = new HomeNavigationManager({
       getDisplayName: () =>
@@ -162,6 +206,14 @@ export default class PalmWikiHomePlugin extends Plugin {
       }
     });
 
+    this.addCommand({
+      id: "focus-search",
+      name: "Focus search",
+      callback: () => {
+        void this.focusSearch();
+      }
+    });
+
     this.addSettingTab(new PalmWikiHomeSettingTab(this));
     this.registerHomeNavigationEvents();
     this.app.workspace.onLayoutReady(() => {
@@ -178,6 +230,10 @@ export default class PalmWikiHomePlugin extends Plugin {
       } else if (this.indexRequested || this.hasHomeViewOpen()) {
         void this.prepareIndexForUse("restored-view", false);
       }
+
+      if (this.searchIndexRequested || this.hasHomeViewOpen()) {
+        this.searchIndex?.requestReady("restored-view");
+      }
     });
   }
 
@@ -186,6 +242,11 @@ export default class PalmWikiHomePlugin extends Plugin {
     this.removeCardPreviewSource();
     this.homeNavigation?.removeAll();
     this.homeNavigation = null;
+    this.searchIndex?.unload();
+    this.searchIndex = null;
+    this.searchNavigationGeneration = new WeakMap<WorkspaceLeaf, number>();
+    this.rawSearchPreviewCache.clear();
+    this.rawSearchPreviewPromises.clear();
     this.indexInputGeneration += 1;
     this.cacheLoadGeneration += 1;
     this.automaticWorkGeneration += 1;
@@ -214,6 +275,99 @@ export default class PalmWikiHomePlugin extends Plugin {
     this.syncHomeNavigationButtons();
   }
 
+  async focusSearch(): Promise<void> {
+    let view = this.app.workspace.getActiveViewOfType(PalmWikiHomeView);
+    if (!view) {
+      await this.openHomeView();
+      view = this.app.workspace.getActiveViewOfType(PalmWikiHomeView);
+    }
+
+    if (!view) {
+      new Notice("Could not open PalmWiki Home search.");
+      return;
+    }
+
+    this.ensureSearchIndexForView("focus-search");
+    const ownerWindow = view.containerEl.ownerDocument.defaultView;
+    ownerWindow?.requestAnimationFrame(() => view?.focusSearch());
+  }
+
+  ensureSearchIndexForView(reason: string): void {
+    this.searchIndexRequested = true;
+    if (this.layoutReady && !this.unloaded) {
+      if (reason === "search-submit") {
+        void this.searchIndex?.ensureReady(reason);
+      } else {
+        this.searchIndex?.requestReady(reason);
+      }
+    }
+  }
+
+  rebuildSearchIndex(reason: string): void {
+    this.searchIndexRequested = true;
+    this.searchIndex?.rebuildAll(reason);
+  }
+
+  getSearchIndexState(): SearchIndexState {
+    return (
+      this.searchIndex?.getState() ?? {
+        phase: "waiting",
+        indexedCount: 0,
+        processedCount: 0,
+        totalCount: 0,
+        isUsingCachedIndex: false,
+        lastIndexedAt: null,
+        lastError: null,
+        persistenceWarning: null
+      }
+    );
+  }
+
+  subscribeToSearchIndex(listener: (state: SearchIndexState) => void): () => void {
+    return this.searchIndex?.subscribe(listener) ?? (() => undefined);
+  }
+
+  searchPages(query: string): FullTextSearchResult[] {
+    const startedAt = performance.now();
+    const searchDiagnostics: FullTextSearchDiagnostics = {
+      directRelationEdgeVisits: 0,
+      directRelationTermsCapped: 0,
+      twoHopRelationEdgeVisits: 0,
+      twoHopRelationTermsCapped: 0
+    };
+    const results = searchFullText(
+      this.pages,
+      this.searchIndex?.getDocuments() ?? [],
+      query,
+      searchDiagnostics
+    );
+    this.logPerformance("full-text search", {
+      ms: Math.round(performance.now() - startedAt),
+      pages: this.pages.length,
+      documents: this.searchIndex?.getState().indexedCount ?? 0,
+      resultCount: results.length,
+      positiveTerms: parseFullTextQuery(query).positive.length,
+      directRelationEdgeVisits: searchDiagnostics.directRelationEdgeVisits,
+      twoHopRelationEdgeVisits: searchDiagnostics.twoHopRelationEdgeVisits,
+      directRelationTermsCapped: searchDiagnostics.directRelationTermsCapped,
+      twoHopRelationTermsCapped: searchDiagnostics.twoHopRelationTermsCapped,
+      directRelationEdgeVisitCap: MAX_DIRECT_RELATION_EDGE_VISITS_PER_TERM,
+      twoHopRelationEdgeVisitCap: MAX_TWO_HOP_RELATION_EDGE_VISITS_PER_TERM
+    });
+    return results;
+  }
+
+  async getRawSearchSnippet(path: string, query: string): Promise<string | undefined> {
+    if (this.unloaded) {
+      return undefined;
+    }
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile) || file.extension.toLocaleLowerCase() !== "md") {
+      return undefined;
+    }
+    return (await this.loadRawSearchPreview(file, query))?.snippet;
+  }
+
   async openPage(path: string): Promise<void> {
     const abstractFile = this.app.vault.getAbstractFileByPath(path);
     if (!(abstractFile instanceof TFile)) {
@@ -224,6 +378,7 @@ export default class PalmWikiHomePlugin extends Plugin {
   }
 
   async openPageInLeaf(path: string, leaf: WorkspaceLeaf): Promise<void> {
+    this.bumpSearchNavigationGeneration(leaf);
     const abstractFile = this.app.vault.getAbstractFileByPath(path);
     if (
       !(abstractFile instanceof TFile) ||
@@ -239,6 +394,265 @@ export default class PalmWikiHomePlugin extends Plugin {
       undefined,
       `Could not open PalmWiki Home page: ${path}`
     );
+  }
+
+  async openSearchResultInLeaf(
+    result: FullTextSearchResult,
+    query: string,
+    leaf: WorkspaceLeaf
+  ): Promise<void> {
+    if (this.unloaded) {
+      return;
+    }
+    const sourceView = leaf.view;
+    if (sourceView.getViewType() !== PALMWIKI_HOME_VIEW_TYPE) {
+      return;
+    }
+    const navigationGeneration = this.bumpSearchNavigationGeneration(leaf);
+    const sourceState = JSON.stringify(leaf.getViewState());
+    const sourceWasMostRecent = this.app.workspace.getMostRecentLeaf() === leaf;
+    const abstractFile = this.app.vault.getAbstractFileByPath(result.page.path);
+    if (
+      !(abstractFile instanceof TFile) ||
+      abstractFile.extension.toLocaleLowerCase() !== "md"
+    ) {
+      new Notice(`PalmWiki Home search result not found: ${result.page.path}`);
+      return;
+    }
+
+    let rawMatch: RawBodySearchMatch | null = null;
+    if (result.firstBodyMatch) {
+      rawMatch = (await this.loadRawSearchPreview(abstractFile, query))?.match ?? null;
+    }
+
+    if (
+      this.unloaded ||
+      this.searchNavigationGeneration.get(leaf) !== navigationGeneration ||
+      leaf.view !== sourceView ||
+      sourceView.getViewType() !== PALMWIKI_HOME_VIEW_TYPE ||
+      JSON.stringify(leaf.getViewState()) !== sourceState ||
+      (sourceWasMostRecent && this.app.workspace.getMostRecentLeaf() !== leaf)
+    ) {
+      return;
+    }
+
+    await this.openMarkdownFileInLeaf(
+      leaf,
+      abstractFile,
+      rawMatch ? { line: rawMatch.line } : undefined,
+      `Could not open PalmWiki Home search result: ${abstractFile.path}`
+    );
+
+    if (rawMatch) {
+      this.revealSearchMatchInEditor(leaf, abstractFile, rawMatch);
+    }
+  }
+
+  private bumpSearchNavigationGeneration(leaf: WorkspaceLeaf): number {
+    const next = (this.searchNavigationGeneration.get(leaf) ?? 0) + 1;
+    this.searchNavigationGeneration.set(leaf, next);
+    return next;
+  }
+
+  private async loadRawSearchPreview(
+    file: TFile,
+    query: string
+  ): Promise<RawSearchPreview | null> {
+    const key = `${file.path}\0${file.stat.mtime}\0${file.stat.size}\0${query}`;
+    const cached = this.rawSearchPreviewCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const existing = this.rawSearchPreviewPromises.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const snapshot = {
+      path: file.path,
+      mtime: file.stat.mtime,
+      size: file.stat.size
+    };
+    const work = (async (): Promise<RawSearchPreview | null> => {
+      try {
+        const body = await this.app.vault.cachedRead(file);
+        if (this.unloaded) {
+          return null;
+        }
+        const current = this.app.vault.getAbstractFileByPath(file.path);
+        if (
+          !(current instanceof TFile) ||
+          current.stat.mtime !== snapshot.mtime ||
+          current.stat.size !== snapshot.size
+        ) {
+          return null;
+        }
+        const match = findRawBodySearchMatch(body, query);
+        const snippet = match
+          ? getRawBodySearchSnippetFromMatch(body, match)
+          : null;
+        if (!match || snippet === null) {
+          return null;
+        }
+        const preview = { match, snippet };
+        this.rawSearchPreviewCache.set(key, preview);
+        while (this.rawSearchPreviewCache.size > 500) {
+          let oldestKey: string | null = null;
+          for (const cacheKey of this.rawSearchPreviewCache.keys()) {
+            oldestKey = cacheKey;
+            break;
+          }
+          if (oldestKey === null) {
+            break;
+          }
+          this.rawSearchPreviewCache.delete(oldestKey);
+        }
+        return preview;
+      } catch {
+        return null;
+      }
+    })();
+    this.rawSearchPreviewPromises.set(key, work);
+    try {
+      return await work;
+    } finally {
+      this.rawSearchPreviewPromises.delete(key);
+    }
+  }
+
+  promptCreateSearchPage(
+    name: string,
+    leaf: WorkspaceLeaf
+  ): void {
+    const existingPage = this.findExactVaultMarkdownPage(name);
+    if (existingPage) {
+      void this.openPageInLeaf(existingPage.path, leaf);
+      return;
+    }
+
+    const sourceView = leaf.view;
+    if (sourceView.getViewType() !== PALMWIKI_HOME_VIEW_TYPE) {
+      return;
+    }
+    const sourceContext = captureSearchPageCreationContext(
+      sourceView,
+      leaf.getViewState()
+    );
+    if (!sourceContext) {
+      new Notice("Could not verify the PalmWiki Home tab for page creation.");
+      return;
+    }
+    const sourceWasMostRecent = this.app.workspace.getMostRecentLeaf() === leaf;
+    const navigationGeneration = this.bumpSearchNavigationGeneration(leaf);
+    const isCurrentContext = (): boolean =>
+      !this.unloaded &&
+      this.searchNavigationGeneration.get(leaf) === navigationGeneration &&
+      sourceView.getViewType() === PALMWIKI_HOME_VIEW_TYPE &&
+      isSearchPageCreationContextCurrent(
+        sourceContext,
+        leaf.view,
+        leaf.getViewState()
+      ) &&
+      (!sourceWasMostRecent || this.app.workspace.getMostRecentLeaf() === leaf);
+
+    new CreateSearchPageModal(this.app, name, async (request) => {
+      if (!isCurrentContext()) {
+        new Notice("Page creation was cancelled because the PalmWiki Home tab changed.");
+        return;
+      }
+      const currentExactPage = this.findExactVaultMarkdownPage(request.name);
+      if (currentExactPage) {
+        await this.openPageInLeaf(currentExactPage.path, leaf);
+        return;
+      }
+
+      const existing = this.app.vault.getAbstractFileByPath(request.path);
+      if (existing instanceof TFile && existing.extension.toLocaleLowerCase() === "md") {
+        await this.openPageInLeaf(existing.path, leaf);
+        return;
+      }
+      if (existing) {
+        new Notice(`Cannot create a page because an item already exists at ${request.path}.`);
+        return;
+      }
+
+      try {
+        const created = await this.app.vault.create(request.path, "");
+        if (isCurrentContext()) {
+          await this.openPageInLeaf(created.path, leaf);
+        } else {
+          new Notice(
+            `Created ${created.path}, but did not replace the changed PalmWiki Home tab.`
+          );
+        }
+      } catch (error) {
+        console.error("Could not create a PalmWiki Home search page", error);
+        new Notice(`Could not create page: ${request.path}`);
+      }
+    }).open();
+  }
+
+  hasExactVaultPageName(name: string): boolean {
+    return this.findExactVaultMarkdownPage(name) !== null;
+  }
+
+  private findExactVaultMarkdownPage(name: string): TFile | null {
+    const expected = normalizePageNameText(name).trim();
+    if (!expected) {
+      return null;
+    }
+
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const frontmatter: unknown = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const frontmatterTitle = getFrontmatterTitle(frontmatter);
+      const aliases = parseFrontMatterAliases(frontmatter) ?? [];
+      const candidates = [
+        file.basename,
+        typeof frontmatterTitle === "string" ? frontmatterTitle : "",
+        ...aliases
+      ];
+      if (
+        candidates.some(
+          (candidate) => normalizePageNameText(candidate).trim() === expected
+        )
+      ) {
+        return file;
+      }
+    }
+
+    return null;
+  }
+
+  private revealSearchMatchInEditor(
+    leaf: WorkspaceLeaf,
+    file: TFile,
+    match: NonNullable<ReturnType<typeof findRawBodySearchMatch>>
+  ): void {
+    const view = leaf.view;
+    if (!(view instanceof MarkdownView) || view.file?.path !== file.path) {
+      return;
+    }
+
+    // Reading view receives the best-effort eState line above. Obsidian has no
+    // stable public API for selecting arbitrary rendered text there.
+    if (view.getMode() !== "source") {
+      return;
+    }
+
+    const ownerWindow = view.containerEl.ownerDocument.defaultView;
+    ownerWindow?.requestAnimationFrame(() => {
+      if (leaf.view !== view || view.file?.path !== file.path) {
+        return;
+      }
+      const from = { line: match.line, ch: match.fromCh };
+      const to = { line: match.line, ch: match.toCh };
+      try {
+        view.editor.setSelection(from, to);
+        view.editor.scrollIntoView({ from, to }, true);
+      } catch {
+        // The editor may still be swapping modes; the page itself stays open.
+      }
+    });
   }
 
   previewCardPage(
@@ -470,6 +884,12 @@ export default class PalmWikiHomePlugin extends Plugin {
       ...this.app.workspace.getLeavesOfType("markdown"),
       ...this.app.workspace.getLeavesOfType(PALMWIKI_HOME_VIEW_TYPE)
     ]);
+
+    for (const leaf of this.app.workspace.getLeavesOfType(PALMWIKI_HOME_VIEW_TYPE)) {
+      if (leaf.view instanceof PalmWikiHomeView) {
+        leaf.view.syncSearchHost();
+      }
+    }
   }
 
   ensureIndexForView(): void {
@@ -725,6 +1145,12 @@ export default class PalmWikiHomePlugin extends Plugin {
     }
     this.homeNavigation?.updateLabels();
 
+    const searchScopeChanged = hasSearchScopeChanged(previousSettings, this.settings);
+    if (searchScopeChanged) {
+      this.rawSearchPreviewCache.clear();
+      this.rawSearchPreviewPromises.clear();
+      this.searchIndex?.handleScopeChange();
+    }
     const indexScopeChanged = hasIndexScopeChanged(previousSettings, this.settings);
     if (indexScopeChanged) {
       this.indexInputGeneration += 1;
@@ -1209,18 +1635,21 @@ export default class PalmWikiHomePlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("create", (file) => {
+        this.searchIndex?.handleFileCreateOrModify(file, "vault-create");
         this.handleMarkdownFileChange(file, "vault-create");
       })
     );
 
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
+        this.searchIndex?.handleFileCreateOrModify(file, "vault-modify");
         this.handleMarkdownFileChange(file, "vault-modify");
       })
     );
 
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
+        this.searchIndex?.handleFileDelete(file);
         if (file instanceof TFile && file.extension === "md") {
           this.bodyMetadataCache.delete(file.path);
           void this.removePinnedPath(file.path);
@@ -1232,6 +1661,7 @@ export default class PalmWikiHomePlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
+        this.searchIndex?.handleFileRename(file, oldPath);
         if (file instanceof TFile && (file.extension === "md" || oldPath.endsWith(".md"))) {
           this.bodyMetadataCache.delete(oldPath);
           void this.migratePinnedPath(oldPath, file.path);
@@ -1302,6 +1732,8 @@ export default class PalmWikiHomePlugin extends Plugin {
       pages: this.pages.length,
       timestamp: Date.now()
     });
+
+    this.ensureSearchIndexForView("active-view");
 
     if (!this.indexDirty) {
       return;
@@ -1444,4 +1876,22 @@ function hasIndexScopeChanged(
     JSON.stringify(previous.pageRankIgnoredSourcePathPatterns) !==
       JSON.stringify(next.pageRankIgnoredSourcePathPatterns)
   );
+}
+
+function hasSearchScopeChanged(
+  previous: PalmWikiHomeSettings,
+  next: PalmWikiHomeSettings
+): boolean {
+  return (
+    JSON.stringify(previous.includeFolders) !== JSON.stringify(next.includeFolders) ||
+    JSON.stringify(previous.excludeFolders) !== JSON.stringify(next.excludeFolders)
+  );
+}
+
+function getFrontmatterTitle(frontmatter: unknown): string {
+  if (typeof frontmatter !== "object" || frontmatter === null) {
+    return "";
+  }
+  const title = (frontmatter as Record<string, unknown>).title;
+  return typeof title === "string" ? title : "";
 }

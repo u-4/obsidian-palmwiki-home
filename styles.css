@@ -32,7 +32,131 @@
 }
 
 .palmwiki-home-container .view-header-title {
-  visibility: hidden;
+  display: none;
+}
+
+.palmwiki-home-container .view-header-title-container {
+  overflow: visible;
+}
+
+.palmwiki-home-search-host {
+  align-items: center;
+  display: flex;
+  flex: 1 1 560px;
+  justify-content: center;
+  margin-inline: 8px;
+  max-width: 680px;
+  min-width: 0;
+  position: relative;
+  z-index: var(--layer-popover, 1000);
+}
+
+.palmwiki-home-search {
+  position: relative;
+  width: 100%;
+}
+
+.palmwiki-home-search-input {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  color: var(--text-normal);
+  font: inherit;
+  height: 30px;
+  min-width: 0;
+  padding: 4px 34px 4px 10px;
+  width: 100%;
+}
+
+.palmwiki-home-search-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+  outline: 0;
+}
+
+.palmwiki-home-search-clear {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  height: 26px;
+  line-height: 1;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 28px;
+}
+
+.palmwiki-home-search-clear:hover,
+.palmwiki-home-search-clear:focus-visible {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.palmwiki-home-search-suggestions {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  box-shadow: var(--shadow-s, 0 8px 24px rgb(0 0 0 / 20%));
+  left: 0;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: 5px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: var(--layer-popover, 1000);
+}
+
+.palmwiki-home-search-suggestions-heading,
+.palmwiki-home-search-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: 5px 8px;
+}
+
+.palmwiki-home-search-option {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-normal);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 2px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.palmwiki-home-container button.palmwiki-home-search-option {
+  align-items: stretch;
+  box-sizing: border-box;
+  height: auto;
+  justify-content: flex-start;
+  min-height: 46px;
+  white-space: normal;
+}
+
+.palmwiki-home-search-option:hover,
+.palmwiki-home-search-option:focus-visible,
+.palmwiki-home-search-option.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.palmwiki-home-search-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.palmwiki-home-search-option span:last-child {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }
 
 .palmwiki-home-view {
@@ -134,6 +258,236 @@
 }
 
 .palmwiki-index-status.is-error {
+  color: var(--text-error);
+}
+
+.palmwiki-index-status.is-loading,
+.palmwiki-index-status.is-indexing {
+  color: var(--interactive-accent);
+}
+
+.palmwiki-index-status.is-ready {
+  color: var(--text-success, var(--color-green));
+}
+
+.palmwiki-search-results {
+  margin: 0 auto;
+  max-width: 1100px;
+  width: 100%;
+}
+
+.palmwiki-search-result-list {
+  display: grid;
+  gap: 10px;
+}
+
+.palmwiki-search-results-header {
+  align-items: flex-end;
+  background: var(--palmwiki-panel);
+  border: 1px solid var(--palmwiki-border);
+  border-radius: var(--palmwiki-radius);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 10px 14px;
+}
+
+.palmwiki-search-results-header div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.palmwiki-search-results-header span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.palmwiki-search-create-result,
+.palmwiki-search-result {
+  background: var(--palmwiki-panel);
+  border: 1px solid var(--palmwiki-border);
+  border-radius: var(--palmwiki-radius);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  margin-bottom: 8px;
+}
+
+.palmwiki-search-create-result {
+  align-items: center;
+  color: var(--text-normal);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.palmwiki-search-create-result > span:first-child {
+  color: var(--interactive-accent);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.palmwiki-search-create-result > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.palmwiki-search-create-result small {
+  color: var(--text-muted);
+}
+
+.palmwiki-search-create-result:hover,
+.palmwiki-search-create-result:focus-visible,
+.palmwiki-search-result:hover,
+.palmwiki-search-result:focus-within {
+  border-color: var(--interactive-accent);
+}
+
+.palmwiki-search-result {
+  align-items: stretch;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.palmwiki-home-view button.palmwiki-search-create-result,
+.palmwiki-home-view button.palmwiki-search-result-open,
+.palmwiki-home-view button.palmwiki-link-target-option {
+  box-sizing: border-box;
+  height: auto;
+  max-height: none;
+  white-space: normal;
+}
+
+.palmwiki-home-view button.palmwiki-search-create-result {
+  justify-content: flex-start;
+  min-height: 64px;
+}
+
+.palmwiki-home-view button.palmwiki-search-result-open {
+  align-items: stretch;
+  background: transparent;
+  border: 0;
+  color: var(--text-normal);
+  cursor: pointer;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  font: inherit;
+  gap: 5px;
+  justify-content: flex-start;
+  line-height: 1.4;
+  min-height: 136px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 14px 12px 14px 16px;
+  text-align: left;
+  width: 100%;
+}
+
+.palmwiki-home-view button.palmwiki-search-result-open:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -3px;
+}
+
+.palmwiki-search-result-title {
+  display: block;
+  font-size: 17px;
+  font-weight: var(--font-semibold);
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palmwiki-search-result-path {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palmwiki-search-result-snippet {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  line-height: 1.55;
+  max-block-size: 3.1em;
+  min-block-size: 3.1em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.palmwiki-search-result-snippet mark {
+  background: var(--text-highlight-bg);
+  color: inherit;
+}
+
+.palmwiki-search-result-reasons {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 20px;
+}
+
+.palmwiki-search-result-reasons > span {
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--palmwiki-border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.palmwiki-home-view button.palmwiki-search-result-pin {
+  align-self: start;
+  justify-self: end;
+  margin: 14px 14px 0 0;
+  position: static;
+}
+
+.palmwiki-search-no-results {
+  background: var(--palmwiki-panel);
+  border: 1px solid var(--palmwiki-border);
+  border-radius: var(--palmwiki-radius);
+  padding: 18px;
+}
+
+.palmwiki-search-load-more {
+  display: block;
+  margin: 12px auto 0;
+}
+
+.palmwiki-search-result-cap {
+  background: var(--palmwiki-panel);
+  border: 1px solid var(--palmwiki-border);
+  border-radius: var(--palmwiki-radius);
+  color: var(--text-muted);
+  margin-top: 12px;
+  padding: 10px 14px;
+  text-align: center;
+}
+
+.palmwiki-create-page-feedback {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.palmwiki-create-page-feedback.is-error {
   color: var(--text-error);
 }
 
@@ -245,6 +599,12 @@
   padding: 6px 8px;
   text-align: left;
   width: 100%;
+}
+
+.palmwiki-home-view button.palmwiki-link-target-option {
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 44px;
 }
 
 .palmwiki-link-target-option:hover,
@@ -604,6 +964,12 @@
 }
 
 @media (max-width: 700px) {
+  .palmwiki-home-search-host {
+    flex-basis: 220px;
+    margin-inline: 3px;
+    min-width: 0;
+  }
+
   .palmwiki-home-shell {
     padding: 10px;
   }
@@ -633,5 +999,14 @@
   .palmwiki-link-target-suggestions {
     min-width: 100%;
     width: 100%;
+  }
+
+  .palmwiki-search-results-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .palmwiki-home-view button.palmwiki-search-result-open {
+    padding: 14px 10px 14px 14px;
   }
 }
