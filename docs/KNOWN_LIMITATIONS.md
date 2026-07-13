@@ -1,8 +1,15 @@
 # Known Limitations
 
-- Version 0.2.1 targets Obsidian Desktop 1.12.7 or later and has been verified only on Obsidian 1.12.7 for macOS. Windows and Linux are not yet verified.
-- iOS and Android are not supported or verified yet. macOS iPhone Mirroring with Computer Use can provide a supplementary screen and basic-tap smoke test, but cannot establish native iOS compatibility, background restoration, touch/keyboard behavior, or file-operation compatibility. Native iOS testing is planned after search work.
-- Full-text body search, OCR search, multi-vault search, and related-page scoring are not implemented.
+- Version 0.3.0 targets Obsidian Desktop 1.12.7 or later and has been verified only on Obsidian 1.12.7 for macOS. Windows and Linux are not yet verified.
+- iOS and Android are not supported or verified yet. macOS iPhone Mirroring with Computer Use can provide a supplementary screen and basic-tap smoke test, but cannot establish native iOS compatibility, background restoration, touch/keyboard behavior, or file-operation compatibility. Native iOS testing is the next compatibility phase after full-text search.
+- Full-text search matches local Markdown strings and Vault links. It does not search OCR, attachment contents, or multiple Vaults, and it does not perform vector/AI semantic search or automatic synonym expansion. Whitespace-separated terms use AND semantics. One query is limited to 256 characters and eight total terms including exclusions; an over-limit query is not executed.
+- Search ranking combines body, page-name, alias, tag, and path evidence with direct links, paths of at most two hops, and the existing PageRank-like score. It is an explainable approximation, not Cosense's private algorithm, and results depend on each Vault's link structure.
+- To prevent UI stalls, relation traversal is capped per positive term at 20,000 direct-link edge visits and 50,000 two-hop edge visits. Extremely dense graphs can therefore omit later related candidates; truncation follows a deterministic path order.
+- A page supported only by a two-hop relation, with no body, page-name, or direct-link evidence, is excluded to suppress graph noise.
+- While typing, fuzzy suggestions search page titles, basenames, and aliases only. Body search starts after Enter is pressed without selecting a suggestion.
+- Ranking uses normalized search text. Visible result snippets and click-time match locations reread only the necessary current source pages, so a snippet may update shortly after it enters the viewport when a note was just edited.
+- Live Preview / Source mode can select the match. Reading view has no stable public API for selecting arbitrary rendered text, so only a best-effort line jump is attempted and highlighting is not guaranteed.
+- Search state may be stored in Obsidian's workspace state for Back/Forward restoration. Returning with the upper-left Home button deliberately starts with a fresh Home state.
 - PageRank is a static vault-ranking heuristic based on resolved links and modification times, not Google PageRank.
 - Tags, unresolved links, non-Markdown embeds, and OCR content do not affect PageRank.
 - An invalid PageRank regex falls back to substring matching without showing a settings error.
@@ -11,8 +18,9 @@
 - Virtualized table rows have a fixed height, so long descriptions and large tag lists are truncated.
 - The saved index is shown before validation. Information may be temporarily stale while the status is `Waiting` or `Indexing`; `Complete` means validation finished.
 - The first run, an invalid cache, or an index-scope setting change requires a rebuild whose duration depends on Vault size.
-- The derived index is stored in the Vault-local plugin folder. Small image URL and date-label caches remain in memory only.
-- Display performance and primary controls have been checked on a copied Vault with approximately 7,000 pages, but PageRank usefulness depends on each Vault's link structure.
+- The Vault-local plugin folder stores the display index and `search-cache.json`, which contains normalized Markdown bodies. Nothing is transmitted externally, but any sync or backup system that includes `.obsidian` may also copy this file. To bound memory use, full-text search accepts at most 8 MiB per Markdown file, 64 MiB of source in the selected scope, and 128 MiB of estimated in-memory normalized text. A malformed cache whose compatibility normalization expands text is checked before expanded bodies are retained. An over-limit build publishes no partial index and asks the user to narrow include/exclude folders. Search caches above 64 MiB are not persisted.
+- Display performance and primary controls have been checked on a copied Vault with approximately 7,000 pages, but search latency and ranking usefulness depend on total body size and each Vault's link structure. Results initially mount 100 rows and can be extended in 100-row steps to a fixed maximum of 500; broader searches must be narrowed with another term or filter.
+- Incremental search-cache reuse requires the same Vault-relative path, modified time, and file size. An external tool that deliberately changes only content while preserving both time and size is not detected; use `Refresh` for a full rebuild in that unusual case.
 - The upper-left Home button has no dedicated public Obsidian API, so its isolated placement module depends on Obsidian's left header DOM structure. A future header redesign could make only this button unavailable until compatibility is updated.
 - Command discovery and execution use a guarded runtime compatibility layer because Obsidian's command manager is not part of the public `App` type. Unsupported, disabled, missing, or context-inapplicable commands leave the current view unchanged and show a Notice.
 - Immediately after workspace restoration, an inactive deferred tab may not yet expose its current Markdown file or command context. Manually entered relative pages, local headings, and Markdown-context commands can remain unavailable until that tab finishes loading; exact Vault-relative paths saved by the page chooser are unaffected.

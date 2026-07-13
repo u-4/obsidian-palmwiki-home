@@ -97,7 +97,8 @@ const forbiddenTrackedFiles = runGit([
   "main.js",
   "*.map",
   "data.json",
-  "index-cache.json"
+  "index-cache.json",
+  "search-cache.json"
 ]);
 assert(
   forbiddenTrackedFiles.length === 0,

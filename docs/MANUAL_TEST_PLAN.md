@@ -64,6 +64,47 @@
 - Change only `Card preview` with performance logging enabled and confirm no index rebuild or full-Vault body read starts.
 - Disable the Page preview core plugin and confirm Card hover fails silently while Card click still works.
 
+## Full-Text Search Checks
+
+- Open PalmWiki Home and confirm the centered header title is replaced by one search field without changing Back/Forward/Home order.
+- Focus the empty field and confirm up to ten recently opened existing Markdown pages appear in recent order.
+- Type a partial page name, basename, alias, transposed spelling, full-width spelling, and hiragana spelling for a katakana title. Confirm candidates update after a short delay and stale candidates cannot be opened by immediate Arrow/Enter input.
+- Use `PalmWiki Home: Focus search` from the command palette, assign a temporary Obsidian hotkey, and confirm it opens/reuses Home and focuses the correct leaf's field.
+- Select a candidate with pointer and Arrow/Enter. Confirm the same Home leaf becomes that Markdown page and no tab is added.
+- Leave candidates unselected and press Enter. Confirm a dedicated list appears and the header announces the result count to assistive technology.
+- Verify whitespace AND, `"quoted phrase"`, `-excluded`, and `-"excluded phrase"` queries. Confirm no note is created merely by pressing Enter.
+- Search `散髪`; confirm the linked concept page and daily notes that actually contain/link it rank ahead of broad diary/index noise.
+- Search `気道 ガイドライン`; confirm a focused airway-guideline page and strongly linked pages rank ahead of a diary containing both words incidentally.
+- Search `レシピ トマト`; confirm specific tomato recipes and preparation records rank ahead of a huge recipe hub.
+- Inspect the evidence badges (`Page name`, `Body`, `Tag`, `Path`, `Direct link`, `2-hop`, `PR`). Confirm Pin changes only an exact tie and does not force a weak page above a stronger result.
+- Confirm visible snippets preserve original uppercase/full-width text after their lazy load. Open a multi-term result and confirm Source mode selects the line containing the most terms.
+- Repeat result opening in Reading view. Confirm a best-effort line jump occurs without requiring rendered-text highlighting.
+- Click one result and immediately choose another page/tab while a large source read is pending. Confirm the delayed first click never overwrites the later action.
+- Apply folder, tag, Quick filter, and `Links to page` controls during a submitted search. Confirm all filters combine with AND and neither graph nor search cache is rebuilt merely from filter changes.
+- Use `Show 100 more` through 500 results. Confirm the cap message appears and no further rows mount until the query is narrowed.
+- Search a name that does not exist anywhere in the Vault. Open the create row, verify the editable name and Obsidian-configured destination, cancel, and confirm nothing was created.
+- In a disposable test folder, confirm the create action makes one blank Markdown file only after `Create page`. Repeat with an existing title, basename, alias, excluded-folder title, unsafe filename, and race-created destination; confirm no overwrite or duplicate occurs.
+- From search results, open a page and use Obsidian Back/Forward. Confirm draft/submitted query, filters, Card/Table/sort state, result limit, and scroll position restore. Repeat via the upper-left Home button and confirm Home starts fresh instead.
+- Move Home to a pop-out while suggestions or a link-target popup is open. Confirm outside click and Escape close controls in the new window and the old window retains no listener-visible behavior.
+- Close the Home leaf, reload/disable the plugin, and confirm header hosts, document listeners, idle callbacks, and result navigation do not remain.
+- Submit exactly 256 characters and eight total positive/negative terms, then exceed each limit. Confirm valid boundaries search normally, while over-limit input shows an explanation and does not start full-Vault search.
+- In a disposable dense-link fixture, confirm performance diagnostics stop each positive term at 20,000 direct and 50,000 two-hop edge visits, repeated searches remain deterministic, and the UI stays responsive.
+- Open the create confirmation, navigate the source Home leaf elsewhere, then confirm. Confirm no file is created and the changed leaf is not replaced. If creation had already completed during a later navigation change, confirm only the file remains and the changed leaf is not replaced.
+
+## Full-Text Cache and Privacy Checks
+
+- With Home closed and `Index on startup` off, restart Obsidian and confirm no search-body read or `search-cache.json` write starts merely from launch.
+- Open Home and confirm search indexing starts only after the initial render/idle delay; submit a search and confirm waiting work is promoted without a duplicate build.
+- On a warm restart, confirm unchanged path/mtime/size entries are reused and changed notes alone are read with maximum concurrency two.
+- Modify, rename, and delete notes while search indexing is active. Confirm old text never returns, only one build remains active, and deleted text is absent from the final disk cache.
+- Change include/exclude scope while Home is closed. Confirm the old `search-cache.json` is removed so newly excluded full text does not remain on disk.
+- Corrupt `search-cache.json`, simulate an unreadable note, and use Refresh. Confirm startup remains usable, failure reaches a stable state without retry looping, and explicit Refresh can recover.
+- Confirm cache files above 64 MiB are ignored/not persisted and the UI explains that a later launch must rebuild.
+- With disposable scope fixtures, confirm a file above 8 MiB, selected Markdown source above 64 MiB, or estimated normalized-text RAM above 128 MiB stops before publishing a partial search index and advises narrowing include/exclude folders.
+- Put compatibility characters that expand under NFKC into a disposable malformed cache and confirm the cache is rejected before normalized text can exceed the memory budget.
+- Confirm performance logs include aggregate timing/counts but no full-text query, note body, or new raw path output.
+- Confirm `search-cache.json` is Git-ignored, rejected by release verification if tracked, and never included in the three release artifacts.
+
 ## PageRank Real-Vault Checks
 
 - Open PalmWiki Home in a copied test vault with realistic data volume.
@@ -117,3 +158,6 @@ Expected:
 - With performance debug logging off, logs are quiet.
 - With performance debug logging on, `graph build` and `page rank` logs appear during index rebuild only.
 - If `PageRank debug path` is set, a contributor breakdown appears during index rebuild.
+- Typing page-name candidates in a roughly 7,000-page Vault remains responsive; long 33+ character candidates skip edit-distance matching rather than blocking the main thread.
+- Submit the three representative searches above and record first/warm search time, result count, peak visible rows, search-cache bytes, and any observable UI pause without recording query results or note paths.
+- Returning by Back/Forward reruns the saved query from the in-memory/persistent search index without a full-Vault body reread.

@@ -1,6 +1,6 @@
 # Third-party notices
 
-PalmWiki Home 0.2.0 bundles the following software from the React project:
+PalmWiki Home bundles the following software from the React project:
 
 - React 18.3.1
 - React DOM 18.3.1

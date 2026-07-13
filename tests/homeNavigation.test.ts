@@ -9,10 +9,13 @@ import {
   getHomeButtonActionDescription,
   getPalmWikiHomeButtonDescription,
   HomeNavigationManager,
+  isPalmWikiHomeRenderRevisionCurrent,
   normalizeHomePageTarget,
   PALMWIKI_HOME_BUTTON_CLASS,
   resolveExistingHomePage,
   resolveHomeButtonLabel,
+  resolvePalmWikiHomeEphemeralScrollTop,
+  shouldCompletePalmWikiScrollRestore,
   scrollPalmWikiHomeToTop
 } from "../src/homeNavigation";
 
@@ -189,6 +192,18 @@ test("PalmWiki Home scroll is smooth normally and forced immediate for reduced m
       });
     }
   }
+});
+
+test("scroll restoration waits for async content and clamps only after content is ready", () => {
+  assert.equal(shouldCompletePalmWikiScrollRestore(500, 0, 0, false), false);
+  assert.equal(shouldCompletePalmWikiScrollRestore(500, 500, 800, false), true);
+  assert.equal(shouldCompletePalmWikiScrollRestore(500, 300, 300, false), false);
+  assert.equal(shouldCompletePalmWikiScrollRestore(500, 300, 300, true), true);
+  assert.equal(shouldCompletePalmWikiScrollRestore(0, 0, 0, false), true);
+  assert.equal(resolvePalmWikiHomeEphemeralScrollTop(500, 0), 500);
+  assert.equal(resolvePalmWikiHomeEphemeralScrollTop(null, 250), 250);
+  assert.equal(isPalmWikiHomeRenderRevisionCurrent(3, 3), true);
+  assert.equal(isPalmWikiHomeRenderRevisionCurrent(2, 3), false);
 });
 
 test("Home navigation manager avoids duplicates, updates labels, and cleans up", () => {

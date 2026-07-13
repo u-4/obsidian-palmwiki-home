@@ -31,6 +31,56 @@
 - `[ ]` iOS実機のネイティブ確認は未実施。検索機能対応後に、インストール、復元、タッチ、設定、ファイル操作、バックグラウンド復帰を確認する。
 - `[ ]` macOSのiPhoneミラーリングとComputer Useは、利用可能な場合に予備的な表示・タップ確認へ使用できる。ただしiOS対応判定の証拠にはしない。
 
+## 0.3.0 本文検索リリース判定
+
+確認環境:
+
+- 日付: 2026-07-13
+- Release branch: `codex/full-text-search`
+- Obsidian: Desktop 1.12.7 / macOS
+- テストVault: `PalmWiki_LocalTest`（公開候補3ファイルを配置し、既存設定と索引キャッシュを保持）
+- 公開候補のSHA-256: `main.js` `d69816fd…de245`、`manifest.json` `010e1468…93e0`、`styles.css` `939d092d…fa799`
+
+自動確認済み:
+
+- `[x]` NFKC・大小文字、ページ名のひらがな/カタカナ、空白AND、引用符フレーズ、マイナス除外を処理する。
+- `[x]` `散髪`、`気道 ガイドライン`、`レシピ トマト`の合成例で、具体的な本文/リンク証拠が日記ノイズや巨大hubより上に出る。
+- `[x]` PageRank係数が最大でありながら無関係な高PageRankページを除外し、直接リンク、最大2-hop、hub減衰、最良経路、Pin同点補助が決定的に動く。密グラフでは1語あたり直接20,000辺・2-hop 50,000辺で同じ順序に打ち切る。
+- `[x]` 半角カナ＋濁点、分解済み濁点、全角英数字を原文位置へ戻し、スニペットとクリック後のジャンプが同じ最良行を選ぶ。
+- `[x]` 最近開いたページ、曖昧候補、最大10件、body/tag非参照、7,000ページ候補上限を検証する。
+- `[x]` `search-cache.json`のschema、設定fingerprint、64 MiB境界、破損entry除外、mtime/size/path差分再利用を検証する。
+- `[x]` 索引中のmodify/deleteで古い本文を公開せず、同時ensureを単一処理へまとめ、全件read失敗が自動再試行しない。
+- `[x]` include/exclude変更時はHome非アクティブでも旧全文キャッシュを削除し、`.gitignore`とRelease検証で追跡を禁止する。
+- `[x]` 削除済み・旧scope・破損entryを含むdisk cacheを即時削除し、削除失敗は警告して次回成功時に解除する。検索対象外ノートのイベントでは有効なcacheを維持する。
+- `[x]` 長文貼り付けを最大256文字・正負合計8語で停止し、1ファイル8 MiB・対象原文64 MiB・推定RAM 128 MiBを超える全文索引は部分公開しない安全策を検証する。
+- `[x]` キャッシュ保存前にentry単位で容量を数え、巨大な全体byte配列を作らず、非同期検索結果後のscroll復元と作成確認中のleaf変更を安全に扱う。
+- `[x]` `npm run check`で113件の自動テスト、production build、公式Obsidian ESLint、metadata検証、差分空白検査がすべて成功する。
+
+`PalmWiki_LocalTest`で確認する項目:
+
+- `[x]` macOS版Obsidian Desktop 1.12.7で中央検索欄と、Back/Forward→Homeボタン→検索欄の順を確認した。
+- `[ ]` 複数split・非アクティブHome・ポップアウトで各leafが独立する。
+- `[x]` 空欄フォーカスで最近開いたページ、入力中にページ名の曖昧候補が出る。
+- `[ ]` 素早い再入力後に古い候補をEnterで開かないことを実画面でも確認する。
+- `[x]` `PalmWiki Home: Focus search`がコマンドパレットに表示され、既存Homeの検索欄へフォーカスする。Obsidian標準ホットキーを割り当て可能。
+- `[x]` 候補選択は同じHome leafで開き、未選択Enterは本文検索となり、Enterだけではページを作らない。
+- `[x]` `散髪`、`気道 ガイドライン`、`レシピ トマト`を実データで検索し、順位、理由badge、原文snippetが実用的であることを確認した。
+- `[x]` Obsidian標準の30px固定button高を解除し、表示中100件で重なり0件、項目間隔10px、結果高148px、見出し1行、本文47px（2行）、Pin通常配置を実寸確認した。
+- `[x]` Source modeで最良一致語が選択され、検索結果を表示していた同じleafで開く。
+- `[ ]` Reading viewでのbest-effort移動と、別操作を先に行った場合に遅い読み込みが上書きしないことを実画面でも確認する。
+- `[x]` Quick filterが本文検索結果へAND適用され、6件から1件へ絞り込まれることを確認した。
+- `[ ]` folder / tag / link target filterのAND適用と、Pinが同点補助に留まることを実画面でも確認する。
+- `[ ]` 100件ずつ最大500件まで追加し、上限で絞り込み案内が出て画面が固まらない。
+- `[x]` 存在しない安全な名前では、Enterだけでは作成されず、作成先を示す確認画面が別に開く。確認画面をキャンセルし、ファイルが作成されないことを確認した。
+- `[ ]` 全Vaultのtitle/basename/alias、除外先、unsafe名、競合先を上書きしないことを実画面でも確認する。
+- `[x]` Backで検索語と結果が復元され、ForwardでMarkdownへ戻り、Markdownの左上Homeボタンでは空の新しいHome状態になる。
+- `[ ]` Back/Forwardのfilter、view/sort、limit、scroll復元を実画面でも確認する。
+- `[x]` `search-cache.json`が7,147件、約20 MBで保存され、schema versionと設定keyを保持することを確認した。
+- `[ ]` warm再利用、変更1件だけ再読込、同時read最大2、scope変更で旧cache削除を実画面でも確認する。
+- `[ ]` 破損cacheとread失敗がretry loopにならずRefreshで復旧し、64 MiB超過時は次回再構築の案内が出る。
+- `[x]` plugin disable/enable後に検索欄が1個だけ再表示され、右上の2Hop Links Plusボタンへ影響しないことを確認した。
+- `[ ]` plugin reload/disable後にdocument listener、idle timer、遅延ナビゲーションが残らないことを開発者ツールでも確認する。
+
 ## 0.2.0 リリース判定
 
 確認環境:

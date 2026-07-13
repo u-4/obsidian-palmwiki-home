@@ -6,7 +6,7 @@
 - `main`へ直接Pushせず、Pull Request経由で変更します。
 - Pull Requestには目的、影響範囲、手動確認の有無、ロールバック方法を記載してください。
 - `2hop-links-plus`への実行時依存や、その固有DOM・設定の読み取りを追加しないでください。
-- Vault本文、添付ファイル、`data.json`、`index-cache.json`、個人パス、ローカルレビュー記録をコミットしないでください。
+- Vault本文、添付ファイル、`data.json`、`index-cache.json`、全文を含む`search-cache.json`、個人パス、ローカルレビュー記録をコミットしないでください。
 
 ## ローカル検証
 

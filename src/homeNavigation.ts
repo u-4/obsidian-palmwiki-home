@@ -226,6 +226,37 @@ export function findPalmWikiHomeScrollContainer(
   return findClosestVerticalScrollContainer(probe) ?? content;
 }
 
+export function shouldCompletePalmWikiScrollRestore(
+  expectedScrollTop: number,
+  actualScrollTop: number,
+  maximumScrollTop: number,
+  contentReady: boolean
+): boolean {
+  const expected = Math.max(0, expectedScrollTop);
+  const actual = Math.max(0, actualScrollTop);
+  const maximum = Math.max(0, maximumScrollTop);
+  const target = Math.min(expected, maximum);
+
+  if (Math.abs(actual - target) > 1) {
+    return false;
+  }
+  return expected <= maximum + 1 || contentReady;
+}
+
+export function resolvePalmWikiHomeEphemeralScrollTop(
+  pendingScrollTop: number | null,
+  currentScrollTop: number | undefined
+): number {
+  return pendingScrollTop ?? currentScrollTop ?? 0;
+}
+
+export function isPalmWikiHomeRenderRevisionCurrent(
+  renderedRevision: number,
+  currentRevision: number
+): boolean {
+  return renderedRevision === currentRevision;
+}
+
 export function scrollPalmWikiHomeToTop(viewContainer: HTMLElement): boolean {
   const scrollContainer = findPalmWikiHomeScrollContainer(viewContainer);
   if (!scrollContainer) {
