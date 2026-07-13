@@ -30,6 +30,42 @@
 - `[x]` 2Hopのseparate paneを有効にしたままLive PreviewとReading viewを往復し、本文内2Hopと右上ボタンが0、設定を戻して現行ノートの表示が1組だけ復帰する。
 - `[x]` 2Hopを無効化して反対modeへ切り替え、5秒待ってもhidden本文や右上ボタンが復活しない。再有効化後は現行ノートの表示が1組だけ復帰する。
 
+公開結果:
+
+- Pull Request: [#15](https://github.com/u-4/obsidian-palmwiki-home/pull/15)
+- Release tag commit: `9a1a40c`（タグ`0.3.1`）
+- Release workflow: [29245936423](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29245936423)
+- 公開Release: [PalmWiki Home 0.3.1](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.3.1)
+- 公開成果物のSHA-256: `main.js` `3c3be397fba13ccc9f369b213f753949927d8b63934882671dcc57717d896f16`、`manifest.json` `7baffd8c734e7f89767a162c6bf4c5eacf721e0ff367d1b83d99d6a4bf057b6a`、`styles.css` `939d092d5011d5441c37f150535962b5ff348dd876125b0ee1524d265f2fa799`
+- `[x]` 公開URLから3成果物を再取得し、GitHub Digest、ローカルbuild、`PalmWiki_LocalTest`配置物のSHA-256が一致した。
+
+## 0.4.0 Markdownヘッダー検索リリース判定
+
+自動確認:
+
+- `[x]` 各Markdown leafが検索欄、query、候補・submit callbackを個別所有し、候補とEnterが開始元leafを受け取る。
+- `[x]` 検索欄の表示だけでは索引準備callbackを呼ばず、実際のfocus時にだけ表示用索引を要求する。
+- `[x]` Homeボタンの直後にcanonical `TFile.path`を1個だけ置き、更新・重複防止・切断leaf・unload清掃を確認する。
+- `[x]` 検索hostを設置できない場合はMarkdown限定classを付けず、Obsidian標準タイトルを残す。
+- `[x]` ownerDocumentが異なるsplit/pop-out相当のfake DOM、実popover祖先、非Markdown viewを分離する。
+- `[x]` 118件の自動テスト、production build、公式Obsidian ESLint、`git diff --check`が成功する。
+- `[x]` `package.json`、lockfile、`manifest.json`、`versions.json`を0.4.0へ揃え、厳格なRelease検証とmoderate基準の依存監査（既知脆弱性0件）が成功する。
+
+`PalmWiki_LocalTest`で確認した項目（2026-07-13）:
+
+- `[x]` Live Preview、Source mode、Reading viewで「戻る・進む → Homeボタン → 薄いパス」と中央検索欄が各1個で、中央ノートタイトルと重複するフォルダーパンくずは表示されない。
+- `[x]` 狭いsplitでも左右のヘッダーが重ならず、パス要素のアクセシブル名で完全なVault相対パスを確認できる。実際のpointer hoverによるツールチップ表示は未確認。
+- `[x]` Markdownの検索欄で最近のページ、曖昧候補、候補の同一leaf移動が動作する。
+- `[x]` 候補未選択のEnterで同じleafに本文検索結果が表示され、Backで元ノートへ戻る。
+- `[x]` `PalmWiki Home: Focus search`コマンドがactive Markdownの欄を優先し、HomeではHomeの欄をフォーカスする。
+- `[ ]` 任意のホットキーを割り当てた状態でも同じフォーカス動作になる。
+- `[ ]` 複数splitで別々のqueryを保ち、inactive leaf、Back/Forward、rename、ファイル切替で別leafのパスや動作を混ぜない。
+- `[ ]` pop-outで入力、候補のoutside click、同一leaf遷移、ウィンドウを戻した後の重複防止が動作する。
+- `[ ]` Hover Preview、Hover Editor、Canvas、設定、他custom viewへボタン・パス・検索欄・タイトル非表示を追加しない。
+- `[x]` plugin無効化でReact root、候補、host、パス、限定classが消え、再有効化で各1個だけ復帰する。
+- `[ ]` 2Hop Links Plusの右上ボタンと本文内表示に変化がなく、双方を個別に無効化・再有効化できる。
+- `[x]` PalmWiki Homeだけを無効化・再有効化しても、2Hop Links Plusの右上ボタン1個と本文内表示が維持される。2Hop Links Plus側だけの無効化・再有効化は未確認。
+
 ## 0.2.1 Release verification
 
 - `[x]` 設定に`Off`、`Cmd/Ctrl + hover`、`Hover`が表示され、既存設定の既定値は`Cmd/Ctrl + hover`になる。

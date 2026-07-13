@@ -100,9 +100,9 @@ export class PalmWikiHomeView extends ItemView implements HoverParent {
     });
 
     this.root = createRoot(rootEl);
+    this.plugin.syncHomeNavigationForLeaf(this.leaf);
     this.syncSearchHost();
     this.renderRoot();
-    this.plugin.syncHomeNavigationForLeaf(this.leaf);
     this.plugin.ensureIndexForView();
     this.plugin.ensureSearchIndexForView("view-open");
     this.restorePendingScroll();

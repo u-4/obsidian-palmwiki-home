@@ -2,6 +2,7 @@ import type { App, TFile, View, WorkspaceLeaf } from "obsidian";
 
 export const PALMWIKI_HOME_NAME = "PalmWiki Home";
 export const PALMWIKI_HOME_BUTTON_CLASS = "palmwiki-vault-home-button";
+export const PALMWIKI_MARKDOWN_PATH_CLASS = "palmwiki-markdown-note-path";
 
 export const HOME_BUTTON_ACTION_OPTIONS = {
   palmwikiHome: "Open PalmWiki Home",
@@ -33,7 +34,9 @@ interface ManagedHomeButton {
   button: HTMLButtonElement;
   host: HTMLElement;
   kind: "home" | "markdown";
+  leaf: WorkspaceLeaf;
   listener: EventListener;
+  path: HTMLElement | null;
   view: View;
 }
 
@@ -45,6 +48,7 @@ interface HeaderPlacement {
 interface HomeNavigationManagerOptions {
   getDisplayName: () => string;
   getMarkdownActionDescription: () => string;
+  getMarkdownPath: (leaf: WorkspaceLeaf) => string;
   onHomeActivate: (leaf: WorkspaceLeaf) => void;
   onMarkdownActivate: (leaf: WorkspaceLeaf, event: MouseEvent) => Promise<void>;
   palmWikiHomeViewType: string;
@@ -52,6 +56,30 @@ interface HomeNavigationManagerOptions {
 
 export function resolveHomeButtonLabel(configuredLabel: string, vaultName: string): string {
   return configuredLabel.trim() || vaultName.trim() || PALMWIKI_HOME_NAME;
+}
+
+export function resolveMarkdownLeafPath(app: App, leaf: WorkspaceLeaf): string {
+  const viewFile = (leaf.view as { file?: unknown }).file;
+  if (isMarkdownFile(viewFile)) {
+    return viewFile.path;
+  }
+
+  let stateFile = "";
+  try {
+    const state = leaf.getViewState().state;
+    stateFile =
+      state && typeof state === "object" && typeof state.file === "string"
+        ? state.file
+        : "";
+  } catch {
+    return "";
+  }
+  if (!stateFile) {
+    return "";
+  }
+
+  const resolved = app.vault.getAbstractFileByPath(stateFile);
+  return isMarkdownFile(resolved) ? resolved.path : "";
 }
 
 export function isHomeButtonAction(value: unknown): value is HomeButtonAction {
@@ -305,7 +333,7 @@ export class HomeNavigationManager {
 
   ensureLeaf(leaf: WorkspaceLeaf): void {
     const kind = this.getManagedKind(leaf);
-    if (!kind || shouldIgnoreLeaf(leaf)) {
+    if (!kind || shouldIgnorePalmWikiHeaderLeaf(leaf)) {
       this.removeLeaf(leaf);
       return;
     }
@@ -331,9 +359,13 @@ export class HomeNavigationManager {
       existing?.view === view &&
       existing.kind === kind &&
       existing.host === placement.host &&
-      existing.button.parentElement === placement.host
+      existing.button.parentElement === placement.host &&
+      (kind === "home" || existing.path?.parentElement === placement.host)
     ) {
       placement.host.insertBefore(existing.button, placement.before);
+      if (existing.path) {
+        placement.host.insertBefore(existing.path, placement.before);
+      }
       this.updateButton(existing);
       return;
     }
@@ -343,6 +375,11 @@ export class HomeNavigationManager {
       view.containerEl.querySelectorAll<HTMLElement>(`.${PALMWIKI_HOME_BUTTON_CLASS}`)
     )) {
       strayButton.remove();
+    }
+    for (const strayPath of Array.from(
+      view.containerEl.querySelectorAll<HTMLElement>(`.${PALMWIKI_MARKDOWN_PATH_CLASS}`)
+    )) {
+      strayPath.remove();
     }
 
     const button = ownerWindow.createEl("button");
@@ -358,16 +395,23 @@ export class HomeNavigationManager {
       }
     };
     button.addEventListener("click", listener);
+    const path = kind === "markdown" ? ownerWindow.createSpan() : null;
+    path?.classList.add(PALMWIKI_MARKDOWN_PATH_CLASS);
 
     const managed: ManagedHomeButton = {
       button,
       host: placement.host,
       kind,
+      leaf,
       listener,
+      path,
       view
     };
     this.buttons.set(leaf, managed);
     placement.host.insertBefore(button, placement.before);
+    if (path) {
+      placement.host.insertBefore(path, placement.before);
+    }
     this.updateButton(managed);
   }
 
@@ -385,6 +429,7 @@ export class HomeNavigationManager {
 
     managed.button.removeEventListener("click", managed.listener);
     managed.button.remove();
+    managed.path?.remove();
     this.buttons.delete(leaf);
   }
 
@@ -421,6 +466,12 @@ export class HomeNavigationManager {
     managed.button.textContent = displayName;
     managed.button.setAttribute("aria-label", description);
     managed.button.setAttribute("title", description);
+    if (managed.path) {
+      const path = this.options.getMarkdownPath(managed.leaf);
+      managed.path.textContent = path;
+      managed.path.setAttribute("aria-label", path ? `Note path: ${path}` : "Note path");
+      managed.path.setAttribute("title", path);
+    }
   }
 }
 
@@ -610,7 +661,7 @@ function findHeaderPlacement(containerEl: HTMLElement): HeaderPlacement | null {
   return header ? { host: header, before: header.firstChild } : null;
 }
 
-function shouldIgnoreLeaf(leaf: WorkspaceLeaf): boolean {
+export function shouldIgnorePalmWikiHeaderLeaf(leaf: WorkspaceLeaf): boolean {
   const containerEl = leaf.view.containerEl;
   const viewType = leaf.view.getViewType();
 

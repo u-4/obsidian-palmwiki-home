@@ -12,8 +12,10 @@ import {
   isPalmWikiHomeRenderRevisionCurrent,
   normalizeHomePageTarget,
   PALMWIKI_HOME_BUTTON_CLASS,
+  PALMWIKI_MARKDOWN_PATH_CLASS,
   resolveExistingHomePage,
   resolveHomeButtonLabel,
+  resolveMarkdownLeafPath,
   resolvePalmWikiHomeEphemeralScrollTop,
   shouldCompletePalmWikiScrollRestore,
   scrollPalmWikiHomeToTop
@@ -23,6 +25,28 @@ test("Home button label uses a configured label and falls back safely", () => {
   assert.equal(resolveHomeButtonLabel("My Home", "My Vault"), "My Home");
   assert.equal(resolveHomeButtonLabel("  ", "My Vault"), "My Vault");
   assert.equal(resolveHomeButtonLabel("", ""), "PalmWiki Home");
+});
+
+test("Markdown header path uses the current TFile and deferred view-state fallback", () => {
+  const current = makeFile("Folder/Current.md");
+  const deferred = makeFile("Restored/Deferred.md");
+  const { app } = makeApp([current, deferred]);
+  const currentLeaf = {
+    getViewState: () => ({ type: "markdown", state: { file: deferred.path } }),
+    view: { file: current }
+  } as unknown as WorkspaceLeaf;
+  const deferredLeaf = {
+    getViewState: () => ({ type: "markdown", state: { file: deferred.path } }),
+    view: { file: null }
+  } as unknown as WorkspaceLeaf;
+  const missingLeaf = {
+    getViewState: () => ({ type: "markdown", state: { file: "Missing.md" } }),
+    view: { file: null }
+  } as unknown as WorkspaceLeaf;
+
+  assert.equal(resolveMarkdownLeafPath(app, currentLeaf), current.path);
+  assert.equal(resolveMarkdownLeafPath(app, deferredLeaf), deferred.path);
+  assert.equal(resolveMarkdownLeafPath(app, missingLeaf), "");
 });
 
 test("Home button descriptions explain all three Markdown actions and Home scrolling", () => {
@@ -232,9 +256,11 @@ test("Home navigation manager avoids duplicates, updates labels, and cleans up",
     view
   } as unknown as WorkspaceLeaf;
   let label = "First Vault";
+  let notePath = "Folder/First note.md";
   const manager = new HomeNavigationManager({
     getDisplayName: () => label,
     getMarkdownActionDescription: () => "Open PalmWiki Home in this tab",
+    getMarkdownPath: () => notePath,
     onHomeActivate: () => undefined,
     onMarkdownActivate: async () => undefined,
     palmWikiHomeViewType: "palmwiki-home-view"
@@ -245,31 +271,38 @@ test("Home navigation manager avoids duplicates, updates labels, and cleans up",
   assert.equal(container.findByClass(PALMWIKI_HOME_BUTTON_CLASS).length, 1);
 
   const button = container.findByClass(PALMWIKI_HOME_BUTTON_CLASS)[0];
+  const path = container.findByClass(PALMWIKI_MARKDOWN_PATH_CLASS)[0];
   headerLeft.appendChild(historyButtons);
   manager.syncLeaves([leaf]);
   assert.equal(container.findByClass(PALMWIKI_HOME_BUTTON_CLASS).length, 1);
   assert.equal(headerLeft.children[0], historyButtons);
   assert.equal(headerLeft.children[1], button);
+  assert.equal(headerLeft.children[2], path);
   assert.equal(header.children[0], headerLeft);
   assert.equal(header.children[1], title);
   assert.equal(button.ownerDocument, document);
   assert.equal(button.textContent, "First Vault");
+  assert.equal(path.textContent, "Folder/First note.md");
+  assert.equal(path.attributes.get("title"), "Folder/First note.md");
   assert.equal(
     button.attributes.get("aria-label"),
     "First Vault: Open PalmWiki Home in this tab"
   );
 
   label = "Renamed Vault";
+  notePath = "Renamed/Second note.md";
   manager.updateLabels();
   assert.equal(button.textContent, "Renamed Vault");
   assert.equal(
     button.attributes.get("title"),
     "Renamed Vault: Open PalmWiki Home in this tab"
   );
+  assert.equal(path.textContent, "Renamed/Second note.md");
 
   container.isConnected = false;
   manager.syncLeaves([leaf]);
   assert.equal(container.findByClass(PALMWIKI_HOME_BUTTON_CLASS).length, 0);
+  assert.equal(container.findByClass(PALMWIKI_MARKDOWN_PATH_CLASS).length, 0);
 
   container.isConnected = true;
   manager.syncLeaves([leaf]);
@@ -300,6 +333,7 @@ test("Home navigation ignores actual hover containers without hiding their sourc
   const manager = new HomeNavigationManager({
     getDisplayName: () => "My Vault",
     getMarkdownActionDescription: () => "Open PalmWiki Home in this tab",
+    getMarkdownPath: () => "Source.md",
     onHomeActivate: () => undefined,
     onMarkdownActivate: async () => undefined,
     palmWikiHomeViewType: "palmwiki-home-view"
@@ -344,6 +378,7 @@ test("Home navigation preserves Back/Forward order in a compatible nested header
   const manager = new HomeNavigationManager({
     getDisplayName: () => "My Vault",
     getMarkdownActionDescription: () => "Open PalmWiki Home in this tab",
+    getMarkdownPath: () => "Nested.md",
     onHomeActivate: () => undefined,
     onMarkdownActivate: async () => undefined,
     palmWikiHomeViewType: "palmwiki-home-view"
@@ -352,9 +387,11 @@ test("Home navigation preserves Back/Forward order in a compatible nested header
   manager.syncLeaves([leaf]);
 
   const button = container.findByClass(PALMWIKI_HOME_BUTTON_CLASS)[0];
+  const path = container.findByClass(PALMWIKI_MARKDOWN_PATH_CLASS)[0];
   assert.equal(titleParent.children[0], historyButtons);
   assert.equal(titleParent.children[1], button);
-  assert.equal(titleParent.children[2], title);
+  assert.equal(titleParent.children[2], path);
+  assert.equal(titleParent.children[3], title);
 });
 
 interface FakeFile {
@@ -458,11 +495,15 @@ function makeScrollElement(
 }
 
 class FakeDocument {
-  defaultView: { createEl: (tagName: string) => FakeElement };
+  defaultView: {
+    createEl: (tagName: string) => FakeElement;
+    createSpan: () => FakeElement;
+  };
 
   constructor() {
     this.defaultView = {
-      createEl: (tagName) => this.createElement(tagName)
+      createEl: (tagName) => this.createElement(tagName),
+      createSpan: () => this.createElement("span")
     };
   }
 

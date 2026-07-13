@@ -1,8 +1,12 @@
 import type { PageRecord } from "./core/index/PageRecord";
+import { limitFullTextQueryEditorInput } from "./core/search/fullTextSearch";
 import { normalizePageNameText } from "./core/search/titleSuggestions";
 import type { SearchIndexState } from "./searchIndex";
 
 export const PALMWIKI_HOME_SEARCH_HOST_CLASS = "palmwiki-home-search-host";
+export const PALMWIKI_MARKDOWN_SEARCH_HOST_CLASS =
+  "palmwiki-markdown-search-host";
+export const PALMWIKI_MARKDOWN_HEADER_CLASS = "palmwiki-markdown-header";
 
 export interface SearchPageCreationContext {
   stateKey: string;
@@ -67,6 +71,46 @@ export function createPalmWikiHomeSearchHost(
   const host = ownerWindow.createDiv({ cls: PALMWIKI_HOME_SEARCH_HOST_CLASS });
   titleContainer.appendChild(host);
   return host;
+}
+
+export function createMarkdownHeaderSearchHost(
+  viewContainer: HTMLElement
+): HTMLElement | null {
+  if (isPopoverContext(viewContainer)) {
+    return null;
+  }
+
+  const titleContainer = viewContainer.querySelector<HTMLElement>(
+    ".view-header-title-container"
+  );
+  const ownerWindow = viewContainer.ownerDocument.defaultView;
+  if (!titleContainer || !ownerWindow) {
+    return null;
+  }
+
+  for (const stray of Array.from(
+    viewContainer.querySelectorAll<HTMLElement>(
+      `.${PALMWIKI_MARKDOWN_SEARCH_HOST_CLASS}`
+    )
+  )) {
+    stray.remove();
+  }
+
+  const host = ownerWindow.createDiv({
+    cls: `${PALMWIKI_HOME_SEARCH_HOST_CLASS} ${PALMWIKI_MARKDOWN_SEARCH_HOST_CLASS}`
+  });
+  titleContainer.appendChild(host);
+  return host;
+}
+
+export function createPalmWikiHomeSearchState(
+  query: string
+): { searchQuery: string; submittedSearchQuery: string } {
+  const normalizedQuery = limitFullTextQueryEditorInput(query.trim());
+  return {
+    searchQuery: normalizedQuery,
+    submittedSearchQuery: normalizedQuery
+  };
 }
 
 export function hasExactPageName(

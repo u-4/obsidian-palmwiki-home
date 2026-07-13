@@ -13,8 +13,11 @@ import {
 } from "../core/search/titleSuggestions";
 
 interface HomeSearchBarProps {
+  ariaLabel?: string;
+  clearAriaLabel?: string;
   getRecentPaths: () => string[];
   onClear: () => void;
+  onFocus?: () => void;
   onOpenSuggestion: (path: string) => void;
   onQueryChange: (query: string) => void;
   onRegisterInput: (input: HTMLInputElement | null) => void;
@@ -26,8 +29,11 @@ interface HomeSearchBarProps {
 const TITLE_SUGGESTION_DELAY_MS = 100;
 
 export function HomeSearchBar({
+  ariaLabel = "Search PalmWiki Home",
+  clearAriaLabel = "Clear PalmWiki Home search",
   getRecentPaths,
   onClear,
+  onFocus,
   onOpenSuggestion,
   onQueryChange,
   onRegisterInput,
@@ -156,7 +162,7 @@ export function HomeSearchBar({
         aria-autocomplete="list"
         aria-controls={isOpen ? listboxId : undefined}
         aria-expanded={isOpen}
-        aria-label="Search PalmWiki Home"
+        aria-label={ariaLabel}
         className="palmwiki-home-search-input"
         maxLength={MAX_FULL_TEXT_QUERY_EDITOR_LENGTH}
         onChange={(event) => {
@@ -166,6 +172,7 @@ export function HomeSearchBar({
         onFocus={() => {
           setRecentPaths(getRecentPaths());
           setIsOpen(true);
+          onFocus?.();
         }}
         onKeyDown={handleKeyDown}
         placeholder="Search pages…"
@@ -178,7 +185,7 @@ export function HomeSearchBar({
       />
       {query ? (
         <button
-          aria-label="Clear PalmWiki Home search"
+          aria-label={clearAriaLabel}
           className="palmwiki-home-search-clear"
           onClick={() => {
             onClear();
