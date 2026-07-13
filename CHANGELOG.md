@@ -6,6 +6,12 @@ The project uses versions from `manifest.json`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-13
+
+- Added the PalmWiki Home search field to every eligible normal Markdown header, with leaf-owned recent/title suggestions and same-leaf full-text search submission.
+- Replaced the redundant normal-Markdown center title with the search field and added a small, muted canonical Vault-relative path immediately after the upper-left Home button.
+- Kept header mounting lazy and owner-document scoped, with Hover/Popover exclusion, per-leaf React cleanup, and no index work merely from displaying the field.
+
 ## [0.3.1] - 2026-07-13
 
 - Unified Card, Table, recent-page, title-suggestion, and search-result activation on the owning PalmWiki Home leaf, with the same failure rollback path for existing Markdown files.

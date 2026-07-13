@@ -29,7 +29,7 @@
 
 - Open several Markdown leaves in multiple splits, including inactive leaves, Live Preview, and Reading view.
 - Confirm each eligible Markdown leaf has exactly one PalmWiki-styled button before its title.
-- Confirm the left-header order is Back/Forward, PalmWiki Home button, then the note title.
+- Confirm the left-header order is Back/Forward, PalmWiki Home button, then the small muted canonical Vault-relative path.
 - In a PalmWiki Home leaf, confirm the centered `PalmWiki Home` header text is hidden while the title-container area remains available.
 - Confirm Canvas, Settings, unrelated custom views, Hover Preview, Hover Editor, and popovers do not receive the button.
 - Leave `Home button label` empty and confirm the current Vault name is used; enter a custom label and confirm text, tooltip, and accessible label update on every eligible leaf without reopening it.
@@ -43,6 +43,21 @@
 - Move an eligible leaf to a pop-out window and repeat label, action, and Home scroll checks.
 - Close leaves, disable/reload the plugin, and confirm no duplicate or stale PalmWiki button remains.
 - With 2Hop Links Plus installed, confirm its upper-right controls and DOM remain unchanged and PalmWiki Home still works after 2Hop Links Plus is disabled.
+
+## Markdown Header Search Checks
+
+- In Live Preview, Source mode, and Reading view, confirm the native centered note title is hidden and exactly one PalmWiki search field occupies that title-container area.
+- Resize to a narrow split. Confirm the Home button remains usable, the path truncates without wrapping, and the complete path remains in its tooltip/accessibility name.
+- Rename or move the open note, use Back/Forward, and switch files in an inactive split. Confirm each leaf shows its own current `TFile.path` and no other split's path.
+- Focus an empty field and confirm up to ten recent existing in-scope Markdown pages appear. Type width/case/kana variants and confirm title, basename, and alias suggestions match as in Home.
+- Choose a suggestion and confirm it replaces the Markdown leaf that owns the field, even when another split was previously active.
+- Enter a body query without selecting a suggestion. Confirm that owning Markdown leaf becomes PalmWiki Home search results, then use Back and confirm the exact source note returns.
+- Assign a hotkey to `PalmWiki Home: Focus search`. Confirm it focuses the active Markdown field; in Home it focuses the Home field; from an unsupported view it retains the normal Open Home fallback.
+- Restart with `Index on startup` off and Home closed. Confirm merely displaying Markdown fields performs no full-Vault read. Focus one field and confirm only then the display index is requested after the idle delay; submit body search and confirm full-text search starts once.
+- Open two Markdown splits, type different drafts, and confirm their queries, suggestions, and actions remain independent. Repeat after moving one split to a pop-out window.
+- Open Hover Preview and Hover Editor. Confirm neither receives the field, path, hidden-title class, or Home button, while the normal source Markdown leaf keeps all four behaviors.
+- Disable and re-enable the plugin after opening fields in multiple modes/windows. Confirm React roots, suggestion popups, search hosts, path labels, and hidden-title classes are removed, then exactly one of each returns.
+- With 2Hop Links Plus enabled and disabled, confirm its upper-right controls and inline content are neither moved nor hidden by the Markdown header changes.
 
 ## Card Same-Leaf Checks
 

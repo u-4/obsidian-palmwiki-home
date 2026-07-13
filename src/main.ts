@@ -42,6 +42,7 @@ import {
   HomeNavigationManager,
   resolveExistingHomePage,
   resolveHomeButtonLabel,
+  resolveMarkdownLeafPath,
   scrollPalmWikiHomeToTop
 } from "./homeNavigation";
 import {
@@ -69,8 +70,11 @@ import { CreateSearchPageModal } from "./ui/CreateSearchPageModal";
 import { normalizePageNameText } from "./core/search/titleSuggestions";
 import {
   captureSearchPageCreationContext,
+  createPalmWikiHomeSearchState,
   isSearchPageCreationContextCurrent
 } from "./homeSearch";
+import { MarkdownHeaderSearchManager, isMarkdownLeaf } from "./markdownHeaderSearch";
+import { mountMarkdownHeaderSearch } from "./ui/MarkdownHeaderSearch";
 
 export interface PalmWikiHomeIndexState {
   indexPhase: IndexPhase;
@@ -142,6 +146,7 @@ export default class PalmWikiHomePlugin extends Plugin {
   private indexRequested = false;
   private indexEventsRegistered = false;
   private homeNavigation: HomeNavigationManager | null = null;
+  private markdownHeaderSearch: MarkdownHeaderSearchManager | null = null;
   private searchIndex: SearchIndexManager | null = null;
   private searchIndexRequested = false;
   private searchNavigationGeneration = new WeakMap<WorkspaceLeaf, number>();
@@ -172,6 +177,7 @@ export default class PalmWikiHomePlugin extends Plugin {
           this.app.vault.getName()
         ),
       getMarkdownActionDescription: () => this.getHomeButtonActionDescription(),
+      getMarkdownPath: (leaf) => resolveMarkdownLeafPath(this.app, leaf),
       onHomeActivate: (leaf) => {
         this.app.workspace.setActiveLeaf(leaf, { focus: true });
         scrollPalmWikiHomeToTop(leaf.view.containerEl);
@@ -180,6 +186,19 @@ export default class PalmWikiHomePlugin extends Plugin {
         await this.activateMarkdownHomeButton(leaf, event);
       },
       palmWikiHomeViewType: PALMWIKI_HOME_VIEW_TYPE
+    });
+
+    this.markdownHeaderSearch = new MarkdownHeaderSearchManager({
+      getPages: () => this.pages,
+      getRecentPaths: () => this.app.workspace.getLastOpenFiles(),
+      mountSearch: mountMarkdownHeaderSearch,
+      onFocus: () => this.ensureIndexForHeaderSearch(),
+      onOpenSuggestion: (leaf, path) => {
+        void this.openPageInLeaf(path, leaf);
+      },
+      onSubmit: (leaf, query) => {
+        void this.openSearchInLeaf(query, leaf);
+      }
     });
 
     this.registerView(
@@ -241,6 +260,8 @@ export default class PalmWikiHomePlugin extends Plugin {
   onunload(): void {
     this.unloaded = true;
     this.removeCardPreviewSource();
+    this.markdownHeaderSearch?.removeAll();
+    this.markdownHeaderSearch = null;
     this.homeNavigation?.removeAll();
     this.homeNavigation = null;
     this.searchIndex?.unload();
@@ -277,11 +298,26 @@ export default class PalmWikiHomePlugin extends Plugin {
   }
 
   async focusSearch(): Promise<void> {
-    let view = this.app.workspace.getActiveViewOfType(PalmWikiHomeView);
-    if (!view) {
-      await this.openHomeView();
-      view = this.app.workspace.getActiveViewOfType(PalmWikiHomeView);
+    const activeHomeView = this.app.workspace.getActiveViewOfType(PalmWikiHomeView);
+    if (activeHomeView) {
+      this.ensureSearchIndexForView("focus-search");
+      const ownerWindow = activeHomeView.containerEl.ownerDocument.defaultView;
+      ownerWindow?.requestAnimationFrame(() => activeHomeView.focusSearch());
+      return;
     }
+
+    const activeLeaf = this.app.workspace.getMostRecentLeaf();
+    if (activeLeaf && isMarkdownLeaf(activeLeaf)) {
+      this.syncHomeNavigationButtons();
+      if (this.markdownHeaderSearch?.focusLeaf(activeLeaf)) {
+        return;
+      }
+      new Notice("Could not focus PalmWiki Home search in this note.");
+      return;
+    }
+
+    await this.openHomeView();
+    const view = this.app.workspace.getActiveViewOfType(PalmWikiHomeView);
 
     if (!view) {
       new Notice("Could not open PalmWiki Home search.");
@@ -395,6 +431,19 @@ export default class PalmWikiHomePlugin extends Plugin {
       undefined,
       `Could not open PalmWiki Home page: ${path}`
     );
+  }
+
+  async openSearchInLeaf(query: string, leaf: WorkspaceLeaf): Promise<void> {
+    if (this.unloaded || !isMarkdownLeaf(leaf)) {
+      return;
+    }
+    const state = createPalmWikiHomeSearchState(query);
+    if (!state.submittedSearchQuery) {
+      return;
+    }
+
+    this.bumpSearchNavigationGeneration(leaf);
+    await this.openPalmWikiHomeInLeaf(leaf, state);
   }
 
   async openSearchResultInLeaf(
@@ -687,9 +736,11 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   syncHomeNavigationForLeaf(leaf: WorkspaceLeaf): void {
     this.homeNavigation?.ensureLeaf(leaf);
+    this.markdownHeaderSearch?.ensureLeaf(leaf);
   }
 
   removeHomeNavigationForLeaf(leaf: WorkspaceLeaf): void {
+    this.markdownHeaderSearch?.removeLeaf(leaf);
     this.homeNavigation?.removeLeaf(leaf);
   }
 
@@ -772,14 +823,18 @@ export default class PalmWikiHomePlugin extends Plugin {
     new Notice(`Home command is unavailable in the current context: ${commandId}`);
   }
 
-  private async openPalmWikiHomeInLeaf(leaf: WorkspaceLeaf): Promise<void> {
+  private async openPalmWikiHomeInLeaf(
+    leaf: WorkspaceLeaf,
+    state?: Record<string, unknown>
+  ): Promise<void> {
     const previousViewState = leaf.getViewState();
     const previousEphemeralState: unknown = leaf.getEphemeralState();
 
     try {
       await leaf.setViewState({
         type: PALMWIKI_HOME_VIEW_TYPE,
-        active: true
+        active: true,
+        ...(state ? { state } : {})
       });
       if (leaf.view.getViewType() !== PALMWIKI_HOME_VIEW_TYPE) {
         throw new Error("PalmWiki Home view type was not activated");
@@ -863,6 +918,11 @@ export default class PalmWikiHomePlugin extends Plugin {
       })
     );
     this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        this.syncHomeNavigationButtons();
+      })
+    );
+    this.registerEvent(
       this.app.workspace.on("window-open", (_workspaceWindow, ownerWindow) => {
         ownerWindow.requestAnimationFrame(() => {
           this.syncHomeNavigationButtons();
@@ -881,10 +941,12 @@ export default class PalmWikiHomePlugin extends Plugin {
       return;
     }
 
+    const markdownLeaves = this.app.workspace.getLeavesOfType("markdown");
     this.homeNavigation.syncLeaves([
-      ...this.app.workspace.getLeavesOfType("markdown"),
+      ...markdownLeaves,
       ...this.app.workspace.getLeavesOfType(PALMWIKI_HOME_VIEW_TYPE)
     ]);
+    this.markdownHeaderSearch?.syncLeaves(markdownLeaves);
 
     for (const leaf of this.app.workspace.getLeavesOfType(PALMWIKI_HOME_VIEW_TYPE)) {
       if (leaf.view instanceof PalmWikiHomeView) {
@@ -902,6 +964,22 @@ export default class PalmWikiHomePlugin extends Plugin {
 
     if (this.layoutReady && (this.indexDirty || this.pages.length === 0)) {
       void this.prepareIndexForUse("view-open", false);
+    }
+  }
+
+  ensureIndexForHeaderSearch(): void {
+    this.indexRequested = true;
+
+    if (!this.cacheHydrated && !this.unloaded) {
+      void this.hydrateIndexCache();
+    }
+
+    if (this.layoutReady && (this.indexDirty || this.pages.length === 0)) {
+      void this.prepareIndexForUse(
+        "header-search-focus",
+        true,
+        VIEW_OPEN_IDLE_DELAY_MS
+      );
     }
   }
 
@@ -1268,7 +1346,8 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   private async prepareIndexForUse(
     reason: string,
-    allowBackground: boolean
+    allowBackground: boolean,
+    initialDelayMs?: number
   ): Promise<void> {
     this.indexRequested = true;
     const workGeneration = this.automaticWorkGeneration;
@@ -1304,7 +1383,9 @@ export default class PalmWikiHomePlugin extends Plugin {
       return;
     }
 
-    const delayMs = allowBackground ? STARTUP_IDLE_DELAY_MS : VIEW_OPEN_IDLE_DELAY_MS;
+    const delayMs =
+      initialDelayMs ??
+      (allowBackground ? STARTUP_IDLE_DELAY_MS : VIEW_OPEN_IDLE_DELAY_MS);
     this.preparationPromise = (async () => {
       await this.waitForPaintAndIdle(delayMs);
       if (this.unloaded || workGeneration !== this.automaticWorkGeneration) {
@@ -1662,6 +1743,7 @@ export default class PalmWikiHomePlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
+        this.syncHomeNavigationButtons();
         this.searchIndex?.handleFileRename(file, oldPath);
         if (file instanceof TFile && (file.extension === "md" || oldPath.endsWith(".md"))) {
           this.bodyMetadataCache.delete(oldPath);
@@ -1858,6 +1940,7 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   private notifyIndexListeners(): void {
     const state = this.getIndexState();
+    this.markdownHeaderSearch?.updatePages(state.pages);
 
     for (const listener of this.indexListeners) {
       listener(state);

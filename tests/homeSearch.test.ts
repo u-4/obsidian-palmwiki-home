@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { MAX_FULL_TEXT_QUERY_EDITOR_LENGTH } from "../src/core/search/fullTextSearch";
 import {
   canUseFullTextSearchIndex,
   captureSearchPageCreationContext,
+  createPalmWikiHomeSearchState,
   hasExactPageName,
   isSearchPageCreationContextCurrent,
   shouldClearFullTextSearchResults,
@@ -95,4 +97,18 @@ test("search results and create-page actions are disabled after a fatal index er
   assert.equal(shouldClearFullTextSearchResults(recoverableError), false);
   assert.equal(canUseFullTextSearchIndex(fatalError), false);
   assert.equal(shouldClearFullTextSearchResults(fatalError), true);
+});
+
+test("Markdown header submissions become a bounded PalmWiki Home search state", () => {
+  assert.deepEqual(createPalmWikiHomeSearchState("  airway guideline  "), {
+    searchQuery: "airway guideline",
+    submittedSearchQuery: "airway guideline"
+  });
+  assert.deepEqual(createPalmWikiHomeSearchState("   "), {
+    searchQuery: "",
+    submittedSearchQuery: ""
+  });
+  const bounded = createPalmWikiHomeSearchState("a".repeat(400));
+  assert.equal(bounded.searchQuery.length, MAX_FULL_TEXT_QUERY_EDITOR_LENGTH);
+  assert.equal(bounded.submittedSearchQuery, bounded.searchQuery);
 });
