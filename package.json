@@ -30,17 +30,17 @@
   },
   "homepage": "https://github.com/u-4/obsidian-palmwiki-home#readme",
   "devDependencies": {
-    "@eslint/js": "^9.39.5",
-    "@eslint/json": "^0.14.0",
-    "@types/node": "^22.10.2",
+    "@eslint/js": "^10.0.1",
+    "@eslint/json": "^2.0.1",
+    "@types/node": "^26.1.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "esbuild": "^0.25.12",
-    "eslint": "^9.39.5",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.7.0",
     "eslint-plugin-obsidianmd": "^0.4.1",
     "globals": "^17.7.0",
     "obsidian": "latest",
-    "typescript": "^5.7.2",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.63.0"
   },
   "dependencies": {
