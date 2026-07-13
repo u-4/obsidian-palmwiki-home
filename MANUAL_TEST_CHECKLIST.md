@@ -51,6 +51,18 @@
 - `[x]` 118件の自動テスト、production build、公式Obsidian ESLint、`git diff --check`が成功する。
 - `[x]` `package.json`、lockfile、`manifest.json`、`versions.json`を0.4.0へ揃え、厳格なRelease検証とmoderate基準の依存監査（既知脆弱性0件）が成功する。
 
+公開結果:
+
+- Pull Request: [#16](https://github.com/u-4/obsidian-palmwiki-home/pull/16)
+- Release tag commit: `a2bb139`（タグ`0.4.0`）
+- PR CI: [29251935466](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29251935466)
+- Main CI: [29252020672](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29252020672)
+- Release workflow: [29252133885](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29252133885)
+- 公開Release: [PalmWiki Home 0.4.0](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.4.0)
+- 公開成果物のSHA-256: `main.js` `abcfcdf2ca77d6152f4b2e2c9bf0dd985234ea286ea193663b9d532de13ae83d`、`manifest.json` `13b20bcd4008980fa147ea6e52e57235d503e9322e301d61dd2f233fc45cbd7a`、`styles.css` `2cbca2f971114f3ef20f7e81066377bd9f005ea674b70499dfeac87f8bf42e4e`
+- `[x]` 通常のLatest Releaseとして公開され、Assetsが3成果物だけであることを確認した。
+- `[x]` 公開URLから3成果物を再取得し、GitHub Digest、ローカルbuild、`PalmWiki_LocalTest`配置物のSHA-256が一致した。
+
 `PalmWiki_LocalTest`で確認した項目（2026-07-13）:
 
 - `[x]` Live Preview、Source mode、Reading viewで「戻る・進む → Homeボタン → 薄いパス」と中央検索欄が各1個で、中央ノートタイトルと重複するフォルダーパンくずは表示されない。
