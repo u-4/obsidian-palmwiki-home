@@ -6,6 +6,12 @@ The project uses versions from `manifest.json`.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-13
+
+- Unified Card, Table, recent-page, title-suggestion, and search-result activation on the owning PalmWiki Home leaf, with the same failure rollback path for existing Markdown files.
+- Scoped Card preview ownership to the PalmWiki Home view and explicitly cleared any remaining preview when that view closes or is replaced.
+- Kept note opening on Obsidian's public `WorkspaceLeaf.openFile()` path without re-emitting workspace events or adding a 2Hop Links Plus runtime dependency.
+
 ## [0.3.0] - 2026-07-13
 
 - Added a Cosense-style Home-header search field with recent-page suggestions, fuzzy page-name completion, and an Obsidian-configurable `Focus search` command.

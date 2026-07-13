@@ -2,6 +2,8 @@ import {
   ItemView,
   TFile,
   WorkspaceLeaf,
+  type HoverParent,
+  type HoverPopover,
   type ViewStateResult
 } from "obsidian";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -54,7 +56,9 @@ export type PagePreviewHandler = (
   event: MouseEvent
 ) => void;
 
-export class PalmWikiHomeView extends ItemView {
+export class PalmWikiHomeView extends ItemView implements HoverParent {
+  hoverPopover: HoverPopover | null = null;
+
   private plugin: PalmWikiHomePlugin;
   private root: Root | null = null;
   private searchHost: HTMLElement | null = null;
@@ -107,6 +111,13 @@ export class PalmWikiHomeView extends ItemView {
   async onClose(): Promise<void> {
     this.cancelPendingScrollFrame();
     this.plugin.removeHomeNavigationForLeaf(this.leaf);
+    try {
+      this.hoverPopover?.unload();
+    } catch (error) {
+      console.error("Could not close PalmWiki Home card preview", error);
+    } finally {
+      this.hoverPopover = null;
+    }
     this.searchInput = null;
     this.root?.unmount();
     this.root = null;
@@ -186,6 +197,7 @@ export class PalmWikiHomeView extends ItemView {
     this.root.render(
       <PalmWikiHomeRoot
         initialState={this.savedState}
+        hoverParent={this}
         key={renderedRevision}
         leaf={this.leaf}
         onRegisterSearchInput={(input) => {
@@ -280,6 +292,7 @@ export interface PalmWikiHomeSavedViewState {
 }
 
 interface PalmWikiHomeRootProps {
+  hoverParent: HoverParent;
   initialState: PalmWikiHomeSavedViewState;
   leaf: WorkspaceLeaf;
   onContentRendered: (contentReady: boolean) => void;
@@ -291,6 +304,7 @@ interface PalmWikiHomeRootProps {
 }
 
 function PalmWikiHomeRoot({
+  hoverParent,
   initialState,
   leaf,
   onContentRendered,
@@ -661,16 +675,16 @@ function PalmWikiHomeRoot({
 
   const openTablePage = useCallback(
     (path: string) => {
-      void plugin.openPage(path);
+      void plugin.openPageInLeaf(path, leaf);
     },
-    [plugin]
+    [leaf, plugin]
   );
 
   const previewCardPage = useCallback(
     (path: string, targetEl: HTMLElement, event: MouseEvent) => {
-      plugin.previewCardPage(path, leaf, targetEl, event);
+      plugin.previewCardPage(path, hoverParent, targetEl, event);
     },
-    [leaf, plugin]
+    [hoverParent, plugin]
   );
 
   const togglePinned = useCallback(

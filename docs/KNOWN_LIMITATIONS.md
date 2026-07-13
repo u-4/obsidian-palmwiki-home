@@ -1,6 +1,6 @@
 # Known Limitations
 
-- Version 0.3.0 targets Obsidian Desktop 1.12.7 or later and has been verified only on Obsidian 1.12.7 for macOS. Windows and Linux are not yet verified.
+- Version 0.3.1 targets Obsidian Desktop 1.12.7 or later and has been verified only on Obsidian 1.12.7 for macOS. Windows and Linux are not yet verified.
 - iOS and Android are not supported or verified yet. macOS iPhone Mirroring with Computer Use can provide a supplementary screen and basic-tap smoke test, but cannot establish native iOS compatibility, background restoration, touch/keyboard behavior, or file-operation compatibility. Native iOS testing is the next compatibility phase after full-text search.
 - Full-text search matches local Markdown strings and Vault links. It does not search OCR, attachment contents, or multiple Vaults, and it does not perform vector/AI semantic search or automatic synonym expansion. Whitespace-separated terms use AND semantics. One query is limited to 256 characters and eight total terms including exclusions; an over-limit query is not executed.
 - Search ranking combines body, page-name, alias, tag, and path evidence with direct links, paths of at most two hops, and the existing PageRank-like score. It is an explainable approximation, not Cosense's private algorithm, and results depend on each Vault's link structure.
@@ -26,3 +26,4 @@
 - Immediately after workspace restoration, an inactive deferred tab may not yet expose its current Markdown file or command context. Manually entered relative pages, local headings, and Markdown-context commands can remain unavailable until that tab finishes loading; exact Vault-relative paths saved by the page chooser are unaffected.
 - Card preview uses Obsidian's Page preview core plugin and remains unavailable while that core plugin is disabled. If the `PalmWiki Home cards` modifier requirement is changed in Obsidian's Page preview settings, that core setting is the final authority for whether a modifier is required.
 - Removing a Card preview source uses a guarded workspace compatibility call because source removal is not included in Obsidian's public type declarations. Unsupported versions keep Card clicks working and stop emitting preview requests safely.
+- PalmWiki Home opens existing Markdown files through Obsidian's public `WorkspaceLeaf.openFile()` API and does not manually re-emit workspace events. Other plugins that inject DOM into a newly created Markdown view must independently wait until their own injection host is ready.

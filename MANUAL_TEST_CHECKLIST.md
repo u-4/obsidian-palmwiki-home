@@ -5,6 +5,31 @@
 - `[x]` 自動確認またはObsidian実画面で確認済み
 - `[ ]` 未実施、または公開操作時にだけ確認する項目
 
+## 0.3.1 ItemView → Markdown互換性（2026-07-13）
+
+自動・調査確認:
+
+- `[x]` PalmWiki Home表示中にObsidian標準のファイルエクスプローラからMarkdownを開いても、初回だけ2Hop本文内表示が出ないことを再現し、PalmWiki固有のクリック処理だけが原因ではないと確認した。
+- `[x]` PalmWiki Homeは公開APIの`WorkspaceLeaf.openFile()`を維持し、workspaceイベントの手動再発火、2Hopのimport・設定・DOM参照を追加していない。
+- `[x]` Card、Table、最近のページ、ページ候補、検索結果が所有Home leafの同じ失敗時復元経路を使う。
+- `[x]` Card previewは`PalmWikiHomeView`が所有し、view終了時に残っているpopoverを解除する。
+- `[x]` PalmWiki Homeの`npm run check`が113件、2Hop候補のテスト15件、build、公式lint、diff check、依存監査、3,000ノート相当benchmarkが成功する。
+
+`PalmWiki_LocalTest`で確認する項目:
+
+- `[x]` Card、Table、最近のページ、ページ名候補、本文検索結果から同じleafでMarkdownを開いた初回に2Hop本文内表示が現れる。
+- `[x]` 本文検索結果から開いた初回に2Hop本文内表示が現れる。検索一致位置への直接移動との両立だけは別途再確認する。
+- `[x]` PalmWiki Home表示中にObsidian標準のファイルエクスプローラと標準検索から開いた初回にも2Hop本文内表示が現れる。
+- `[x]` Live Preview、Source mode、Reading view、別Markdownへの通常移動、Back / Forwardで2Hop本文内表示と右上ボタン1個を維持する。
+- `[x]` Live Preview → Reading view → Source mode → Live Previewの往復で、現行ノートの本文2Hopと右上ボタン1個を維持する。
+- `[x]` Reading viewで別ノートへ移動してLive Previewへ戻しても、前ノート固有の2Hopカードがhidden hostから復活しない。
+- `[ ]` 同じ候補を複数splitとpop-outでも再確認する。
+- `[ ]` Card previewを表示してからクリックしてもpreview所有状態が移動先Markdownへ残らない。
+- `[x]` ノートAからBへ素早く切り替えても、遅れた処理がAへ描画せずBだけに表示する。
+- `[x]` MarkdownからPalmWiki Homeへ戻って3秒以上待っても、2Hop本文内表示、右上ボタン、検索欄がHomeへ残らない。
+- `[x]` 2Hopのseparate paneを有効にしたままLive PreviewとReading viewを往復し、本文内2Hopと右上ボタンが0、設定を戻して現行ノートの表示が1組だけ復帰する。
+- `[x]` 2Hopを無効化して反対modeへ切り替え、5秒待ってもhidden本文や右上ボタンが復活しない。再有効化後は現行ノートの表示が1組だけ復帰する。
+
 ## 0.2.1 Release verification
 
 - `[x]` 設定に`Off`、`Cmd/Ctrl + hover`、`Hover`が表示され、既存設定の既定値は`Cmd/Ctrl + hover`になる。
