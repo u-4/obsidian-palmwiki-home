@@ -6,6 +6,7 @@ import {
   Plugin,
   TAbstractFile,
   TFile,
+  type HoverParent,
   type ViewState,
   type WorkspaceLeaf
 } from "obsidian";
@@ -657,7 +658,7 @@ export default class PalmWikiHomePlugin extends Plugin {
 
   previewCardPage(
     path: string,
-    leaf: WorkspaceLeaf,
+    hoverParent: HoverParent,
     targetEl: HTMLElement,
     event: MouseEvent
   ): void {
@@ -676,7 +677,7 @@ export default class PalmWikiHomePlugin extends Plugin {
       "hover-link",
       createCardPreviewEventPayload({
         event,
-        hoverParent: leaf,
+        hoverParent,
         path: abstractFile.path,
         source,
         targetEl

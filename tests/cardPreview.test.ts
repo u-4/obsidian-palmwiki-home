@@ -27,7 +27,7 @@ test("Card preview mode validation rejects unknown saved values", () => {
   assert.equal(isCardPreviewMode(null), false);
 });
 
-test("Card previews use the canonical path and clicked Home leaf as hover parent", () => {
+test("Card previews use the canonical path and provided Home view as hover parent", () => {
   const event = {} as MouseEvent;
   const hoverParent = { hoverPopover: null } as HoverParent;
   const targetEl = {} as HTMLElement;

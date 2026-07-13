@@ -50,7 +50,8 @@
 - Click a Card in one Home leaf and confirm that clicked Home leaf becomes the selected Markdown page, while the other split and tab count remain unchanged.
 - Activate a Card title/body with Enter and Space and confirm the same-leaf behavior.
 - Confirm the Card pin button still changes only pin state and does not open the page.
-- Switch to Table and confirm its existing page-opening behavior has not regressed.
+- Switch to Table and confirm the page-name button replaces that same Home leaf, while the
+  other split and tab count remain unchanged.
 
 ## Card Preview Checks
 
@@ -61,8 +62,14 @@
 - Confirm hovering or clicking the Pin button never opens a preview and changes only pin state.
 - Confirm clicking a preview-enabled Card still replaces that same Home leaf, without creating another tab.
 - Repeat in a pop-out window and confirm the preview is owned by that window and is removed when the pointer leaves.
+- Open a preview, then click the Card. Confirm preview ownership is cleared with
+  the Home view and does not remain attached to the resulting Markdown leaf.
 - Change only `Card preview` with performance logging enabled and confirm no index rebuild or full-Vault body read starts.
 - Disable the Page preview core plugin and confirm Card hover fails silently while Card click still works.
+- With inline 2Hop Links Plus enabled, open Markdown from Card, Table, search
+  result, recent/title suggestion, File Explorer, and Obsidian Search while Home
+  is active. Confirm 2-hop content appears on the first open without another tab
+  switch. Repeat in Live Preview, Source mode, and Reading view.
 
 ## Full-Text Search Checks
 

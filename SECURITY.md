@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-セキュリティ修正の対象は、原則として最新の`0.2.x`系列です。古い版を使用している場合は、まず最新のGitHub Releaseで再現するか確認してください。
+セキュリティ修正の対象は、原則として最新のGitHub Releaseです。古い版を使用している場合は、まず最新版で再現するか確認してください。
 
 ## Reporting a vulnerability
 
