@@ -33,6 +33,18 @@
 - `[ ]` iPhone実機で再起動・タブ復元、バックグラウンド復帰、Card/Table同一leaf移動、Back/Forward、検索索引作成中の応答性とメモリを確認する。
 - `[x]` iOSライフサイクル確認が完了するまでは公開manifestの`isDesktopOnly`とREADMEのdesktop-only表示を変更しない。
 
+公開結果:
+
+- Pull Request: [#18](https://github.com/u-4/obsidian-palmwiki-home/pull/18)
+- Release tag commit: `fc60dc7`（タグ`0.5.0`）
+- PR CI: [29410044094](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29410044094)
+- Main CI: [29410125218](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29410125218)
+- Release workflow: [29410359415](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29410359415)
+- 公開Release: [PalmWiki Home 0.5.0](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.5.0)
+- 公開成果物のSHA-256: `main.js` `a7f87cad4f9a9e9172659a53aa3109bf272fae120b2fb83cf31feca1b3c0253a`、`manifest.json` `d51e136a0fd26b2fec4b30c020829d7901c37aff93a3c7320a2854eb14649195`、`styles.css` `26b7d509a033798f4ed848e5fe7ad55c2279b9ffa4ddb125e0f51b54f92ac330`
+- `[x]` 通常のLatest Releaseとして公開され、Assetsが3成果物だけであることを確認した。
+- `[x]` 公開URLから3成果物を再取得し、GitHub DigestとローカルbuildのSHA-256が一致した。
+
 ## 0.3.1 ItemView → Markdown互換性（2026-07-13）
 
 自動・調査確認:
