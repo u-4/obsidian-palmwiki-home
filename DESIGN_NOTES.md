@@ -121,7 +121,7 @@ PageRank-only ignored source settings allow broad diary/journal/MOC sources to s
 
 ## Settings
 
-Settings are persisted through Obsidian plugin data and normalized after load/update. The Phase 1 settings include include/exclude folders, pinned page paths, default view/sort preferences, card display options, and card size. Home navigation adds `homeButtonLabel`, `homeButtonAction`, `homeButtonPagePath`, and `homeButtonCommandId`; missing 0.1.0 values receive safe defaults. These navigation-only settings do not change the index fingerprint or request a Vault rebuild.
+Settings are persisted through Obsidian plugin data and normalized after load/update. The Phase 1 settings include include/exclude folders, pinned page paths, default view/sort preferences, card display options, card size, and the independently selected `portrait` / `square` card shape. Missing card-shape values normalize to `portrait`, preserving the 0.4.0 layout. `squareTwoColumnMaxWidth` defaults to 480 CSS pixels, rounds to an integer, and is clamped to 280..1600; it describes the measured Card-grid content width rather than a device or physical-screen resolution. Home navigation adds `homeButtonLabel`, `homeButtonAction`, `homeButtonPagePath`, and `homeButtonCommandId`; missing 0.1.0 values receive safe defaults. Navigation and card-presentation settings do not change the index fingerprint or request a Vault rebuild.
 
 The folder settings UI uses one folder path per line or comma-separated paths. Empty include folders means all folders; exclude folders win over include folders.
 
@@ -135,7 +135,7 @@ Within the left header, the button is inserted immediately before `.view-header-
 
 That reserved title-container owns one `.palmwiki-home-search-host` per PalmWiki Home leaf and one separately managed Markdown search mount per eligible Markdown leaf. Each Markdown mount owns its query and input independently, while title suggestions receive the current immutable page-index snapshot. Hosts are isolated from hover/popover contexts and recreated if a leaf or document changes, so React roots, outside-click listeners, and timers remain in the correct pop-out window. Merely mounting the Markdown field starts no index work; an actual focus requests the display index after a short idle delay, and body-search indexing remains tied to Home/search submission. The command `PalmWiki Home: Focus search` focuses the active Home field when Home owns the active leaf, otherwise it focuses the most recent eligible Markdown mount, and exposes Obsidian's normal user-configurable hotkey mechanism.
 
-An empty focused search field displays up to ten paths from `Workspace.getLastOpenFiles()`. Typing computes up to ten title/basename/alias suggestions after a 100 ms delay. Exact, prefix, substring, subsequence, and bounded typo matches are ordered in that sequence; NFKC, case, and hiragana/katakana normalization are shared with exact-page detection. Old suggestions are disabled during the delay, so a fast Arrow/Enter sequence cannot open a candidate from the previous input.
+An empty focused search field displays up to ten paths from `Workspace.getLastOpenFiles()`. Typing computes up to ten title/basename/alias suggestions after a 100 ms delay. Exact, prefix, substring, subsequence, and bounded typo matches are ordered in that sequence; NFKC, case, and hiragana/katakana normalization are shared with exact-page detection. Old suggestions are disabled during the delay, so a fast Arrow/Enter sequence cannot open a candidate from the previous input. Suggestions use compact flat rows: the title is primary, an alias match remains visible when present, and the canonical full path is smaller and right-aligned on the metadata line.
 
 Enter with no selected suggestion submits a body query. From Markdown, the owning leaf is replaced with `palmwiki-home-view` carrying only the bounded draft/submitted query fields; the Home view fills all other state from current defaults and Obsidian Back returns to the source note. Positive whitespace-separated terms are ANDed, quoted terms remain contiguous, and a leading minus excludes a term or quoted phrase. Results are grouped by evidence completeness and then ranked with the following largest-to-smallest weighted contributions:
 
@@ -169,9 +169,11 @@ The toolbar contains:
 - Tag filter
 - Simple title/path/tag quick filter
 - Link target filter
-- Refresh button
+- Standard refresh icon adjacent to the index/search status
 
-Card view renders a responsive Cosense-like grid with title, optional thumbnail, description, tags, folder/path, updated date, and pin button. Cards use a lightweight virtual grid so only the visible rows plus 3 overscan rows are mounted.
+All platforms use the same initially collapsed display controls and an icon-only filter button. The button keeps an accessible Show/Hide display settings label, reports active filters to assistive technology, and shows a small accent dot when filters are active. Closing the controls also closes the link-target suggestion popup. A toolbar container query uses the actual Home content width: wide layouts place both compact state badges, refresh, and filter icons in one right-aligned row beside the title; at 620 CSS pixels or below the status row wraps below the title. Verbose state details remain in each live region's accessible label but are visually hidden. This handles desktop splits and resizable iPad windows without platform detection.
+
+Card view renders a responsive Cosense-like grid with title, optional thumbnail, description, tags, folder/path, updated date, and a compact pin button. `portrait` preserves the three historical fixed heights and all metadata. `square` reads the grid's measured content width from its existing `ResizeObserver`: below 276 CSS pixels it safely uses one column; from 276 through the configured breakpoint (480 by default) it uses exactly two columns; above the breakpoint it uses the selected Card size's responsive minimum width but never falls back below two columns. This keeps every iPhone portrait width at two columns, lets full-width iPad layouts gain columns, and naturally follows Split View, Stage Manager, desktop splits, and rotation without user-agent or physical-resolution detection. Square uses the rendered column width as card height, keeps title, image, description, and Pin, and omits path fallback, graph badges, tags, folder/path, and date. The pure layout calculation supplies the dynamic row stride and total spacer height, so width changes do not leave virtual-scroll gaps or overlaps. Cards use a lightweight virtual grid so only the visible rows plus 3 overscan rows are mounted.
 
 Card, Table, recent-page, title-suggestion, and search-result activation receive the owning `PalmWikiHomeView.leaf` explicitly and open the selected existing Markdown file in that same leaf. They share `openMarkdownFileInLeaf()`, which captures the original view state and restores it on failure where possible. Both Card and Table virtualizers locate scroll parents through the shared owner-document-aware helper.
 
@@ -183,7 +185,7 @@ Table view renders the requested columns: Page, Image, Description, Created, Upd
 
 The outer card is a non-keyboard-interactive article. A dedicated title/body open area handles keyboard activation, and the pin button is a sibling control so keyboard pinning does not accidentally open the page.
 
-Cards show compact graph badges for PageRank, inlink count, and outlink count without increasing fixed card height.
+Portrait cards show compact graph badges for PageRank, inlink count, and outlink count without increasing fixed card height. Square cards deliberately omit those secondary badges.
 
 ## Virtual table
 

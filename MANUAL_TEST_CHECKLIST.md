@@ -5,6 +5,34 @@
 - `[x]` 自動確認またはObsidian実画面で確認済み
 - `[ ]` 未実施、または公開操作時にだけ確認する項目
 
+## 0.5.0 レスポンシブUIリリース判定（2026-07-15）
+
+自動確認:
+
+- `[x]` 既存設定へ`cardShape: portrait`と`Square two-column maximum width: 480`を補い、形状の保存値、不正値のfallback、閾値の整数化と280〜1600への制限を確認する。
+- `[x]` Card shape/size/2列閾値は表示専用であり、表示用索引キャッシュを無効化しない。
+- `[x]` Portraitの3固定高を維持し、Squareは276未満で1列、276〜設定値で2列、設定値より広い領域でCard size別の2列以上を使う。320〜440、480境界、680、820、1080、1280 CSS pxで列数を固定し、実列幅と同じ高さ・正しい行数とspacer高、未計測幅と空一覧を確認する。
+- `[x]` Squareの表示契約がパスfallbackと補助メタデータを省き、Portraitでは維持する。
+- `[x]` ソースと静的レビューで、更新操作をObsidian標準`refresh-cw`アイコンとして状態表示の隣へ置き、タッチ環境では44pxの操作領域にする契約を確認する。実描画は下の実機項目に残す。
+- `[x]` ソースと静的レビューで、Home上部は端末判定を使わず、実際のtoolbar幅が620 CSS pxを超える時はタイトル右に状態・更新・絞り込みを1行、以下では状態行を折り返す契約を確認する。同じ絞り込みアイコンと初期閉鎖を全環境で使い、実描画は下の実機項目に残す。
+- `[x]` ソースと静的レビューで、検索候補はタイトル、任意のalias、canonical full pathを別要素で表示する契約を確認する。検索欄は表示placeholderを持たず左端にObsidianの検索アイコンを置き、iOS標準のpill形状と重複clearを抑えて4px角丸の矩形にする。実描画は下の実機項目に残す。
+
+実機確認:
+
+- `[x]` iPhone 15 Pro Max縦画面で、小さいページ数行の下に`Complete`、`Search ready`、更新アイコンが1行で表示され、更新中も`Indexing`、`Indexing search`、無効状態の更新アイコンが1行を維持する。
+- `[x]` iPhone 15 Pro Max縦画面で表示設定が初期状態で閉じ、開閉でき、閉じている間は大きい絞り込みcontrolが表示領域を占有しない。矢印を絞り込みアイコンへ変更し、全環境で同じ開閉にした最終配置はソースと自動検査まで確認し、実機再確認は下の未実施項目へ残す。
+- `[x]` iPhone 15 Pro Max縦画面のSmall / Squareで2列の実カードが正方形になり、compact Pin、タイトル、画像・本文を維持し、パス等の補助情報を省く。長い一覧をスクロールしても重なり・大きな空白はなく、Homeボタンで上部へ戻る。
+- `[x]` iPhone 15 Pro MaxのライトテーマでHomeボタン・検索欄・候補popupが白背景になり、平坦な候補で太字タイトルと小さい右寄せfull pathを確認する。
+- `[x]` iPhone版ObsidianでPalmWiki Homeを無効化・再有効化し、更新版を再読み込みしてHomeを同一leafへ開ける。
+- `[x]` `PalmWiki_LocalTest`のデスクトップで更新アイコン、全表示設定、3サイズ×2形状、長いSquare一覧、明るい/暗いテーマ、最近/曖昧候補を確認する。
+  - 2026-07-15、macOS版Obsidian 1.12.7、候補commit `85841cc`で実施。更新中の状態・無効化、Card/Table、並べ替えと方向、folder/tag/quick/link target filter、表示設定の初期閉鎖、Small/Medium/Large × Portrait/Square、Square一覧の最下部、ライト/ダーク、最近のページと`RrC`→`RareC`の曖昧候補を確認し、Medium・Portrait・Darkへ戻した。
+- `[ ]` iPhone実機の縦・横画面で、狭い時は小さいページ数の下に2状態、更新、絞り込みアイコンが1行に収まることを確認する。320 CSS px相当では長いエラー表示が省略されても重ならず、読み上げには全文が残ることを確認する。絞り込みの開閉、確定済みfilterだけに付くactive表示、全Card sizeで2列Square、Pinがタイトル高さを超えないこと、縦横回転後も長い一覧を維持することを確認する。
+- `[ ]` iPad miniを含むiPad実機で、全幅なら`PalmWiki Home`の右に`Complete`、`Search ready`、更新、絞り込みが右寄せ1行で並ぶことを確認する。SquareはSmall/Medium/Largeに応じて2列固定を脱し、Split Viewで幅を480以下へ縮めると2列へ戻ること、設定値の変更が即時反映されることを確認する。
+- `[ ]` Homeと通常Markdownの検索欄が、左端の虫眼鏡、表示文字なし、角だけわずかに丸い矩形として表示されることを確認する。focus、最近のページ、入力候補、独自clear、ソフトウェアキーボードを再確認する。
+- `[ ]` iPhone実機でHome/Markdown双方の白いHomeボタン・検索欄、平坦な候補、タイトル優先、小さい右寄せfull path、touch/ソフトウェアキーボード操作を確認する。
+- `[ ]` iPhone実機で再起動・タブ復元、バックグラウンド復帰、Card/Table同一leaf移動、Back/Forward、検索索引作成中の応答性とメモリを確認する。
+- `[x]` iOSライフサイクル確認が完了するまでは公開manifestの`isDesktopOnly`とREADMEのdesktop-only表示を変更しない。
+
 ## 0.3.1 ItemView → Markdown互換性（2026-07-13）
 
 自動・調査確認:

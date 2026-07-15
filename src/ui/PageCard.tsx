@@ -1,12 +1,15 @@
 import React from "react";
+import type { PalmWikiCardShape } from "../settings/Settings";
 import type {
   PageActionHandler,
   PagePreviewHandler,
   PageRecord
 } from "./PalmWikiHomeView";
+import { getCardPresentation } from "./cardPresentation";
 import { formatDate } from "./components/format";
 
 interface PageCardProps {
+  cardShape: PalmWikiCardShape;
   imageUrl?: string;
   onOpenPage: PageActionHandler;
   onPreviewPage?: PagePreviewHandler;
@@ -17,6 +20,7 @@ interface PageCardProps {
 }
 
 export const PageCard = React.memo(function PageCard({
+  cardShape,
   imageUrl,
   onOpenPage,
   onPreviewPage,
@@ -26,6 +30,7 @@ export const PageCard = React.memo(function PageCard({
   showTags
 }: PageCardProps): React.JSX.Element {
   const openPage = (): void => onOpenPage(page.path);
+  const presentation = getCardPresentation(cardShape);
   const previewPage = (event: React.MouseEvent<HTMLElement>): void => {
     onPreviewPage?.(page.path, event.currentTarget, event.nativeEvent);
   };
@@ -39,7 +44,7 @@ export const PageCard = React.memo(function PageCard({
 
   return (
     <article
-      className={`palmwiki-card ${page.pinned ? "is-pinned" : ""}`}
+      className={`palmwiki-card palmwiki-card-${cardShape} ${page.pinned ? "is-pinned" : ""}`}
       onClick={openPage}
     >
       <div className="palmwiki-card-header">
@@ -57,8 +62,9 @@ export const PageCard = React.memo(function PageCard({
           <h2>{page.title}</h2>
         </div>
         <button
+          aria-label={page.pinned ? `Unpin ${page.title}` : `Pin ${page.title}`}
           aria-pressed={page.pinned}
-          className="palmwiki-pin-button"
+          className="palmwiki-pin-button palmwiki-card-pin-button"
           onClick={(event) => {
             event.stopPropagation();
             onTogglePinned(page.path);
@@ -69,11 +75,12 @@ export const PageCard = React.memo(function PageCard({
           title={page.pinned ? "Unpin" : "Pin"}
           type="button"
         >
-          {page.pinned ? "Pinned" : "Pin"}
+          Pin
         </button>
       </div>
 
       <div
+        aria-label={`Open ${page.title}`}
         className="palmwiki-card-body-action"
         onClick={(event) => {
           event.stopPropagation();
@@ -90,17 +97,19 @@ export const PageCard = React.memo(function PageCard({
 
         {page.description ? (
           <p className="palmwiki-card-description">{page.description}</p>
-        ) : (
+        ) : presentation.showDescriptionPathFallback ? (
           <p className="palmwiki-card-description is-empty">{page.path}</p>
-        )}
+        ) : null}
 
-        <div className="palmwiki-graph-badges" aria-label="Graph metadata">
-          <span>PR {page.pageRank.toFixed(2)}</span>
-          <span>In {page.inlinkCount}</span>
-          <span>Out {page.outlinkCount}</span>
-        </div>
+        {presentation.showSecondaryMetadata ? (
+          <div className="palmwiki-graph-badges" aria-label="Graph metadata">
+            <span>PR {page.pageRank.toFixed(2)}</span>
+            <span>In {page.inlinkCount}</span>
+            <span>Out {page.outlinkCount}</span>
+          </div>
+        ) : null}
 
-        {showTags && page.tags.length > 0 ? (
+        {presentation.showSecondaryMetadata && showTags && page.tags.length > 0 ? (
           <div className="palmwiki-tags">
             {page.tags.map((tag) => (
               <span className="palmwiki-tag" key={tag}>
@@ -110,10 +119,12 @@ export const PageCard = React.memo(function PageCard({
           </div>
         ) : null}
 
-        <div className="palmwiki-card-footer">
-          {showFolder && page.folder ? <span>{page.folder}</span> : <span>{page.path}</span>}
-          <span>{formatDate(page.modifiedTime)}</span>
-        </div>
+        {presentation.showSecondaryMetadata ? (
+          <div className="palmwiki-card-footer">
+            {showFolder && page.folder ? <span>{page.folder}</span> : <span>{page.path}</span>}
+            <span>{formatDate(page.modifiedTime)}</span>
+          </div>
+        ) : null}
       </div>
     </article>
   );

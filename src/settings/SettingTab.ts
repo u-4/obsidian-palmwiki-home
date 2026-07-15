@@ -13,10 +13,14 @@ import {
   isCardPreviewMode
 } from "../cardPreview";
 import {
+  DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH,
   formatFolderListInput,
   formatLineListInput,
+  MAX_SQUARE_TWO_COLUMN_MAX_WIDTH,
+  MIN_SQUARE_TWO_COLUMN_MAX_WIDTH,
   parseFolderListInput,
   parseLineListInput,
+  type PalmWikiCardShape,
   type PalmWikiCardSize,
   type PalmWikiSortDirection,
   type PalmWikiSortKey,
@@ -242,6 +246,74 @@ export class PalmWikiHomeSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.cardSize)
           .onChange(async (value) => {
             await this.plugin.updateSettings({ cardSize: value as PalmWikiCardSize }, false);
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Card shape")
+      .setDesc(
+        "Portrait keeps all card metadata. Square uses the available column width as its height and hides secondary metadata."
+      )
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("portrait", "Portrait")
+          .addOption("square", "Square")
+          .setValue(this.plugin.settings.cardShape)
+          .onChange(async (value) => {
+            await this.plugin.updateSettings(
+              { cardShape: value as PalmWikiCardShape },
+              false
+            );
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Square two-column maximum width")
+      .setDesc(
+        `Square cards stay at exactly two columns from 276 CSS px through this card-area width. Narrower areas use one column; above it, columns adapt to Card size. Recommended: ${DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH} CSS px. Allowed: ${MIN_SQUARE_TWO_COLUMN_MAX_WIDTH}-${MAX_SQUARE_TWO_COLUMN_MAX_WIDTH}.`
+      )
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.inputMode = "numeric";
+        text.inputEl.min = String(MIN_SQUARE_TWO_COLUMN_MAX_WIDTH);
+        text.inputEl.max = String(MAX_SQUARE_TWO_COLUMN_MAX_WIDTH);
+        text.inputEl.step = "1";
+        text.inputEl.addEventListener("blur", () => {
+          text.inputEl.value = String(
+            this.plugin.settings.squareTwoColumnMaxWidth
+          );
+        });
+        text
+          .setValue(String(this.plugin.settings.squareTwoColumnMaxWidth))
+          .onChange(async (value) => {
+            const nextValue = Number(value);
+            if (
+              !Number.isFinite(nextValue) ||
+              nextValue < MIN_SQUARE_TWO_COLUMN_MAX_WIDTH ||
+              nextValue > MAX_SQUARE_TWO_COLUMN_MAX_WIDTH
+            ) {
+              return;
+            }
+
+            await this.plugin.updateSettings(
+              { squareTwoColumnMaxWidth: Math.round(nextValue) },
+              false
+            );
+          });
+      })
+      .addExtraButton((button) => {
+        button
+          .setIcon("rotate-ccw")
+          .setTooltip("Restore the recommended width")
+          .onClick(async () => {
+            await this.plugin.updateSettings(
+              {
+                squareTwoColumnMaxWidth:
+                  DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH
+              },
+              false
+            );
+            this.renderSettings();
           });
       });
 

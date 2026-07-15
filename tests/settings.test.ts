@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH,
   DEFAULT_SETTINGS,
+  MAX_SQUARE_TWO_COLUMN_MAX_WIDTH,
+  MIN_SQUARE_TWO_COLUMN_MAX_WIDTH,
   normalizeSettings
 } from "../src/settings/Settings";
 
@@ -39,6 +42,8 @@ test("saved settings are normalized and deduplicated", () => {
       showFoldersOnCards: false,
       showTagsOnCards: false,
       cardSize: "large",
+      cardShape: "square",
+      squareTwoColumnMaxWidth: 720,
       cardPreviewMode: "hover",
       indexOnStartup: true,
       performanceDebug: true,
@@ -60,6 +65,8 @@ test("saved settings are normalized and deduplicated", () => {
       showFoldersOnCards: false,
       showTagsOnCards: false,
       cardSize: "large",
+      cardShape: "square",
+      squareTwoColumnMaxWidth: 720,
       cardPreviewMode: "hover",
       indexOnStartup: true,
       performanceDebug: true,
@@ -75,6 +82,8 @@ test("unknown enum values and non-boolean flags are rejected", () => {
     defaultSortKey: "unknown",
     defaultSortDirection: 1,
     cardSize: "huge",
+    cardShape: "circle",
+    squareTwoColumnMaxWidth: "wide",
     cardPreviewMode: "always",
     performanceDebug: 1
   });
@@ -82,6 +91,11 @@ test("unknown enum values and non-boolean flags are rejected", () => {
   assert.equal(settings.defaultSortKey, DEFAULT_SETTINGS.defaultSortKey);
   assert.equal(settings.defaultSortDirection, DEFAULT_SETTINGS.defaultSortDirection);
   assert.equal(settings.cardSize, DEFAULT_SETTINGS.cardSize);
+  assert.equal(settings.cardShape, DEFAULT_SETTINGS.cardShape);
+  assert.equal(
+    settings.squareTwoColumnMaxWidth,
+    DEFAULT_SETTINGS.squareTwoColumnMaxWidth
+  );
   assert.equal(settings.cardPreviewMode, DEFAULT_SETTINGS.cardPreviewMode);
   assert.equal(settings.performanceDebug, DEFAULT_SETTINGS.performanceDebug);
 });
@@ -97,6 +111,11 @@ test("version 0.1.0 settings gain Home button defaults without losing saved valu
   assert.equal(settings.homeButtonAction, "palmwikiHome");
   assert.equal(settings.homeButtonPagePath, "");
   assert.equal(settings.homeButtonCommandId, "");
+  assert.equal(settings.cardShape, "portrait");
+  assert.equal(
+    settings.squareTwoColumnMaxWidth,
+    DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH
+  );
   assert.equal(settings.cardPreviewMode, "modifier");
   assert.deepEqual(settings.includeFolders, ["Notes"]);
   assert.equal(settings.defaultViewMode, "table");
@@ -113,4 +132,30 @@ test("all supported Card preview modes are preserved", () => {
   for (const mode of ["off", "modifier", "hover"] as const) {
     assert.equal(normalizeSettings({ cardPreviewMode: mode }).cardPreviewMode, mode);
   }
+});
+
+test("all supported Card shapes are preserved", () => {
+  for (const shape of ["portrait", "square"] as const) {
+    assert.equal(normalizeSettings({ cardShape: shape }).cardShape, shape);
+  }
+});
+
+test("Square two-column maximum width is rounded and clamped safely", () => {
+  assert.equal(
+    normalizeSettings({ squareTwoColumnMaxWidth: 612.6 }).squareTwoColumnMaxWidth,
+    613
+  );
+  assert.equal(
+    normalizeSettings({ squareTwoColumnMaxWidth: 1 }).squareTwoColumnMaxWidth,
+    MIN_SQUARE_TWO_COLUMN_MAX_WIDTH
+  );
+  assert.equal(
+    normalizeSettings({ squareTwoColumnMaxWidth: 9999 }).squareTwoColumnMaxWidth,
+    MAX_SQUARE_TWO_COLUMN_MAX_WIDTH
+  );
+  assert.equal(
+    normalizeSettings({ squareTwoColumnMaxWidth: Number.NaN })
+      .squareTwoColumnMaxWidth,
+    DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH
+  );
 });

@@ -4,7 +4,16 @@ All notable changes to PalmWiki Home will be documented in this file.
 
 The project uses versions from `manifest.json`.
 
-## [Unreleased]
+## [0.5.0] - 2026-07-15
+
+- Replaced the large text Refresh control with Obsidian's standard refresh icon beside the index status.
+- Unified the Home header across desktop and narrow or mobile-shaped layouts: wide Home areas keep both index states, refresh, and filter icons right-aligned beside the title, while narrow areas wrap the status row below it.
+- Added an icon-only display-settings disclosure on every platform and kept the full controls collapsed until requested.
+- Added independently selectable Portrait and Square card shapes; Square cards use their rendered column width as height, stay at exactly two columns through a configurable 480 CSS-pixel default breakpoint, then adapt columns to Card size on wider iPad and desktop layouts, while omitting secondary path, graph, tag, folder, and date metadata.
+- Replaced the visible search placeholder with a leading search icon and a compact, lightly rounded rectangular field on Home and Markdown headers.
+- Simplified recent/title suggestions into compact flat rows with a primary title and a smaller right-aligned full path.
+- Improved light-theme contrast for the upper-left Home button, header search field, and suggestion popup without changing the dark theme.
+- Preserved compact Pin visuals while providing a 44 CSS-pixel touch target on coarse-pointer devices, and kept empty Square-card open controls accessible to screen readers.
 
 ## [0.4.0] - 2026-07-13
 

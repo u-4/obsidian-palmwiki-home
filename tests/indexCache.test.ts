@@ -90,6 +90,9 @@ test("UI-only Home navigation and Card preview settings do not invalidate the pa
     homeButtonLabel: "Vault home",
     homeButtonPagePath: "Notes/Example.md",
     homeButtonCommandId: "app:test",
+    cardShape: "square",
+    cardSize: "large",
+    squareTwoColumnMaxWidth: 760,
     cardPreviewMode: "hover"
   };
 

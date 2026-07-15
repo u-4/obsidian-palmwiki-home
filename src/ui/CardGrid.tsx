@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { findClosestVerticalScrollContainer } from "../homeNavigation";
-import type { PalmWikiCardSize } from "../settings/Settings";
+import type {
+  PalmWikiCardShape,
+  PalmWikiCardSize
+} from "../settings/Settings";
 import type {
   PageActionHandler,
   PageImageCacheStatsGetter,
@@ -9,17 +12,12 @@ import type {
   PageRecord
 } from "./PalmWikiHomeView";
 import { PageCard } from "./PageCard";
+import { CARD_GRID_GAP, getCardGridLayout } from "./cardGridLayout";
 
-const GRID_GAP = 12;
 const OVERSCAN_ROWS = 3;
 
-const CARD_LAYOUT: Record<PalmWikiCardSize, { minWidth: number; height: number }> = {
-  small: { minWidth: 180, height: 300 },
-  medium: { minWidth: 230, height: 420 },
-  large: { minWidth: 300, height: 520 }
-};
-
 interface CardGridProps {
+  cardShape: PalmWikiCardShape;
   cardSize: PalmWikiCardSize;
   getImageCacheStats: PageImageCacheStatsGetter;
   onOpenPage: PageActionHandler;
@@ -30,9 +28,11 @@ interface CardGridProps {
   resolveImageUrl: PageImageResolver;
   showFolders: boolean;
   showTags: boolean;
+  squareTwoColumnMaxWidth: number;
 }
 
 export function CardGrid({
+  cardShape,
   cardSize,
   getImageCacheStats,
   onOpenPage,
@@ -42,21 +42,24 @@ export function CardGrid({
   performanceDebug,
   resolveImageUrl,
   showFolders,
-  showTags
+  showTags,
+  squareTwoColumnMaxWidth
 }: CardGridProps): React.JSX.Element {
   const containerRef = useRef<HTMLElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [visibleRange, setVisibleRange] = useState({ startRow: 0, endRow: 8 });
-  const layout = CARD_LAYOUT[cardSize];
-  const columns = Math.max(
-    1,
-    Math.floor((containerWidth + GRID_GAP) / (layout.minWidth + GRID_GAP))
+  const layout = getCardGridLayout(
+    cardSize,
+    cardShape,
+    containerWidth,
+    pages.length,
+    { squareTwoColumnMaxWidth }
   );
-  const rowStride = layout.height + GRID_GAP;
-  const rowCount = Math.ceil(pages.length / columns);
-  const totalHeight = Math.max(0, rowCount * rowStride - GRID_GAP);
-  const startIndex = visibleRange.startRow * columns;
-  const endIndex = Math.min(pages.length, visibleRange.endRow * columns);
+  const startIndex = visibleRange.startRow * layout.columns;
+  const endIndex = Math.min(
+    pages.length,
+    visibleRange.endRow * layout.columns
+  );
   const visiblePages = useMemo(
     () => pages.slice(startIndex, endIndex),
     [endIndex, pages, startIndex]
@@ -110,18 +113,25 @@ export function CardGrid({
             : (scrollParent as HTMLElement).getBoundingClientRect();
         const visibleTop = Math.max(0, viewportRect.top - containerRect.top);
         const visibleBottom = Math.min(
-          totalHeight,
-          visibleTop + viewportRect.height + rowStride
+          layout.totalHeight,
+          visibleTop + viewportRect.height + layout.rowStride
         );
         const rawStartRow = Math.max(
           0,
-          Math.floor(visibleTop / rowStride) - OVERSCAN_ROWS
+          Math.floor(visibleTop / layout.rowStride) - OVERSCAN_ROWS
         );
-        const maxStartRow = Math.max(0, rowCount - 1);
-        const startRow = rowCount === 0 ? 0 : Math.min(rawStartRow, maxStartRow);
-        const rawEndRow = Math.ceil(visibleBottom / rowStride) + OVERSCAN_ROWS;
+        const maxStartRow = Math.max(0, layout.rowCount - 1);
+        const startRow =
+          layout.rowCount === 0 ? 0 : Math.min(rawStartRow, maxStartRow);
+        const rawEndRow =
+          Math.ceil(visibleBottom / layout.rowStride) + OVERSCAN_ROWS;
         const endRow =
-          rowCount === 0 ? 0 : Math.min(rowCount, Math.max(startRow + 1, rawEndRow));
+          layout.rowCount === 0
+            ? 0
+            : Math.min(
+                layout.rowCount,
+                Math.max(startRow + 1, rawEndRow)
+              );
 
         setVisibleRange((current) =>
           current.startRow === startRow && current.endRow === endRow
@@ -144,7 +154,13 @@ export function CardGrid({
       scrollParent.removeEventListener("scroll", updateVisibleRows);
       ownerWindow.removeEventListener("resize", updateVisibleRows);
     };
-  }, [columns, pages.length, rowCount, rowStride, totalHeight]);
+  }, [
+    layout.columns,
+    layout.rowCount,
+    layout.rowStride,
+    layout.totalHeight,
+    pages.length
+  ]);
 
   useEffect(() => {
     if (!performanceDebug) {
@@ -158,11 +174,11 @@ export function CardGrid({
       endIndex,
       startRow: visibleRange.startRow,
       endRow: visibleRange.endRow,
-      columns,
+      columns: layout.columns,
       imageCache: getImageCacheStats()
     });
   }, [
-    columns,
+    layout.columns,
     endIndex,
     getImageCacheStats,
     pages.length,
@@ -179,21 +195,25 @@ export function CardGrid({
       ref={containerRef}
       style={
         {
-          "--palmwiki-card-height": `${layout.height}px`
+          "--palmwiki-card-height": `${layout.cardHeight}px`
         } as React.CSSProperties
       }
     >
-      <div className="palmwiki-card-virtual-spacer" style={{ height: totalHeight }}>
+      <div
+        className="palmwiki-card-virtual-spacer"
+        style={{ height: layout.totalHeight }}
+      >
         <div
           className="palmwiki-card-virtual-window"
           style={{
-            gap: GRID_GAP,
-            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-            transform: `translateY(${visibleRange.startRow * rowStride}px)`
+            gap: CARD_GRID_GAP,
+            gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
+            transform: `translateY(${visibleRange.startRow * layout.rowStride}px)`
           }}
         >
           {visiblePages.map((page) => (
             <PageCard
+              cardShape={cardShape}
               imageUrl={resolveImageUrl(page.firstImagePath)}
               key={page.path}
               onOpenPage={onOpenPage}

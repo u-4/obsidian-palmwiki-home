@@ -10,6 +10,8 @@ const workDir = await mkdtemp(join(tmpdir(), "palmwiki-home-tests-"));
 try {
   await esbuild.build({
     entryPoints: [
+      "tests/cardGridLayout.test.ts",
+      "tests/cardPresentation.test.ts",
       "tests/cardPreview.test.ts",
       "tests/filterPages.test.ts",
       "tests/fileSnapshot.test.ts",
@@ -21,10 +23,12 @@ try {
       "tests/mapWithConcurrency.test.ts",
       "tests/markdownHeaderSearch.test.ts",
       "tests/obsidianCompat.test.ts",
+      "tests/pageCard.test.ts",
       "tests/pageRank.test.ts",
       "tests/rebuildRequest.test.ts",
       "tests/settings.test.ts",
       "tests/sortPages.test.ts",
+      "tests/toolbarPresentation.test.ts",
       "tests/searchCache.test.ts",
       "tests/searchIndexManager.test.ts",
       "tests/titleSuggestions.test.ts"
@@ -45,6 +49,8 @@ try {
     process.execPath,
     [
       "--test",
+      join(workDir, "cardGridLayout.test.js"),
+      join(workDir, "cardPresentation.test.js"),
       join(workDir, "cardPreview.test.js"),
       join(workDir, "filterPages.test.js"),
       join(workDir, "fileSnapshot.test.js"),
@@ -56,10 +62,12 @@ try {
       join(workDir, "mapWithConcurrency.test.js"),
       join(workDir, "markdownHeaderSearch.test.js"),
       join(workDir, "obsidianCompat.test.js"),
+      join(workDir, "pageCard.test.js"),
       join(workDir, "pageRank.test.js"),
       join(workDir, "rebuildRequest.test.js"),
       join(workDir, "settings.test.js"),
       join(workDir, "sortPages.test.js"),
+      join(workDir, "toolbarPresentation.test.js"),
       join(workDir, "searchCache.test.js"),
       join(workDir, "searchIndexManager.test.js"),
       join(workDir, "titleSuggestions.test.js")
