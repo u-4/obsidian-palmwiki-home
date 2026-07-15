@@ -24,7 +24,8 @@
 - `[x]` iPhone 15 Pro Max縦画面のSmall / Squareで2列の実カードが正方形になり、compact Pin、タイトル、画像・本文を維持し、パス等の補助情報を省く。長い一覧をスクロールしても重なり・大きな空白はなく、Homeボタンで上部へ戻る。
 - `[x]` iPhone 15 Pro MaxのライトテーマでHomeボタン・検索欄・候補popupが白背景になり、平坦な候補で太字タイトルと小さい右寄せfull pathを確認する。
 - `[x]` iPhone版ObsidianでPalmWiki Homeを無効化・再有効化し、更新版を再読み込みしてHomeを同一leafへ開ける。
-- `[ ]` `PalmWiki_LocalTest`のデスクトップで更新アイコン、全表示設定、3サイズ×2形状、長いSquare一覧、明るい/暗いテーマ、最近/曖昧候補を確認する。
+- `[x]` `PalmWiki_LocalTest`のデスクトップで更新アイコン、全表示設定、3サイズ×2形状、長いSquare一覧、明るい/暗いテーマ、最近/曖昧候補を確認する。
+  - 2026-07-15、macOS版Obsidian 1.12.7、候補commit `85841cc`で実施。更新中の状態・無効化、Card/Table、並べ替えと方向、folder/tag/quick/link target filter、表示設定の初期閉鎖、Small/Medium/Large × Portrait/Square、Square一覧の最下部、ライト/ダーク、最近のページと`RrC`→`RareC`の曖昧候補を確認し、Medium・Portrait・Darkへ戻した。
 - `[ ]` iPhone実機の縦・横画面で、狭い時は小さいページ数の下に2状態、更新、絞り込みアイコンが1行に収まることを確認する。320 CSS px相当では長いエラー表示が省略されても重ならず、読み上げには全文が残ることを確認する。絞り込みの開閉、確定済みfilterだけに付くactive表示、全Card sizeで2列Square、Pinがタイトル高さを超えないこと、縦横回転後も長い一覧を維持することを確認する。
 - `[ ]` iPad miniを含むiPad実機で、全幅なら`PalmWiki Home`の右に`Complete`、`Search ready`、更新、絞り込みが右寄せ1行で並ぶことを確認する。SquareはSmall/Medium/Largeに応じて2列固定を脱し、Split Viewで幅を480以下へ縮めると2列へ戻ること、設定値の変更が即時反映されることを確認する。
 - `[ ]` Homeと通常Markdownの検索欄が、左端の虫眼鏡、表示文字なし、角だけわずかに丸い矩形として表示されることを確認する。focus、最近のページ、入力候補、独自clear、ソフトウェアキーボードを再確認する。
