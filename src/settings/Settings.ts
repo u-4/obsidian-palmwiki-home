@@ -17,6 +17,12 @@ export type PalmWikiSortDirection = "asc" | "desc";
 
 export type PalmWikiCardSize = "small" | "medium" | "large";
 
+export type PalmWikiCardShape = "portrait" | "square";
+
+export const DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH = 480;
+export const MIN_SQUARE_TWO_COLUMN_MAX_WIDTH = 280;
+export const MAX_SQUARE_TWO_COLUMN_MAX_WIDTH = 1600;
+
 export interface PalmWikiHomeSettings {
   homeButtonLabel: string;
   homeButtonAction: HomeButtonAction;
@@ -31,6 +37,8 @@ export interface PalmWikiHomeSettings {
   showFoldersOnCards: boolean;
   showTagsOnCards: boolean;
   cardSize: PalmWikiCardSize;
+  cardShape: PalmWikiCardShape;
+  squareTwoColumnMaxWidth: number;
   cardPreviewMode: CardPreviewMode;
   indexOnStartup: boolean;
   performanceDebug: boolean;
@@ -53,6 +61,8 @@ export const DEFAULT_SETTINGS: PalmWikiHomeSettings = {
   showFoldersOnCards: true,
   showTagsOnCards: true,
   cardSize: "medium",
+  cardShape: "portrait",
+  squareTwoColumnMaxWidth: DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH,
   cardPreviewMode: "modifier",
   indexOnStartup: false,
   performanceDebug: false,
@@ -86,6 +96,13 @@ export function normalizeSettings(value: unknown): PalmWikiHomeSettings {
     showFoldersOnCards: readBoolean(settings.showFoldersOnCards, true),
     showTagsOnCards: readBoolean(settings.showTagsOnCards, true),
     cardSize: readEnum(settings.cardSize, ["small", "medium", "large"], "medium"),
+    cardShape: readEnum(settings.cardShape, ["portrait", "square"], "portrait"),
+    squareTwoColumnMaxWidth: readClampedInteger(
+      settings.squareTwoColumnMaxWidth,
+      DEFAULT_SQUARE_TWO_COLUMN_MAX_WIDTH,
+      MIN_SQUARE_TWO_COLUMN_MAX_WIDTH,
+      MAX_SQUARE_TWO_COLUMN_MAX_WIDTH
+    ),
     cardPreviewMode: readEnum(
       settings.cardPreviewMode,
       ["off", "modifier", "hover"],
@@ -177,6 +194,19 @@ function uniqueNonEmptyStrings(value: unknown): string[] {
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function readClampedInteger(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
 
 function readTrimmedString(value: unknown): string {

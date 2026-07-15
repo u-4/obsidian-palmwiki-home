@@ -1,3 +1,4 @@
+import { setIcon } from "obsidian";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { PageRecord } from "../core/index/PageRecord";
 import {
@@ -42,6 +43,7 @@ export function HomeSearchBar({
   query
 }: HomeSearchBarProps): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const searchIconRef = useRef<HTMLSpanElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -53,6 +55,12 @@ export function HomeSearchBar({
     onRegisterInput(inputRef.current);
     return () => onRegisterInput(null);
   }, [onRegisterInput]);
+
+  useEffect(() => {
+    if (searchIconRef.current) {
+      setIcon(searchIconRef.current, "search");
+    }
+  }, []);
 
   useEffect(() => {
     const ownerWindow = inputRef.current?.ownerDocument.defaultView;
@@ -155,6 +163,11 @@ export function HomeSearchBar({
 
   return (
     <div className="palmwiki-home-search" ref={wrapperRef}>
+      <span
+        aria-hidden="true"
+        className="palmwiki-home-search-icon"
+        ref={searchIconRef}
+      />
       <input
         aria-activedescendant={
           selectedIndex >= 0 ? `${listboxId}-${selectedIndex}` : undefined
@@ -175,7 +188,6 @@ export function HomeSearchBar({
           onFocus?.();
         }}
         onKeyDown={handleKeyDown}
-        placeholder="Search pages…"
         ref={inputRef}
         role="combobox"
         spellCheck={false}
@@ -228,11 +240,21 @@ export function HomeSearchBar({
                 role="option"
                 type="button"
               >
-                <span>{suggestion.title}</span>
-                <span>
-                  {suggestion.aliasMatch
-                    ? `Alias: ${suggestion.aliasMatch} · ${suggestion.path}`
-                    : suggestion.path}
+                <span className="palmwiki-home-search-option-title">
+                  {suggestion.title}
+                </span>
+                <span className="palmwiki-home-search-option-meta">
+                  {suggestion.aliasMatch ? (
+                    <span className="palmwiki-home-search-option-alias">
+                      Alias: {suggestion.aliasMatch}
+                    </span>
+                  ) : null}
+                  <span
+                    className="palmwiki-home-search-option-path"
+                    title={suggestion.path}
+                  >
+                    {suggestion.path}
+                  </span>
                 </span>
               </button>
             ))

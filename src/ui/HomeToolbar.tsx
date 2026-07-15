@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import { setIcon } from "obsidian";
+import React, { useEffect, useId, useRef, useState } from "react";
 import type { PalmWikiHomeIndexState } from "../main";
 import type { SearchIndexState } from "../searchIndex";
 import type {
@@ -6,6 +7,10 @@ import type {
   PalmWikiSortKey,
   PalmWikiViewMode
 } from "../settings/Settings";
+import {
+  countActiveToolbarFilters,
+  getDisplaySettingsToggleLabel
+} from "./toolbarPresentation";
 
 interface HomeToolbarProps {
   availableFolders: string[];
@@ -63,6 +68,10 @@ export function HomeToolbar({
   viewMode
 }: HomeToolbarProps): React.JSX.Element {
   const linkTargetFilterRef = useRef<HTMLDivElement | null>(null);
+  const displaySettingsIconRef = useRef<HTMLSpanElement | null>(null);
+  const refreshIconRef = useRef<HTMLSpanElement | null>(null);
+  const displaySettingsId = useId();
+  const [displaySettingsOpen, setDisplaySettingsOpen] = useState(false);
   const [linkTargetPopoverOpen, setLinkTargetPopoverOpen] = useState(false);
   const lastIndexed = indexState.lastIndexedAt
     ? new Date(indexState.lastIndexedAt).toLocaleTimeString()
@@ -71,6 +80,21 @@ export function HomeToolbar({
   const searchStatus = getSearchStatusPresentation(searchIndexState);
   const showLinkTargetSuggestions =
     linkTargetPopoverOpen && linkTargetSuggestions.length > 0;
+  const activeFilterCount = countActiveToolbarFilters({
+    folderFilter,
+    linkTargetPath,
+    query,
+    tagFilter,
+  });
+
+  useEffect(() => {
+    if (refreshIconRef.current) {
+      setIcon(refreshIconRef.current, "refresh-cw");
+    }
+    if (displaySettingsIconRef.current) {
+      setIcon(displaySettingsIconRef.current, "list-filter");
+    }
+  }, []);
 
   useEffect(() => {
     if (!linkTargetPopoverOpen) {
@@ -102,53 +126,110 @@ export function HomeToolbar({
   return (
     <header className="palmwiki-toolbar">
       <div className="palmwiki-toolbar-title-row">
-        <div>
+        <div className="palmwiki-toolbar-title-block">
           <h1>PalmWiki Home</h1>
-          <div className="palmwiki-toolbar-meta">
-            <span>{resultCount} / {totalCount} pages</span>
+          <span className="palmwiki-page-count">
+            {resultCount} / {totalCount} pages
+          </span>
+        </div>
+        <div className="palmwiki-status-line">
+          <span
+            aria-atomic="true"
+            aria-label={`${indexStatus.label}: ${indexStatus.detail}`}
+            aria-live="polite"
+            className="palmwiki-index-status-group"
+            role="status"
+          >
             <span
-              aria-atomic="true"
-              aria-live="polite"
-              className="palmwiki-index-status-group"
-              role="status"
+              className={`palmwiki-index-status is-${indexState.indexPhase}`}
             >
-              <span
-                className={`palmwiki-index-status is-${indexState.indexPhase}`}
-              >
-                <span aria-hidden="true" className="palmwiki-index-status-dot" />
+              <span aria-hidden="true" className="palmwiki-index-status-dot" />
+              <span className="palmwiki-index-status-label">
                 {indexStatus.label}
               </span>
-              <span>{indexStatus.detail}</span>
             </span>
-            <span
-              aria-atomic="true"
-              aria-live="polite"
-              className="palmwiki-index-status-group"
-              role="status"
-            >
-              <span className={`palmwiki-index-status is-${searchIndexState.phase}`}>
-                <span aria-hidden="true" className="palmwiki-index-status-dot" />
+            <span className="palmwiki-index-status-detail">
+              {indexStatus.detail}
+            </span>
+          </span>
+          <span
+            aria-atomic="true"
+            aria-label={`${searchStatus.label}: ${searchStatus.detail}`}
+            aria-live="polite"
+            className="palmwiki-index-status-group"
+            role="status"
+          >
+            <span className={`palmwiki-index-status is-${searchIndexState.phase}`}>
+              <span aria-hidden="true" className="palmwiki-index-status-dot" />
+              <span className="palmwiki-index-status-label">
                 {searchStatus.label}
               </span>
-              <span>{searchStatus.detail}</span>
             </span>
-          </div>
+            <span className="palmwiki-index-status-detail">
+              {searchStatus.detail}
+            </span>
+          </span>
+          <button
+            aria-label="Refresh page and search indexes"
+            className="palmwiki-button palmwiki-refresh-button"
+            disabled={
+              indexState.isIndexing ||
+              searchIndexState.phase === "loading" ||
+              searchIndexState.phase === "indexing"
+            }
+            onClick={onRefresh}
+            title="Refresh page and search indexes"
+            type="button"
+          >
+            <span aria-hidden="true" ref={refreshIconRef} />
+          </button>
+          <button
+            aria-controls={displaySettingsId}
+            aria-expanded={displaySettingsOpen}
+            aria-label={getDisplaySettingsToggleLabel(
+              displaySettingsOpen,
+              activeFilterCount
+            )}
+            className={
+              displaySettingsOpen
+                ? "palmwiki-button palmwiki-display-settings-toggle is-open"
+                : "palmwiki-button palmwiki-display-settings-toggle"
+            }
+            onClick={() => {
+              const nextOpen = !displaySettingsOpen;
+              setDisplaySettingsOpen(nextOpen);
+              if (!nextOpen) {
+                setLinkTargetPopoverOpen(false);
+              }
+            }}
+            title={
+              displaySettingsOpen
+                ? "Hide display settings"
+                : "Show display settings"
+            }
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              className="palmwiki-display-settings-icon"
+              ref={displaySettingsIconRef}
+            />
+            {activeFilterCount > 0 ? (
+              <span
+                aria-hidden="true"
+                className="palmwiki-display-settings-active-dot"
+              />
+            ) : null}
+          </button>
         </div>
-        <button
-          className="palmwiki-button"
-          disabled={
-            indexState.isIndexing ||
-            searchIndexState.phase === "loading" ||
-            searchIndexState.phase === "indexing"
-          }
-          onClick={onRefresh}
-          type="button"
-        >
-          Refresh
-        </button>
       </div>
 
-      <div className="palmwiki-toolbar-controls">
+      <div
+        className="palmwiki-display-settings"
+        hidden={!displaySettingsOpen}
+        id={displaySettingsId}
+      >
+        <div className="palmwiki-toolbar-controls">
         <div className="palmwiki-segmented" role="group">
           <button
             aria-pressed={viewMode === "card"}
@@ -286,6 +367,7 @@ export function HomeToolbar({
             </div>
           ) : null}
         </div>
+        </div>
       </div>
     </header>
   );
@@ -333,7 +415,7 @@ function getIndexStatusPresentation(
         label: "Update failed",
         detail: state.usingCachedIndex
           ? `Saved pages remain available · ${savedDetail}`
-          : "Use Refresh to try again"
+          : "Use the refresh icon to try again"
       };
   }
 }

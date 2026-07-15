@@ -912,6 +912,7 @@ function PalmWikiHomeRoot({
 
       {!isSearchMode && visiblePages.length > 0 && viewMode === "card" ? (
         <CardGrid
+          cardShape={plugin.settings.cardShape}
           cardSize={plugin.settings.cardSize}
           getImageCacheStats={getImageCacheStats}
           onOpenPage={openCardPage}
@@ -924,6 +925,7 @@ function PalmWikiHomeRoot({
           resolveImageUrl={resolveImageUrl}
           showFolders={plugin.settings.showFoldersOnCards}
           showTags={plugin.settings.showTagsOnCards}
+          squareTwoColumnMaxWidth={plugin.settings.squareTwoColumnMaxWidth}
         />
       ) : null}
 
