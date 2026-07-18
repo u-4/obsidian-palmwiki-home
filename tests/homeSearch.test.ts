@@ -4,8 +4,10 @@ import { MAX_FULL_TEXT_QUERY_EDITOR_LENGTH } from "../src/core/search/fullTextSe
 import {
   canUseFullTextSearchIndex,
   captureSearchPageCreationContext,
+  clearPalmWikiHomeSearchState,
   createPalmWikiHomeSearchState,
   hasExactPageName,
+  isPalmWikiHomeSearchActive,
   isSearchPageCreationContextCurrent,
   shouldClearFullTextSearchResults,
   validateNewPageName
@@ -111,4 +113,30 @@ test("Markdown header submissions become a bounded PalmWiki Home search state", 
   const bounded = createPalmWikiHomeSearchState("a".repeat(400));
   assert.equal(bounded.searchQuery.length, MAX_FULL_TEXT_QUERY_EDITOR_LENGTH);
   assert.equal(bounded.submittedSearchQuery, bounded.searchQuery);
+});
+
+test("Home button search reset preserves Home display and filter state", () => {
+  const searchState = {
+    searchQuery: "airway guideline",
+    submittedSearchQuery: "airway guideline",
+    searchResultLimit: 300,
+    quickFilterQuery: "#guideline",
+    viewMode: "table"
+  };
+
+  assert.equal(isPalmWikiHomeSearchActive(searchState), true);
+  const homeState = clearPalmWikiHomeSearchState(searchState, 100);
+  assert.notEqual(homeState, searchState);
+  assert.deepEqual(homeState, {
+    searchQuery: "",
+    submittedSearchQuery: "",
+    searchResultLimit: 100,
+    quickFilterQuery: "#guideline",
+    viewMode: "table"
+  });
+  assert.equal(isPalmWikiHomeSearchActive(homeState), false);
+  assert.equal(searchState.submittedSearchQuery, "airway guideline");
+  assert.equal(isPalmWikiHomeSearchActive({ submittedSearchQuery: "  " }), false);
+  assert.equal(isPalmWikiHomeSearchActive({ submittedSearchQuery: 42 }), false);
+  assert.equal(isPalmWikiHomeSearchActive(null), false);
 });

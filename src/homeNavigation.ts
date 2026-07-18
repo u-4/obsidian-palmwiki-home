@@ -4,31 +4,8 @@ export const PALMWIKI_HOME_NAME = "PalmWiki Home";
 export const PALMWIKI_HOME_BUTTON_CLASS = "palmwiki-vault-home-button";
 export const PALMWIKI_MARKDOWN_PATH_CLASS = "palmwiki-markdown-note-path";
 
-export const HOME_BUTTON_ACTION_OPTIONS = {
-  palmwikiHome: "Open PalmWiki Home",
-  page: "Open a page",
-  command: "Run a command"
-} as const;
-
-export type HomeButtonAction = keyof typeof HOME_BUTTON_ACTION_OPTIONS;
-
 export const HOME_BUTTON_SETTING_DESCRIPTION =
-  "Choose what happens when you click the Home button in a Markdown note. In PalmWiki Home itself, the button always scrolls to the top.";
-export const HOME_PAGE_SETTING_DESCRIPTION =
-  "Enter a note name, Vault-relative path, or [[Wiki link]], or choose an existing Markdown note. It opens in the current tab; a missing note is not created.";
-export const HOME_COMMAND_SETTING_DESCRIPTION =
-  "Choose an Obsidian command. Choosing it here does not run it. The command runs only when the Home button is clicked, with that Markdown tab active.";
-
-export interface NormalizedHomePageTarget {
-  isWikiLink: boolean;
-  linkpath: string;
-  subpath: string;
-}
-
-export interface ResolvedHomePage {
-  file: TFile;
-  subpath: string;
-}
+  "The button always opens PalmWiki Home in the current tab. In Home search results it returns to the normal Home screen; on the normal Home screen it scrolls to the top.";
 
 interface ManagedHomeButton {
   button: HTMLButtonElement;
@@ -47,10 +24,10 @@ interface HeaderPlacement {
 
 interface HomeNavigationManagerOptions {
   getDisplayName: () => string;
-  getMarkdownActionDescription: () => string;
   getMarkdownPath: (leaf: WorkspaceLeaf) => string;
+  isHomeSearchActive: (leaf: WorkspaceLeaf) => boolean;
   onHomeActivate: (leaf: WorkspaceLeaf) => void;
-  onMarkdownActivate: (leaf: WorkspaceLeaf, event: MouseEvent) => Promise<void>;
+  onMarkdownActivate: (leaf: WorkspaceLeaf) => Promise<void>;
   palmWikiHomeViewType: string;
 }
 
@@ -82,139 +59,17 @@ export function resolveMarkdownLeafPath(app: App, leaf: WorkspaceLeaf): string {
   return isMarkdownFile(resolved) ? resolved.path : "";
 }
 
-export function isHomeButtonAction(value: unknown): value is HomeButtonAction {
-  return value === "palmwikiHome" || value === "page" || value === "command";
+export function getMarkdownHomeButtonDescription(displayName: string): string {
+  return `${displayName}: Open ${PALMWIKI_HOME_NAME} in this tab`;
 }
 
-export function getHomeButtonActionDescription(
-  action: HomeButtonAction,
-  pageTarget = "",
-  commandLabel = ""
+export function getPalmWikiHomeButtonDescription(
+  displayName: string,
+  searchActive = false
 ): string {
-  switch (action) {
-    case "page": {
-      const configured = pageTarget.trim();
-      return configured
-        ? `Open ${configured} in this tab`
-        : "Open the configured page in this tab";
-    }
-    case "command":
-      return commandLabel.trim()
-        ? `Run command: ${commandLabel.trim()}`
-        : "Run the configured command";
-    case "palmwikiHome":
-    default:
-      return `Open ${PALMWIKI_HOME_NAME} in this tab`;
-  }
-}
-
-export function getPalmWikiHomeButtonDescription(displayName: string): string {
-  return `${displayName}: Scroll PalmWiki Home to top`;
-}
-
-export function normalizeHomePageTarget(configuredTarget: string): NormalizedHomePageTarget {
-  const configured = configuredTarget.trim();
-  const isWikiLink = configured.startsWith("[[") && configured.endsWith("]]");
-  let target = isWikiLink ? configured.slice(2, -2).trim() : configured;
-
-  if (isWikiLink) {
-    const aliasIndex = target.indexOf("|");
-    if (aliasIndex >= 0) {
-      target = target.slice(0, aliasIndex);
-    }
-  }
-
-  const subpathIndex = target.indexOf("#");
-  const subpath = subpathIndex >= 0 ? target.slice(subpathIndex).trim() : "";
-  const linkpath = (subpathIndex >= 0 ? target.slice(0, subpathIndex) : target).trim();
-
-  return { isWikiLink, linkpath, subpath };
-}
-
-export function resolveExistingHomePage(
-  app: App,
-  sourcePath: string,
-  configuredTarget: string
-): ResolvedHomePage | null {
-  const configured = configuredTarget.trim();
-  if (!configured) {
-    return null;
-  }
-
-  const isWikiLink = configured.startsWith("[[") && configured.endsWith("]]");
-  const exactTarget = isWikiLink ? configured.slice(2, -2).trim() : configured;
-  const exactFile = getMarkdownFileByExactPath(app, exactTarget);
-  if (exactFile) {
-    return { file: exactFile, subpath: "" };
-  }
-
-  if (/[#|]/.test(exactTarget)) {
-    const literalNamedFile = findMarkdownFileByLiteralName(app, exactTarget);
-    if (literalNamedFile) {
-      return { file: literalNamedFile, subpath: "" };
-    }
-  }
-
-  if (!isWikiLink) {
-    const literalAlias = findMarkdownFileByAlias(app, exactTarget);
-    if (literalAlias) {
-      return { file: literalAlias, subpath: "" };
-    }
-  }
-
-  let targetWithoutAlias = exactTarget;
-  if (isWikiLink) {
-    const aliasIndex = exactTarget.lastIndexOf("|");
-    const headingIndex = exactTarget.indexOf("#");
-    if (aliasIndex >= 0 && (headingIndex < 0 || aliasIndex > headingIndex)) {
-      targetWithoutAlias = exactTarget.slice(0, aliasIndex).trim();
-      const aliasStrippedExactFile = getMarkdownFileByExactPath(
-        app,
-        targetWithoutAlias
-      );
-      if (aliasStrippedExactFile) {
-        return { file: aliasStrippedExactFile, subpath: "" };
-      }
-      const aliasStrippedLiteralFile = findMarkdownFileByLiteralName(
-        app,
-        targetWithoutAlias
-      );
-      if (aliasStrippedLiteralFile) {
-        return { file: aliasStrippedLiteralFile, subpath: "" };
-      }
-    }
-  }
-
-  const headingTarget = resolveHeadingTarget(app, sourcePath, targetWithoutAlias);
-  if (headingTarget) {
-    return headingTarget;
-  }
-
-  const file = resolveHomePageLinkpath(app, sourcePath, targetWithoutAlias);
-  if (file) {
-    return { file, subpath: "" };
-  }
-
-  if (isWikiLink) {
-    const standardAliasIndex = exactTarget.indexOf("|");
-    if (standardAliasIndex >= 0) {
-      const standardTarget = exactTarget.slice(0, standardAliasIndex).trim();
-      const standardHeadingTarget = resolveHeadingTarget(
-        app,
-        sourcePath,
-        standardTarget
-      );
-      if (standardHeadingTarget) {
-        return standardHeadingTarget;
-      }
-      const standardFile = resolveHomePageLinkpath(app, sourcePath, standardTarget);
-      if (standardFile) {
-        return { file: standardFile, subpath: "" };
-      }
-    }
-  }
-
-  return null;
+  return searchActive
+    ? `${displayName}: Return to PalmWiki Home`
+    : `${displayName}: Scroll PalmWiki Home to top`;
 }
 
 export function findClosestVerticalScrollContainer(
@@ -391,7 +246,7 @@ export class HomeNavigationManager {
       if (kind === "home") {
         this.options.onHomeActivate(leaf);
       } else {
-        void this.options.onMarkdownActivate(leaf, event as MouseEvent);
+        void this.options.onMarkdownActivate(leaf);
       }
     };
     button.addEventListener("click", listener);
@@ -460,8 +315,11 @@ export class HomeNavigationManager {
     const displayName = this.options.getDisplayName();
     const description =
       managed.kind === "home"
-        ? getPalmWikiHomeButtonDescription(displayName)
-        : `${displayName}: ${this.options.getMarkdownActionDescription()}`;
+        ? getPalmWikiHomeButtonDescription(
+            displayName,
+            this.options.isHomeSearchActive(managed.leaf)
+          )
+        : getMarkdownHomeButtonDescription(displayName);
 
     managed.button.textContent = displayName;
     managed.button.setAttribute("aria-label", description);
@@ -473,153 +331,6 @@ export class HomeNavigationManager {
       managed.path.setAttribute("title", path);
     }
   }
-}
-
-function getMarkdownFileByExactPath(app: App, target: string): TFile | null {
-  const normalizedTarget = normalizeVaultRelativePath(target);
-  if (!normalizedTarget) {
-    return null;
-  }
-
-  const candidatePaths = normalizedTarget.toLocaleLowerCase().endsWith(".md")
-    ? [normalizedTarget]
-    : [normalizedTarget, `${normalizedTarget}.md`];
-
-  for (const path of candidatePaths) {
-    const candidate = app.vault.getAbstractFileByPath(path);
-    if (isMarkdownFile(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function normalizeVaultRelativePath(path: string): string {
-  return path
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/^\.\//, "")
-    .replace(/^\/+/, "")
-    .replace(/\/{2,}/g, "/");
-}
-
-function resolveLinkpath(app: App, linkpath: string, sourcePath: string): TFile | null {
-  try {
-    const candidate = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
-    return isMarkdownFile(candidate) ? candidate : null;
-  } catch {
-    return null;
-  }
-}
-
-function resolveHomePageLinkpath(
-  app: App,
-  sourcePath: string,
-  linkpath: string
-): TFile | null {
-  if (!linkpath) {
-    return getMarkdownFileByExactPath(app, sourcePath);
-  }
-
-  return (
-    getMarkdownFileByExactPath(app, linkpath) ??
-    (/[#|]/.test(linkpath) ? findMarkdownFileByLiteralName(app, linkpath) : null) ??
-    resolveLinkpath(app, linkpath, sourcePath) ??
-    findMarkdownFileByAlias(app, linkpath)
-  );
-}
-
-function resolveHeadingTarget(
-  app: App,
-  sourcePath: string,
-  target: string
-): ResolvedHomePage | null {
-  const headingIndexes: number[] = [];
-  for (let index = target.indexOf("#"); index >= 0; ) {
-    headingIndexes.push(index);
-    index = target.indexOf("#", index + 1);
-  }
-
-  for (const headingIndex of headingIndexes.reverse()) {
-    const linkpath = target.slice(0, headingIndex).trim();
-    let subpath = target.slice(headingIndex).trim();
-    const displayAliasIndex = subpath.indexOf("|");
-    if (displayAliasIndex >= 0) {
-      subpath = subpath.slice(0, displayAliasIndex).trim();
-    }
-    const file = resolveHomePageLinkpath(app, sourcePath, linkpath);
-    if (file) {
-      return { file, subpath };
-    }
-  }
-
-  return null;
-}
-
-function findMarkdownFileByLiteralName(app: App, target: string): TFile | null {
-  const normalizedTarget = normalizeVaultRelativePath(target);
-  if (!normalizedTarget || normalizedTarget.includes("/")) {
-    return null;
-  }
-
-  const expectedFilename = normalizedTarget.toLocaleLowerCase().endsWith(".md")
-    ? normalizedTarget.toLocaleLowerCase()
-    : `${normalizedTarget.toLocaleLowerCase()}.md`;
-  return (
-    [...app.vault.getMarkdownFiles()]
-      .filter(isMarkdownFile)
-      .sort((left, right) => left.path.localeCompare(right.path))
-      .find(
-        (file) =>
-          file.path.slice(file.path.lastIndexOf("/") + 1).toLocaleLowerCase() ===
-          expectedFilename
-      ) ?? null
-  );
-}
-
-function findMarkdownFileByAlias(app: App, alias: string): TFile | null {
-  const expectedAlias = alias.trim().toLocaleLowerCase();
-  if (!expectedAlias) {
-    return null;
-  }
-
-  const markdownFiles = [...app.vault.getMarkdownFiles()].sort((left, right) =>
-    left.path.localeCompare(right.path)
-  );
-  for (const file of markdownFiles) {
-    const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
-    if (
-      readAliases(frontmatter).some(
-        (candidateAlias) => candidateAlias.toLocaleLowerCase() === expectedAlias
-      )
-    ) {
-      return file;
-    }
-  }
-  return null;
-}
-
-function readAliases(frontmatter: unknown): string[] {
-  if (!frontmatter || typeof frontmatter !== "object") {
-    return [];
-  }
-
-  const record = frontmatter as Record<string, unknown>;
-  return [...readStringList(record.aliases), ...readStringList(record.alias)];
-}
-
-function readStringList(value: unknown): string[] {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? [trimmed] : [];
-  }
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function isMarkdownFile(value: unknown): value is TFile {

@@ -5,6 +5,24 @@
 - `[x]` 自動確認またはObsidian実画面で確認済み
 - `[ ]` 未実施、または公開操作時にだけ確認する項目
 
+## 0.6.0 固定Homeボタン動作リリース判定（2026-07-18）
+
+自動確認:
+
+- `[x]` Markdownではクリックしたleafを通常Homeへ置き換え、失敗時だけ元のViewStateとephemeral stateを復元する。
+- `[x]` Home検索結果ではdraft/submitted queryとresult limitだけを初期化し、filter、Card/Table、sort、方向を維持する。
+- `[x]` 通常Homeでは既存の最上部移動を維持し、検索中と通常時でアクセシブル名を切り替える。
+- `[x]` ページ／Obsidianコマンドの選択設定とprivate command-manager経路を削除し、旧保存keyを安全に破棄する。
+- `[x]` 2Hop Links Plusのimport、設定、class、DOM参照、実行時依存を追加しない。
+- `[x]` production build、公式Obsidian ESLint、124件の自動テスト、metadata、Release metadata、diff check、moderate基準の依存監査を公開前に成功させる。
+
+`PalmWiki_LocalTest`実機確認:
+
+- `[x]` macOS版Obsidian 1.12.7を完全再起動し、`BODY_ONLY_NEEDLE_ALPHA`の検索結果で左上ボタンが通常Homeへ戻り、検索欄と結果を消す。
+- `[x]` 通常Homeの`BodyOnlyCandidate` CardからMarkdownを同じleafへ開き、左上ボタンで通常Homeへ戻る。
+- `[x]` 通常Homeを数画面下へスクロールし、左上ボタンで見出しと先頭Cardが見える最上部へ戻る。
+- `[x]` 更新版3成果物だけをVault外バックアップ後に配置し、ローカル成果物とのSHA-256一致を確認する。
+
 ## 0.5.0 レスポンシブUIリリース判定（2026-07-15）
 
 自動確認:

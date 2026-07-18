@@ -82,14 +82,11 @@ test("persistent index cache is rejected when index-affecting settings change", 
   assert.equal(parsePersistentIndexCache(serialized, changedSettings), null);
 });
 
-test("UI-only Home navigation and Card preview settings do not invalidate the page index cache", () => {
+test("UI-only Home label and Card preview settings do not invalidate the page index cache", () => {
   const serialized = createPersistentIndexCache(settings, [page], new Map(), 1234);
   const navigationSettings: PalmWikiHomeSettings = {
     ...settings,
-    homeButtonAction: "page",
     homeButtonLabel: "Vault home",
-    homeButtonPagePath: "Notes/Example.md",
-    homeButtonCommandId: "app:test",
     cardShape: "square",
     cardSize: "large",
     squareTwoColumnMaxWidth: 760,

@@ -14,9 +14,6 @@ test("missing or invalid saved settings fall back to safe defaults", () => {
   assert.deepEqual(
     normalizeSettings({
       homeButtonLabel: 42,
-      homeButtonAction: "elsewhere",
-      homeButtonPagePath: [],
-      homeButtonCommandId: false,
       includeFolders: 42,
       defaultViewMode: "grid",
       indexOnStartup: "yes",
@@ -30,9 +27,6 @@ test("saved settings are normalized and deduplicated", () => {
   assert.deepEqual(
     normalizeSettings({
       homeButtonLabel: " My Vault Home ",
-      homeButtonAction: "command",
-      homeButtonPagePath: " Notes/Home.md ",
-      homeButtonCommandId: " workspace:close ",
       includeFolders: ["/Notes/", "Notes", " Projects\\"],
       excludeFolders: [" Archive/", "Archive"],
       pinnedPages: ["Notes/A.md", "Notes/A.md", ""],
@@ -53,9 +47,6 @@ test("saved settings are normalized and deduplicated", () => {
     }),
     {
       homeButtonLabel: "My Vault Home",
-      homeButtonAction: "command",
-      homeButtonPagePath: "Notes/Home.md",
-      homeButtonCommandId: "workspace:close",
       includeFolders: ["Notes", "Projects"],
       excludeFolders: ["Archive"],
       pinnedPages: ["Notes/A.md"],
@@ -100,7 +91,7 @@ test("unknown enum values and non-boolean flags are rejected", () => {
   assert.equal(settings.performanceDebug, DEFAULT_SETTINGS.performanceDebug);
 });
 
-test("version 0.1.0 settings gain Home button defaults without losing saved values", () => {
+test("version 0.1.0 settings gain current defaults without losing saved values", () => {
   const settings = normalizeSettings({
     includeFolders: ["Notes"],
     defaultViewMode: "table",
@@ -108,9 +99,6 @@ test("version 0.1.0 settings gain Home button defaults without losing saved valu
   });
 
   assert.equal(settings.homeButtonLabel, "");
-  assert.equal(settings.homeButtonAction, "palmwikiHome");
-  assert.equal(settings.homeButtonPagePath, "");
-  assert.equal(settings.homeButtonCommandId, "");
   assert.equal(settings.cardShape, "portrait");
   assert.equal(
     settings.squareTwoColumnMaxWidth,
@@ -122,10 +110,18 @@ test("version 0.1.0 settings gain Home button defaults without losing saved valu
   assert.equal(settings.showTagsOnCards, false);
 });
 
-test("all supported Home button actions are preserved", () => {
-  for (const action of ["palmwikiHome", "page", "command"] as const) {
-    assert.equal(normalizeSettings({ homeButtonAction: action }).homeButtonAction, action);
-  }
+test("legacy configurable Home button settings are discarded", () => {
+  const settings = normalizeSettings({
+    homeButtonAction: "command",
+    homeButtonPagePath: "Notes/Home.md",
+    homeButtonCommandId: "workspace:close",
+    homeButtonLabel: "PalmWiki"
+  });
+
+  assert.equal(settings.homeButtonLabel, "PalmWiki");
+  assert.equal("homeButtonAction" in settings, false);
+  assert.equal("homeButtonPagePath" in settings, false);
+  assert.equal("homeButtonCommandId" in settings, false);
 });
 
 test("all supported Card preview modes are preserved", () => {

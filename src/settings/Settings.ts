@@ -1,4 +1,3 @@
-import type { HomeButtonAction } from "../homeNavigation";
 import type { CardPreviewMode } from "../cardPreview";
 
 export type PalmWikiViewMode = "card" | "table";
@@ -25,9 +24,6 @@ export const MAX_SQUARE_TWO_COLUMN_MAX_WIDTH = 1600;
 
 export interface PalmWikiHomeSettings {
   homeButtonLabel: string;
-  homeButtonAction: HomeButtonAction;
-  homeButtonPagePath: string;
-  homeButtonCommandId: string;
   includeFolders: string[];
   excludeFolders: string[];
   pinnedPages: string[];
@@ -49,9 +45,6 @@ export interface PalmWikiHomeSettings {
 
 export const DEFAULT_SETTINGS: PalmWikiHomeSettings = {
   homeButtonLabel: "",
-  homeButtonAction: "palmwikiHome",
-  homeButtonPagePath: "",
-  homeButtonCommandId: "",
   includeFolders: [],
   excludeFolders: [],
   pinnedPages: [],
@@ -76,13 +69,6 @@ export function normalizeSettings(value: unknown): PalmWikiHomeSettings {
 
   return {
     homeButtonLabel: readTrimmedString(settings.homeButtonLabel),
-    homeButtonAction: readEnum(
-      settings.homeButtonAction,
-      ["palmwikiHome", "page", "command"],
-      "palmwikiHome"
-    ),
-    homeButtonPagePath: readTrimmedString(settings.homeButtonPagePath),
-    homeButtonCommandId: readTrimmedString(settings.homeButtonCommandId),
     includeFolders: normalizeFolderList(readStringArray(settings.includeFolders)),
     excludeFolders: normalizeFolderList(readStringArray(settings.excludeFolders)),
     pinnedPages: uniqueNonEmptyStrings(settings.pinnedPages),
