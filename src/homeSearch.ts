@@ -15,6 +15,12 @@ export interface SearchPageCreationContext {
 
 type SearchIndexAvailability = Pick<SearchIndexState, "phase" | "indexedCount">;
 
+interface PalmWikiHomeSearchViewState {
+  searchQuery: string;
+  submittedSearchQuery: string;
+  searchResultLimit: number;
+}
+
 export function canUseFullTextSearchIndex(
   state: SearchIndexAvailability
 ): boolean {
@@ -28,6 +34,32 @@ export function shouldClearFullTextSearchResults(
   state: SearchIndexAvailability
 ): boolean {
   return state.phase === "error" && state.indexedCount === 0;
+}
+
+export function isPalmWikiHomeSearchActive(
+  state: unknown
+): boolean {
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return false;
+  }
+  const submittedSearchQuery = (
+    state as Record<string, unknown>
+  ).submittedSearchQuery;
+  return (
+    typeof submittedSearchQuery === "string" &&
+    submittedSearchQuery.trim().length > 0
+  );
+}
+
+export function clearPalmWikiHomeSearchState<
+  T extends object
+>(state: T, defaultSearchResultLimit: number): T & PalmWikiHomeSearchViewState {
+  return {
+    ...state,
+    searchQuery: "",
+    submittedSearchQuery: "",
+    searchResultLimit: defaultSearchResultLimit
+  };
 }
 
 export function captureSearchPageCreationContext(

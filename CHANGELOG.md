@@ -4,6 +4,13 @@ All notable changes to PalmWiki Home will be documented in this file.
 
 The project uses versions from `manifest.json`.
 
+## [0.6.0] - 2026-07-18
+
+- Made the upper-left Home button deterministic across every supported view: Markdown returns in the same tab to normal PalmWiki Home, Home search results clear the search and return to normal Home, and normal Home scrolls to the top.
+- Removed the configurable Markdown page and Obsidian-command Home-button actions, including their settings controls and private command-manager compatibility path; legacy saved keys are safely ignored.
+- Preserved the current filters, display mode, and sorting when leaving Home search through the Home button while clearing only the draft query, submitted query, and expanded result limit.
+- Added state-aware accessible labels and regression coverage for fixed navigation, legacy-setting removal, search reset, fallback view-state transitions, and existing index behavior.
+
 ## [0.5.0] - 2026-07-15
 
 - Replaced the large text Refresh control with Obsidian's standard refresh icon beside the index status.

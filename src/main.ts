@@ -38,18 +38,12 @@ import {
   getCardPreviewSource
 } from "./cardPreview";
 import {
-  getHomeButtonActionDescription,
   HomeNavigationManager,
-  resolveExistingHomePage,
   resolveHomeButtonLabel,
   resolveMarkdownLeafPath,
   scrollPalmWikiHomeToTop
 } from "./homeNavigation";
-import {
-  executeCommandByIdCompat,
-  listCommandsCompat,
-  unregisterHoverLinkSourceCompat
-} from "./obsidianCompat";
+import { unregisterHoverLinkSourceCompat } from "./obsidianCompat";
 import { PalmWikiHomeView, PALMWIKI_HOME_VIEW_TYPE } from "./ui/PalmWikiHomeView";
 import {
   SearchIndexManager,
@@ -70,11 +64,14 @@ import { CreateSearchPageModal } from "./ui/CreateSearchPageModal";
 import { normalizePageNameText } from "./core/search/titleSuggestions";
 import {
   captureSearchPageCreationContext,
+  clearPalmWikiHomeSearchState,
   createPalmWikiHomeSearchState,
+  isPalmWikiHomeSearchActive,
   isSearchPageCreationContextCurrent
 } from "./homeSearch";
 import { MarkdownHeaderSearchManager, isMarkdownLeaf } from "./markdownHeaderSearch";
 import { mountMarkdownHeaderSearch } from "./ui/MarkdownHeaderSearch";
+import { DEFAULT_SEARCH_RESULT_LIMIT } from "./ui/SearchResults";
 
 export interface PalmWikiHomeIndexState {
   indexPhase: IndexPhase;
@@ -176,14 +173,13 @@ export default class PalmWikiHomePlugin extends Plugin {
           this.settings.homeButtonLabel,
           this.app.vault.getName()
         ),
-      getMarkdownActionDescription: () => this.getHomeButtonActionDescription(),
       getMarkdownPath: (leaf) => resolveMarkdownLeafPath(this.app, leaf),
+      isHomeSearchActive: (leaf) => this.isHomeSearchActive(leaf),
       onHomeActivate: (leaf) => {
-        this.app.workspace.setActiveLeaf(leaf, { focus: true });
-        scrollPalmWikiHomeToTop(leaf.view.containerEl);
+        void this.activatePalmWikiHomeButton(leaf);
       },
-      onMarkdownActivate: async (leaf, event) => {
-        await this.activateMarkdownHomeButton(leaf, event);
+      onMarkdownActivate: async (leaf) => {
+        await this.openPalmWikiHomeInLeaf(leaf);
       },
       palmWikiHomeViewType: PALMWIKI_HOME_VIEW_TYPE
     });
@@ -744,83 +740,42 @@ export default class PalmWikiHomePlugin extends Plugin {
     this.homeNavigation?.removeLeaf(leaf);
   }
 
-  private getHomeButtonActionDescription(): string {
-    let commandLabel = "";
-    if (this.settings.homeButtonAction === "command") {
-      const commandId = this.settings.homeButtonCommandId;
-      commandLabel = commandId
-        ? listCommandsCompat(this.app).find((command) => command.id === commandId)?.name ??
-          commandId
-        : "";
-    }
-
-    return getHomeButtonActionDescription(
-      this.settings.homeButtonAction,
-      this.settings.homeButtonPagePath,
-      commandLabel
-    );
-  }
-
-  private async activateMarkdownHomeButton(
-    leaf: WorkspaceLeaf,
-    event: MouseEvent
-  ): Promise<void> {
-    switch (this.settings.homeButtonAction) {
-      case "page":
-        await this.openConfiguredHomePage(leaf);
-        return;
-      case "command":
-        this.runConfiguredHomeCommand(leaf, event);
-        return;
-      case "palmwikiHome":
-      default:
-        await this.openPalmWikiHomeInLeaf(leaf);
-    }
-  }
-
-  private async openConfiguredHomePage(leaf: WorkspaceLeaf): Promise<void> {
-    const configuredTarget = this.settings.homeButtonPagePath;
-    if (!configuredTarget) {
-      new Notice("Choose a home page in the PalmWiki Home settings.");
-      return;
-    }
-
-    const sourceFile = (leaf.view as { file?: TFile | null }).file;
-    const resolvedPage = resolveExistingHomePage(
-      this.app,
-      sourceFile instanceof TFile ? sourceFile.path : "",
-      configuredTarget
-    );
-    if (!resolvedPage) {
-      new Notice(`Home page not found: ${configuredTarget}`);
-      return;
-    }
-
-    await this.openMarkdownFileInLeaf(
-      leaf,
-      resolvedPage.file,
-      resolvedPage.subpath ? { subpath: resolvedPage.subpath } : undefined,
-      `Could not open Home page: ${resolvedPage.file.path}`
-    );
-  }
-
-  private runConfiguredHomeCommand(leaf: WorkspaceLeaf, event: MouseEvent): void {
-    const commandId = this.settings.homeButtonCommandId;
-    if (!commandId) {
-      new Notice("Choose a home command in the PalmWiki Home settings.");
-      return;
-    }
-
+  private async activatePalmWikiHomeButton(leaf: WorkspaceLeaf): Promise<void> {
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
-    const result = executeCommandByIdCompat(this.app, commandId, event);
-    if (result === "executed") {
-      return;
+    const currentState = leaf.view.getState();
+
+    if (this.isHomeSearchActive(leaf)) {
+      const searchView = leaf.view as typeof leaf.view & {
+        returnToHomeFromSearch?: () => boolean;
+      };
+      const returnedDirectly =
+        typeof searchView.returnToHomeFromSearch === "function" &&
+        searchView.returnToHomeFromSearch();
+      if (!returnedDirectly) {
+        await leaf.setViewState({
+          ...leaf.getViewState(),
+          type: PALMWIKI_HOME_VIEW_TYPE,
+          active: true,
+          state: clearPalmWikiHomeSearchState(
+            currentState,
+            DEFAULT_SEARCH_RESULT_LIMIT
+          )
+        });
+        leaf.view.setEphemeralState({ scrollTop: 0 });
+        this.syncHomeNavigationForLeaf(leaf);
+      }
     }
-    if (result === "unsupported") {
-      new Notice("Obsidian command access is unavailable in this version.");
-      return;
-    }
-    new Notice(`Home command is unavailable in the current context: ${commandId}`);
+
+    scrollPalmWikiHomeToTop(leaf.view.containerEl);
+  }
+
+  private isHomeSearchActive(leaf: WorkspaceLeaf): boolean {
+    return (
+      isPalmWikiHomeSearchActive(leaf.view.getState()) ||
+      leaf.view.containerEl.querySelector(
+        '[data-palmwiki-search-active="true"], .palmwiki-search-results'
+      ) !== null
+    );
   }
 
   private async openPalmWikiHomeInLeaf(

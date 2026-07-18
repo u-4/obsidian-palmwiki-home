@@ -43,14 +43,11 @@
 - In a PalmWiki Home leaf, confirm the centered `PalmWiki Home` header text is hidden while the title-container area remains available.
 - Confirm Canvas, Settings, unrelated custom views, Hover Preview, Hover Editor, and popovers do not receive the button.
 - Leave `Home button label` empty and confirm the current Vault name is used; enter a custom label and confirm text, tooltip, and accessible label update on every eligible leaf without reopening it.
-- Select `Open PalmWiki Home`, click a Markdown leaf's button, and confirm that exact leaf becomes PalmWiki Home without creating or selecting another Home leaf.
-- Select `Open a page`, choose an existing Markdown file, and confirm it opens in the clicked leaf. Check a basename, Vault-relative path, `.md` path, Wiki link, alias, and heading target.
-- Configure a missing page and confirm no file is created, the original Markdown view remains, and a Notice appears.
-- Select `Run a command`, choose a command, and confirm choosing it does not execute it. Click the button in an inactive split and confirm that split becomes active before the command runs.
-- Disable or remove the selected command, or choose one unavailable in the current context, and confirm the view stays unchanged with a Notice.
-- Change only Home button settings with performance logging enabled and confirm no index rebuild or full-Vault body read starts.
-- Open PalmWiki Home in Card and Table modes, scroll down, and click the left button. Confirm the same Home view returns to the top. Repeat with reduced motion enabled.
-- Move an eligible leaf to a pop-out window and repeat label, action, and Home scroll checks.
+- Click a Markdown leaf's button and confirm that exact leaf becomes the normal PalmWiki Home screen without creating or selecting another Home leaf. Repeat after the same leaf previously showed full-text search results and confirm the old query is not restored.
+- Submit a full-text search in PalmWiki Home, click the left button, and confirm the query and results are cleared while the current Card/Table, sort, Quick filter, folder, tag, and link-target choices remain. Confirm the tooltip changes from `Return to PalmWiki Home` to `Scroll PalmWiki Home to top`.
+- Open the normal PalmWiki Home screen in Card and Table modes, scroll down, and click the left button. Confirm the same Home view returns to the top. Repeat with reduced motion enabled.
+- Change only the Home button label with performance logging enabled and confirm no index rebuild or full-Vault body read starts.
+- Move an eligible leaf to a pop-out window and repeat label, fixed Markdown return, search-result return, and Home scroll checks.
 - Close leaves, disable/reload the plugin, and confirm no duplicate or stale PalmWiki button remains.
 - With 2Hop Links Plus installed, confirm its upper-right controls and DOM remain unchanged and PalmWiki Home still works after 2Hop Links Plus is disabled.
 
@@ -116,7 +113,7 @@
 - Use `Show 100 more` through 500 results. Confirm the cap message appears and no further rows mount until the query is narrowed.
 - Search a name that does not exist anywhere in the Vault. Open the create row, verify the editable name and Obsidian-configured destination, cancel, and confirm nothing was created.
 - In a disposable test folder, confirm the create action makes one blank Markdown file only after `Create page`. Repeat with an existing title, basename, alias, excluded-folder title, unsafe filename, and race-created destination; confirm no overwrite or duplicate occurs.
-- From search results, open a page and use Obsidian Back/Forward. Confirm draft/submitted query, filters, Card/Table/sort state, result limit, and scroll position restore. Repeat via the upper-left Home button and confirm Home starts fresh instead.
+- From search results, open a page and use Obsidian Back/Forward. Confirm draft/submitted query, filters, Card/Table/sort state, result limit, and scroll position restore. In the search-results Home view, use the upper-left Home button and confirm the submitted query/results clear without restoring them, while the current display and filter choices remain.
 - Move Home to a pop-out while suggestions or a link-target popup is open. Confirm outside click and Escape close controls in the new window and the old window retains no listener-visible behavior.
 - Close the Home leaf, reload/disable the plugin, and confirm header hosts, document listeners, idle callbacks, and result navigation do not remain.
 - Submit exactly 256 characters and eight total positive/negative terms, then exceed each limit. Confirm valid boundaries search normally, while over-limit input shows an explanation and does not start full-Vault search.

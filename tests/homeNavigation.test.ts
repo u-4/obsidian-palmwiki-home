@@ -4,16 +4,12 @@ import type { App, View, WorkspaceLeaf } from "obsidian";
 import {
   findClosestVerticalScrollContainer,
   HOME_BUTTON_SETTING_DESCRIPTION,
-  HOME_COMMAND_SETTING_DESCRIPTION,
-  HOME_PAGE_SETTING_DESCRIPTION,
-  getHomeButtonActionDescription,
+  getMarkdownHomeButtonDescription,
   getPalmWikiHomeButtonDescription,
   HomeNavigationManager,
   isPalmWikiHomeRenderRevisionCurrent,
-  normalizeHomePageTarget,
   PALMWIKI_HOME_BUTTON_CLASS,
   PALMWIKI_MARKDOWN_PATH_CLASS,
-  resolveExistingHomePage,
   resolveHomeButtonLabel,
   resolveMarkdownLeafPath,
   resolvePalmWikiHomeEphemeralScrollTop,
@@ -49,136 +45,22 @@ test("Markdown header path uses the current TFile and deferred view-state fallba
   assert.equal(resolveMarkdownLeafPath(app, missingLeaf), "");
 });
 
-test("Home button descriptions explain all three Markdown actions and Home scrolling", () => {
+test("Home button descriptions explain the fixed Markdown and Home behavior", () => {
   assert.equal(
-    getHomeButtonActionDescription("palmwikiHome"),
-    "Open PalmWiki Home in this tab"
-  );
-  assert.equal(
-    getHomeButtonActionDescription("page", "Notes/Home.md"),
-    "Open Notes/Home.md in this tab"
-  );
-  assert.equal(
-    getHomeButtonActionDescription("command", "", "Open command palette"),
-    "Run command: Open command palette"
+    getMarkdownHomeButtonDescription("My Vault"),
+    "My Vault: Open PalmWiki Home in this tab"
   );
   assert.equal(
     getPalmWikiHomeButtonDescription("My Vault"),
     "My Vault: Scroll PalmWiki Home to top"
   );
-  assert.match(HOME_BUTTON_SETTING_DESCRIPTION, /always scrolls to the top/);
-  assert.match(HOME_PAGE_SETTING_DESCRIPTION, /current tab/);
-  assert.match(HOME_PAGE_SETTING_DESCRIPTION, /not created/);
-  assert.match(HOME_COMMAND_SETTING_DESCRIPTION, /does not run it/);
-});
-
-test("Wiki links, aliases, and headings are normalized without touching plain pipe names", () => {
-  assert.deepEqual(normalizeHomePageTarget("[[Folder/Page.md#Section|Shown name]]"), {
-    isWikiLink: true,
-    linkpath: "Folder/Page.md",
-    subpath: "#Section"
-  });
-  assert.deepEqual(normalizeHomePageTarget("Page#Section"), {
-    isWikiLink: false,
-    linkpath: "Page",
-    subpath: "#Section"
-  });
-  assert.deepEqual(normalizeHomePageTarget("Folder/A|B.md"), {
-    isWikiLink: false,
-    linkpath: "Folder/A|B.md",
-    subpath: ""
-  });
-  assert.deepEqual(normalizeHomePageTarget("[[Page|Shown#label]]"), {
-    isWikiLink: true,
-    linkpath: "Page",
-    subpath: ""
-  });
-});
-
-test("existing Home pages resolve by exact path, extension, basename, Wiki link, and alias", () => {
-  const page = makeFile("Folder/Page.md");
-  const aliased = makeFile("Folder/Aliased.md");
-  const source = makeFile("Folder/Source.md");
-  const { app } = makeApp([page, aliased, source], {
-    aliases: { [aliased.path]: ["Start here"] },
-    links: { Page: page }
-  });
-
-  assert.equal(resolveExistingHomePage(app, source.path, "Folder/Page.md")?.file, page);
-  assert.equal(resolveExistingHomePage(app, source.path, "Folder/Page")?.file, page);
-  assert.equal(resolveExistingHomePage(app, source.path, "Page")?.file, page);
-  assert.deepEqual(resolveExistingHomePage(app, source.path, "[[Page#Section|Shown]]"), {
-    file: page,
-    subpath: "#Section"
-  });
-  assert.equal(resolveExistingHomePage(app, source.path, "[[Start here]]")?.file, aliased);
-  assert.deepEqual(resolveExistingHomePage(app, source.path, "[[#Local heading]]"), {
-    file: source,
-    subpath: "#Local heading"
-  });
-});
-
-test("exact paths containing hash or pipe win before Wiki syntax is split", () => {
-  const hashFile = makeFile("Folder/A#B.md");
-  const pipeFile = makeFile("Folder/A|B.md");
-  const page = makeFile("Page.md");
-  const aliased = makeFile("Folder/SharpAlias.md");
-  const { app } = makeApp([hashFile, pipeFile, page, aliased], {
-    aliases: { [aliased.path]: ["C#"] },
-    links: { Page: page }
-  });
-
-  assert.equal(resolveExistingHomePage(app, "", "[[Folder/A#B.md]]")?.file, hashFile);
-  assert.equal(resolveExistingHomePage(app, "", "[[Folder/A|B.md]]")?.file, pipeFile);
-  assert.deepEqual(resolveExistingHomePage(app, "", "[[Folder/A#B.md#Heading]]"), {
-    file: hashFile,
-    subpath: "#Heading"
-  });
-  assert.deepEqual(resolveExistingHomePage(app, "", "[[Folder/A#B.md|Shown]]"), {
-    file: hashFile,
-    subpath: ""
-  });
-  assert.deepEqual(resolveExistingHomePage(app, "", "[[Folder/A#B|Shown]]"), {
-    file: hashFile,
-    subpath: ""
-  });
-  assert.deepEqual(resolveExistingHomePage(app, "", "[[Folder/A|B.md|Shown]]"), {
-    file: pipeFile,
-    subpath: ""
-  });
-  assert.equal(resolveExistingHomePage(app, "", "[[A#B.md]]")?.file, hashFile);
-  assert.deepEqual(resolveExistingHomePage(app, "", "[[Page#C# language]]"), {
-    file: page,
-    subpath: "#C# language"
-  });
-  assert.equal(resolveExistingHomePage(app, "", "[[Page|Shown#label]]")?.file, page);
-  assert.deepEqual(resolveExistingHomePage(app, "", "[[A#B.md#C# language]]"), {
-    file: hashFile,
-    subpath: "#C# language"
-  });
-  assert.deepEqual(resolveExistingHomePage(app, "", "[[Folder/A|B.md#Heading]]"), {
-    file: pipeFile,
-    subpath: "#Heading"
-  });
-  assert.deepEqual(
-    resolveExistingHomePage(app, "", "[[Folder/A|B.md#Heading|Shown]]"),
-    {
-      file: pipeFile,
-      subpath: "#Heading"
-    }
+  assert.equal(
+    getPalmWikiHomeButtonDescription("My Vault", true),
+    "My Vault: Return to PalmWiki Home"
   );
-  assert.equal(resolveExistingHomePage(app, "", "C#")?.file, aliased);
-});
-
-test("missing and non-Markdown Home targets stay unresolved and never create a file", () => {
-  const nonMarkdown = { extension: "canvas", path: "Canvas.canvas" };
-  const { app, getCreateCalls } = makeApp([], {
-    abstractFiles: { "Canvas.canvas": nonMarkdown }
-  });
-
-  assert.equal(resolveExistingHomePage(app, "", "Missing"), null);
-  assert.equal(resolveExistingHomePage(app, "", "Canvas.canvas"), null);
-  assert.equal(getCreateCalls(), 0);
+  assert.match(HOME_BUTTON_SETTING_DESCRIPTION, /always opens PalmWiki Home/);
+  assert.match(HOME_BUTTON_SETTING_DESCRIPTION, /returns to the normal Home screen/);
+  assert.match(HOME_BUTTON_SETTING_DESCRIPTION, /scrolls to the top/);
 });
 
 test("the nearest actually scrollable vertical ownerDocument container is selected", () => {
@@ -259,8 +141,8 @@ test("Home navigation manager avoids duplicates, updates labels, and cleans up",
   let notePath = "Folder/First note.md";
   const manager = new HomeNavigationManager({
     getDisplayName: () => label,
-    getMarkdownActionDescription: () => "Open PalmWiki Home in this tab",
     getMarkdownPath: () => notePath,
+    isHomeSearchActive: () => false,
     onHomeActivate: () => undefined,
     onMarkdownActivate: async () => undefined,
     palmWikiHomeViewType: "palmwiki-home-view"
@@ -311,6 +193,41 @@ test("Home navigation manager avoids duplicates, updates labels, and cleans up",
   assert.equal(container.findByClass(PALMWIKI_HOME_BUTTON_CLASS).length, 0);
 });
 
+test("Home navigation describes returning from search before top scrolling", () => {
+  const document = new FakeDocument();
+  const container = document.createElement("div");
+  const headerLeft = document.createElement("div");
+  container.classList.add("workspace-leaf-content");
+  headerLeft.classList.add("view-header-left");
+  container.appendChild(headerLeft);
+
+  const view = {
+    containerEl: container as unknown as HTMLElement,
+    getViewType: () => "palmwiki-home-view"
+  } as unknown as View;
+  const leaf = {
+    getViewState: () => ({ type: "palmwiki-home-view" }),
+    view
+  } as unknown as WorkspaceLeaf;
+  let searchActive = true;
+  const manager = new HomeNavigationManager({
+    getDisplayName: () => "My Vault",
+    getMarkdownPath: () => "",
+    isHomeSearchActive: () => searchActive,
+    onHomeActivate: () => undefined,
+    onMarkdownActivate: async () => undefined,
+    palmWikiHomeViewType: "palmwiki-home-view"
+  });
+
+  manager.syncLeaves([leaf]);
+  const button = container.findByClass(PALMWIKI_HOME_BUTTON_CLASS)[0];
+  assert.equal(button.attributes.get("title"), "My Vault: Return to PalmWiki Home");
+
+  searchActive = false;
+  manager.updateLabels();
+  assert.equal(button.attributes.get("title"), "My Vault: Scroll PalmWiki Home to top");
+});
+
 test("Home navigation ignores actual hover containers without hiding their source leaf", () => {
   const document = new FakeDocument();
   const container = document.createElement("div");
@@ -332,8 +249,8 @@ test("Home navigation ignores actual hover containers without hiding their sourc
   } as unknown as WorkspaceLeaf;
   const manager = new HomeNavigationManager({
     getDisplayName: () => "My Vault",
-    getMarkdownActionDescription: () => "Open PalmWiki Home in this tab",
     getMarkdownPath: () => "Source.md",
+    isHomeSearchActive: () => false,
     onHomeActivate: () => undefined,
     onMarkdownActivate: async () => undefined,
     palmWikiHomeViewType: "palmwiki-home-view"
@@ -377,8 +294,8 @@ test("Home navigation preserves Back/Forward order in a compatible nested header
   } as unknown as WorkspaceLeaf;
   const manager = new HomeNavigationManager({
     getDisplayName: () => "My Vault",
-    getMarkdownActionDescription: () => "Open PalmWiki Home in this tab",
     getMarkdownPath: () => "Nested.md",
+    isHomeSearchActive: () => false,
     onHomeActivate: () => undefined,
     onMarkdownActivate: async () => undefined,
     palmWikiHomeViewType: "palmwiki-home-view"

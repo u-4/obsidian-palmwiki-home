@@ -32,7 +32,9 @@ import {
 } from "./SearchResults";
 import {
   canUseFullTextSearchIndex,
+  clearPalmWikiHomeSearchState,
   createPalmWikiHomeSearchHost,
+  isPalmWikiHomeSearchActive,
   shouldClearFullTextSearchResults
 } from "../homeSearch";
 import {
@@ -137,11 +139,15 @@ export class PalmWikiHomeView extends ItemView implements HoverParent {
 
   async setState(state: unknown, result: ViewStateResult): Promise<void> {
     await super.setState(state, result);
+    const searchWasActive = this.isSearchResultsActive();
     this.savedState = normalizeSavedViewState(state, this.plugin);
     this.stateRevision += 1;
     this.pendingScrollContentReady = false;
     this.renderRoot();
     this.restorePendingScroll();
+    if (searchWasActive !== this.isSearchResultsActive()) {
+      this.plugin.syncHomeNavigationForLeaf(this.leaf);
+    }
   }
 
   getEphemeralState(): Record<string, unknown> {
@@ -189,6 +195,29 @@ export class PalmWikiHomeView extends ItemView implements HoverParent {
     this.searchInput?.focus();
   }
 
+  isSearchResultsActive(): boolean {
+    return isPalmWikiHomeSearchActive(this.savedState);
+  }
+
+  returnToHomeFromSearch(): boolean {
+    if (!this.isSearchResultsActive()) {
+      return false;
+    }
+
+    this.cancelPendingScrollFrame();
+    this.pendingScrollTop = null;
+    this.pendingScrollContentReady = false;
+    this.searchInput = null;
+    this.savedState = clearPalmWikiHomeSearchState(
+      this.savedState,
+      DEFAULT_SEARCH_RESULT_LIMIT
+    );
+    this.stateRevision += 1;
+    this.renderRoot();
+    this.plugin.syncHomeNavigationForLeaf(this.leaf);
+    return true;
+  }
+
   private renderRoot(): void {
     if (!this.root) {
       return;
@@ -214,7 +243,11 @@ export class PalmWikiHomeView extends ItemView implements HoverParent {
           }
         }}
         onStateChange={(state) => {
+          const searchWasActive = this.isSearchResultsActive();
           this.savedState = state;
+          if (searchWasActive !== this.isSearchResultsActive()) {
+            this.plugin.syncHomeNavigationForLeaf(this.leaf);
+          }
         }}
         plugin={this.plugin}
         searchHost={this.searchHost}
@@ -773,6 +806,10 @@ function PalmWikiHomeRoot({
     visiblePages.length
   ]);
 
+  useEffect(() => {
+    plugin.syncHomeNavigationForLeaf(leaf);
+  }, [isSearchMode, leaf, plugin]);
+
   return (
     <>
       {searchHost
@@ -790,7 +827,10 @@ function PalmWikiHomeRoot({
             searchHost
           )
         : null}
-      <div className="palmwiki-home-shell">
+      <div
+        className="palmwiki-home-shell"
+        data-palmwiki-search-active={isSearchMode ? "true" : "false"}
+      >
       <HomeToolbar
         availableFolders={availableFolders}
         availableTags={availableTags}
