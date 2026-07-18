@@ -23,6 +23,18 @@
 - `[x]` 通常Homeを数画面下へスクロールし、左上ボタンで見出しと先頭Cardが見える最上部へ戻る。
 - `[x]` 更新版3成果物だけをVault外バックアップ後に配置し、ローカル成果物とのSHA-256一致を確認する。
 
+公開結果:
+
+- Pull Request: [#21](https://github.com/u-4/obsidian-palmwiki-home/pull/21)
+- Release tag commit: `d725ea4`（タグ`0.6.0`）
+- PR CI: [29629446642](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29629446642)
+- Main CI: [29629480183](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29629480183)
+- Release workflow: [29629532692](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29629532692)
+- 公開Release: [PalmWiki Home 0.6.0](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.6.0)
+- 公開成果物のSHA-256: `main.js` `34d2718dbe7336dcdd1703c79eb92305fa8b14dc5689e573ba634acf23b10399`、`manifest.json` `5093eea4cd22f4c2a68380f21650c3070ea3dd2276b7fc5d2e7f43f24ab50d34`、`styles.css` `26b7d509a033798f4ed848e5fe7ad55c2279b9ffa4ddb125e0f51b54f92ac330`
+- `[x]` 通常のLatest Releaseとして公開され、Assetsが3成果物だけであることを確認した。
+- `[x]` GitHub Digest、下書き／公開URLから再取得したファイル、ローカルbuild、`PalmWiki_LocalTest`配置物のSHA-256が一致した。
+
 ## 0.5.0 レスポンシブUIリリース判定（2026-07-15）
 
 自動確認:
