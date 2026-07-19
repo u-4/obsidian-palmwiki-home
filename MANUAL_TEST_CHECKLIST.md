@@ -23,8 +23,20 @@
 
 公開判定:
 
-- `[ ]` 0.6.1タグが公開時の`main`を指し、Release workflowが3成果物だけの下書きを作る。
-- `[ ]` 公開URLから3成果物を再取得し、GitHub Digest、ローカルbuild、`PalmWiki_LocalTest`配置物と一致する。
+- `[x]` 0.6.1タグが公開時の`main`を指し、Release workflowが3成果物だけの下書きを作る。
+- `[x]` 公開URLから3成果物を再取得し、GitHub Digest、ローカルbuild、`PalmWiki_LocalTest`配置物と一致する。
+
+公開結果:
+
+- Pull Request: [#23](https://github.com/u-4/obsidian-palmwiki-home/pull/23)
+- Release tag commit: `b1ef401`（タグ`0.6.1`）
+- PR CI: [29676622359](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29676622359)
+- Main CI: [29676650913](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29676650913)
+- Release workflow: [29676697460](https://github.com/u-4/obsidian-palmwiki-home/actions/runs/29676697460)
+- 公開Release: [PalmWiki Home 0.6.1](https://github.com/u-4/obsidian-palmwiki-home/releases/tag/0.6.1)
+- 公開成果物のSHA-256: `main.js` `34d2718dbe7336dcdd1703c79eb92305fa8b14dc5689e573ba634acf23b10399`、`manifest.json` `87981ce37568a2da52f7721fbda8d1a25f52cba0d67ae2885c8fc158b9811de8`、`styles.css` `26b7d509a033798f4ed848e5fe7ad55c2279b9ffa4ddb125e0f51b54f92ac330`
+- `[x]` 通常のLatest Releaseとして公開され、Assetsが3成果物だけであることを確認した。
+- `[x]` GitHub Digest、下書き／公開URLから再取得したファイル、ローカルbuild、`PalmWiki_LocalTest`配置物のSHA-256が一致した。
 
 ## 0.6.0 固定Homeボタン動作リリース判定（2026-07-18）
 
