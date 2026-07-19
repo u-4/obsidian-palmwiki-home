@@ -29,7 +29,7 @@ export default defineConfig(
     files: ["src/**/*.{ts,tsx}", "tests/**/*.ts"],
     rules: {
       // Declarative settings search is available in Obsidian 1.13+. Version 0.1.0
-      // intentionally supports the verified 1.12.7 desktop release.
+      // intentionally supports the verified 1.12.7 minimum release.
       "obsidianmd/settings-tab/prefer-setting-definitions": "off",
       "obsidianmd/ui/sentence-case": [
         "warn",
@@ -46,6 +46,8 @@ export default defineConfig(
     files: ["tests/**/*.ts"],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      // Tests run under Node.js and are never bundled into the mobile plugin.
+      "obsidianmd/no-nodejs-modules": "off",
       "obsidianmd/prefer-window-timers": "off",
       "obsidianmd/ui/sentence-case": "off"
     }
