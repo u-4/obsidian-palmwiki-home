@@ -4,6 +4,12 @@ All notable changes to PalmWiki Home will be documented in this file.
 
 The project uses versions from `manifest.json`.
 
+## [0.6.1] - 2026-07-19
+
+- Enabled installation and use on Obsidian Mobile by setting the public manifest's `isDesktopOnly` flag to `false` after the responsive interface and primary navigation/search flows were accepted on a physical iPhone.
+- Added release-time guards that reject bundled Node.js/Electron imports, `process.platform`, and an unconditional desktop `FileSystemAdapter`, keeping future mobile releases from silently regressing to desktop-only runtime assumptions.
+- Documented that macOS Desktop and iPhone are verified environments while Windows, Linux, iPad, and Android remain device-specific follow-up checks.
+
 ## [0.6.0] - 2026-07-18
 
 - Made the upper-left Home button deterministic across every supported view: Markdown returns in the same tab to normal PalmWiki Home, Home search results clear the search and return to normal Home, and normal Home scrolls to the top.

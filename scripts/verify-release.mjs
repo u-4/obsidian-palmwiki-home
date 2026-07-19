@@ -31,7 +31,7 @@ assert(
   versions[expectedVersion] === manifest.minAppVersion,
   "versions.json must map the release to manifest.minAppVersion"
 );
-assert(manifest.isDesktopOnly === true, "The release must be marked desktop-only");
+assert(manifest.isDesktopOnly === false, "The release must enable mobile installation");
 
 const hasDatedChangelogEntry = new RegExp(
   `^## \\[${escapeRegex(expectedVersion)}\\] - \\d{4}-\\d{2}-\\d{2}$`,
@@ -62,6 +62,17 @@ for (const asset of RELEASE_ASSETS) {
 
 const mainJs = await readFile("main.js", "utf8");
 assert(!/sourceMappingURL/.test(mainJs), "Production main.js must not reference a source map");
+assert(
+  !/\brequire\(\s*["'](?:node:[^"']+|electron|fs(?:\/promises)?|path|os|child_process)["']\s*\)/.test(
+    mainJs
+  ),
+  "Mobile release must not bundle Node.js or Electron runtime imports"
+);
+assert(!/\bprocess\.platform\b/.test(mainJs), "Mobile release must not use process.platform");
+assert(
+  !/\bFileSystemAdapter\b/.test(mainJs),
+  "Mobile release must not assume Obsidian's desktop FileSystemAdapter"
+);
 assert(
   thirdPartyNotices.includes("Permission is hereby granted") &&
     thirdPartyNotices.includes("Copyright (c) Facebook, Inc. and its affiliates."),

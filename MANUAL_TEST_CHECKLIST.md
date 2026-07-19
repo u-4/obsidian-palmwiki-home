@@ -5,6 +5,27 @@
 - `[x]` 自動確認またはObsidian実画面で確認済み
 - `[ ]` 未実施、または公開操作時にだけ確認する項目
 
+## 0.6.1 モバイル対応リリース判定（2026-07-19）
+
+自動・静的確認:
+
+- `[x]` 公開manifestの`isDesktopOnly`を`false`とし、Obsidian Mobileでインストールできる設定にする。
+- `[x]` 実行時ソースとproduction bundleにNode.js / Electron import、`process.platform`、無条件の`FileSystemAdapter`、正規表現lookbehindがない。
+- `[x]` Release verifierがモバイル有効manifestを必須とし、デスクトップ専用runtime参照を検出した場合は公開前に失敗する。
+- `[x]` 0.6.1のproduction build、公式Obsidian ESLint、124件の自動テスト、metadata、Release metadata、diff check、moderate基準の依存監査が成功する。
+
+実機・配布確認:
+
+- `[x]` 利用者がiPhone実機で主要動作に大きな問題がないことを確認した。
+- `[x]` `PalmWiki_LocalTest`の既存版をVault外へバックアップし、0.6.1の3成果物だけを配置してSHA-256一致を確認する。既存の設定・索引・検索キャッシュは変更しない。
+- `[ ]` iPad miniを含むiPad全幅／Split Viewを個別に確認する。
+- `[ ]` Android版Obsidianで起動、Home／Markdown移動、検索、設定保存を個別に確認する。
+
+公開判定:
+
+- `[ ]` 0.6.1タグが公開時の`main`を指し、Release workflowが3成果物だけの下書きを作る。
+- `[ ]` 公開URLから3成果物を再取得し、GitHub Digest、ローカルbuild、`PalmWiki_LocalTest`配置物と一致する。
+
 ## 0.6.0 固定Homeボタン動作リリース判定（2026-07-18）
 
 自動確認:
