@@ -1,0 +1,9 @@
+{
+  "name": "palmwiki-home-lite-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated dependency-free PalmWiki Home Lite test build",
+  "scripts": { "build": "node build.mjs", "test": "node --test tests.cjs" },
+  "engines": { "node": ">=22" },
+  "license": "MIT"
+}
