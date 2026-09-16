@@ -30,8 +30,11 @@
 
 ## Vault Deployment
 
-- The user-designated `PalmWiki_LocalTest` Vault is the standing test target. After verified feature updates, deployment there is pre-authorized without asking again.
-- Confirm the target before deploying to any other Vault.
+- Current user authorization (2026-09-16): the standing deployment and real-device acceptance target is the existing `PalmWiki` Vault under iCloud Drive / Obsidian. Verified updates may be distributed there without requesting the same approval again.
+- `PalmWiki_LocalTest` remains optional for isolated regression checks; Mac-only testing is not the primary acceptance target. For Lite, follow the current procedure in `lite/DEPLOYMENT.md`; older test-only deployment text in historical records is superseded.
+- Prioritize iPhone/iPad startup, progressive card/image loading, note switching, offline use and background/foreground return. Record actual device results separately from desktop or synthetic tests.
+- The user-reported iPhone navigation-button placement problem is known and deferred; do not treat it as fixed or expand the current work to redesign it.
+- Confirm the target before deploying to any other Vault. This authorization does not include changing note contents, plugin settings, synchronization services, repository protection, merging, or public releases.
 - Back up an existing plugin installation outside `.obsidian/plugins/` before replacing it.
 - Deploy only `main.js`, `manifest.json`, and `styles.css` unless explicitly required.
 - Verify checksums after copying and never copy Vault notes into this repository.
