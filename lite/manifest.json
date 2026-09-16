@@ -1,7 +1,7 @@
 {
   "id": "palmwiki-home-lite",
   "name": "PalmWiki Home Lite",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.10.0",
   "description": "A lightweight Bases home with on-demand card previews and external search buttons.",
   "author": "u-4",

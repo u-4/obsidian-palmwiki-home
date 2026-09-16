@@ -3,12 +3,17 @@
 const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
-const PAGE_SIZE = 60;
+const INITIAL_CARDS = 24;
+const CARD_STEP = 24;
+const MAX_CARDS = 300;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const MAX_PREVIEW_BYTES = 512 * 1024;
 const DEFAULTS = Object.freeze({
   homePath: 'PalmWiki Home.base',
   searchCommand: 'omnisearch:show-modal',
   switchCommand: '',
+  showImages: true,
 });
 
 function safeHomePath(value) {
@@ -37,10 +42,101 @@ function excerpt(body) {
     .replace(/[*_`~]/g, '').replace(/\s+/g, ' ').trim().slice(0, 280);
 }
 
-function pageWindow(files, requestedPage) {
-  const last = Math.max(0, Math.ceil(files.length / PAGE_SIZE) - 1);
-  const page = Math.min(last, Math.max(0, Number.isInteger(requestedPage) ? requestedPage : 0));
-  return { page, last, files: files.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) };
+// Keep file references only; never scan note bodies or build a second index.
+function cardWindow(data, limit) {
+  const files = [];
+  let total = 0;
+  for (const group of data?.groupedData || []) {
+    for (const entry of group.entries) {
+      if (entry.file.extension !== 'md') continue;
+      total++;
+      if (files.length < MAX_CARDS) files.push(entry.file);
+    }
+  }
+  return { files, total, shown: files.slice(0, Math.min(MAX_CARDS, Math.max(INITIAL_CARDS, limit))) };
+}
+
+function snapshotKey(file) {
+  return JSON.stringify([file.path, file.stat.mtime, file.stat.size]);
+}
+
+function firstImage(app, file) {
+  // MetadataCache already knows wiki/Markdown image embeds and their source order.
+  // No HTML embeds, network URLs, SVG, animation-specific formats or image scans.
+  const embeds = app.metadataCache.getFileCache(file)?.embeds || [];
+  for (const embed of embeds.slice(0, 100)) {
+    let link = String(embed.link || '').split('|')[0].split('#')[0].trim();
+    try { link = decodeURIComponent(link); } catch { continue; }
+    if (!link || /^(?:[a-z][a-z0-9+.-]*:|[\\/])/i.test(link) || /[\x00-\x1f]/.test(link)) continue;
+    const image = app.metadataCache.getFirstLinkpathDest(link, file.path);
+    if (!(image instanceof TFile) || !IMAGE_EXTENSIONS.has(image.extension.toLowerCase())) continue;
+    // Do not decode an oversized first image just to make a small card.
+    if (!Number.isFinite(image.stat.size) || image.stat.size <= 0 || image.stat.size > MAX_IMAGE_BYTES) return null;
+    return image;
+  }
+  return null;
+}
+
+class PreviewStore {
+  constructor(app) {
+    this.app = app;
+    this.cache = new Map();
+    this.jobs = new Map();
+    this.queue = [];
+    this.active = 0;
+    this.timer = null;
+    this.disposed = false;
+  }
+  get(file) {
+    const key = snapshotKey(file);
+    if (!this.cache.has(key)) return undefined;
+    const text = this.cache.get(key);
+    this.cache.delete(key); this.cache.set(key, text);
+    return text;
+  }
+  read(file, needed) {
+    const cached = this.get(file);
+    if (cached !== undefined) return Promise.resolve(cached);
+    const key = snapshotKey(file);
+    const existing = this.jobs.get(key);
+    if (existing) { existing.checks.push(needed); return existing.promise; }
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    const job = { key, path: file.path, file, checks: [needed], promise, resolve };
+    this.jobs.set(key, job); this.queue.push(job); this.schedule();
+    return promise;
+  }
+  schedule() {
+    if (this.disposed || this.timer !== null || !this.queue.length) return;
+    // Let titles paint first; yield again between reads, even on a warm Vault cache.
+    this.timer = setTimeout(() => { this.timer = null; this.drain(); }, 32);
+  }
+  drain() {
+    while (!this.disposed && this.active < 2 && this.queue.length) {
+      const job = this.queue.shift();
+      const current = this.app.vault.getAbstractFileByPath(job.path);
+      if (!(current instanceof TFile) || snapshotKey(current) !== job.key || !job.checks.some(check => check())) {
+        this.jobs.delete(job.key); job.resolve(null); continue;
+      }
+      this.active++;
+      Promise.resolve().then(() => this.app.vault.cachedRead(current)).then(body => {
+        const latest = this.app.vault.getAbstractFileByPath(job.path);
+        if (this.disposed || !(latest instanceof TFile) || snapshotKey(latest) !== job.key) return null;
+        const text = excerpt(body);
+        this.cache.set(job.key, text);
+        while (this.cache.size > MAX_CARDS) this.cache.delete(this.cache.keys().next().value);
+        return text;
+      }).catch(() => null).then(text => job.resolve(text)).finally(() => {
+        this.active--; this.jobs.delete(job.key); this.schedule();
+      });
+    }
+  }
+  dispose() {
+    this.disposed = true;
+    if (this.timer !== null) clearTimeout(this.timer);
+    for (const job of this.queue) job.resolve(null);
+    this.queue = []; this.jobs.clear(); this.cache.clear();
+  }
 }
 
 function defaultBase() {
@@ -75,6 +171,8 @@ class PalmWikiHomeLite extends Plugin {
         if (typeof saved[key] === 'string' && saved[key].length < 512) this.settings[key] = saved[key];
       }
     }
+    this.settings.showImages = saved?.showImages !== false;
+    this.previews = new PreviewStore(this.app);
     this.disposed = false;
     this.bars = new Map();
     this.cardViews = new Set();
@@ -99,6 +197,15 @@ class PalmWikiHomeLite extends Plugin {
       if (this.disposed) return;
       for (const name of ['layout-change', 'active-leaf-change', 'file-open', 'window-open', 'window-close']) {
         this.registerEvent(this.app.workspace.on(name, () => this.scheduleBars()));
+      }
+      this.registerEvent(this.app.metadataCache.on('changed', file => {
+        for (const view of this.cardViews) view.refreshImages(file.path);
+      }));
+      for (const name of ['create', 'modify', 'delete', 'rename']) {
+        this.registerEvent(this.app.vault.on(name, (file, oldPath) => {
+          if (!(file instanceof TFile) || file.extension === 'md') return;
+          for (const view of this.cardViews) view.refreshImages(null, file.path, oldPath);
+        }));
       }
       this.syncBars();
       const registry = commandBridge(this.app);
@@ -233,6 +340,7 @@ class PalmWikiHomeLite extends Plugin {
     this.bars?.clear();
     for (const view of [...(this.cardViews || [])]) view.dispose();
     this.cardViews?.clear();
+    this.previews?.dispose();
   }
 }
 
@@ -242,82 +350,147 @@ class LiteCards extends BasesView {
     this.type = VIEW_TYPE;
     this.plugin = plugin;
     this.parent = parent;
-    this.page = 0;
+    this.limit = INITIAL_CARDS;
     this.files = [];
+    this.total = 0;
     this.cards = new Map();
-    this.pending = new Map();
-    this.activeReads = 0;
+    this.imageQueue = new Map();
+    this.activeImages = new Set();
+    this.imageTimer = null;
     this.renderFrame = null;
+    this.viewportFrame = null;
+    this.moreFrame = null;
     this.disposed = false;
+    this.lastScrollTop = parent.scrollTop;
     const doc = parent.ownerDocument;
     this.root = doc.createElement('div');
     this.root.className = 'palmwiki-lite-home';
-    this.controls = doc.createElement('div');
-    this.controls.className = 'palmwiki-lite-paging';
-    this.prev = button(doc, '前へ', () => this.changePage(-1));
-    this.status = doc.createElement('span');
+    this.status = doc.createElement('div');
+    this.status.className = 'palmwiki-lite-status';
     this.status.setAttribute('role', 'status');
-    this.next = button(doc, '次へ', () => this.changePage(1));
-    this.controls.append(this.prev, this.status, this.next);
     this.grid = doc.createElement('div');
     this.grid.className = 'palmwiki-lite-grid';
-    this.root.append(this.controls, this.grid);
+    this.more = button(doc, '続きを表示', () => this.requestMore());
+    this.more.className = 'palmwiki-lite-more';
+    this.footer = doc.createElement('div');
+    this.footer.className = 'palmwiki-lite-footer';
+    this.footer.append(this.more);
+    this.root.append(this.status, this.grid, this.footer);
     parent.append(this.root);
     const Observer = doc.defaultView?.IntersectionObserver;
     this.observer = Observer ? new Observer(entries => {
-      for (const entry of entries) if (entry.isIntersecting) {
+      for (const entry of entries) {
         const card = this.cards.get(entry.target.dataset.path);
-        if (card) this.queuePreview(card);
-        this.observer.unobserve(entry.target);
+        if (card && card.el === entry.target) this.setNear(card, entry.isIntersecting && this.visible());
       }
-    }, { root: parent, rootMargin: '200px' }) : null;
+    }, { root: parent, rootMargin: '160px' }) : null;
+    this.registerDomEvent(parent, 'scroll', () => {
+      const top = parent.scrollTop;
+      const down = top > this.lastScrollTop;
+      this.lastScrollTop = top;
+      this.scheduleViewport();
+      if (down && this.visible() && parent.scrollHeight - top - parent.clientHeight < 320) this.requestMore();
+    }, { passive: true });
+    this.registerDomEvent(doc, 'visibilitychange', () => this.scheduleViewport());
+    this.registerDomEvent(doc.defaultView, 'resize', () => this.scheduleViewport());
     plugin.cardViews.add(this);
     this.register(() => this.dispose());
   }
 
+  visible() {
+    return !this.disposed && !this.root.ownerDocument.hidden && this.root.isConnected &&
+      this.parent.clientHeight > 0 && this.root.getClientRects().length > 0;
+  }
+
   onDataUpdated() {
     if (this.disposed || this.renderFrame !== null) return;
-    const win = this.root.ownerDocument.defaultView;
-    this.renderFrame = win.requestAnimationFrame(() => {
+    this.renderFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
       this.renderFrame = null;
       if (this.disposed) return;
-      // Bases supplies the filtered/sorted file references. No Vault scan, graph,
-      // full-body index or duplicate sort here. Group order is preserved.
-      this.files = (this.data?.groupedData || []).flatMap(group => group.entries)
-        .map(entry => entry.file).filter(file => file.extension === 'md');
+      const window = cardWindow(this.data, this.limit);
+      this.files = window.files; this.total = window.total;
       this.render();
     });
   }
 
-  goFirst() { this.page = 0; this.render(); this.parent.scrollTop = 0; }
-  changePage(delta) { this.page += delta; this.render(); this.parent.scrollTop = 0; }
+  goFirst() {
+    this.limit = INITIAL_CARDS;
+    this.parent.scrollTop = 0; this.lastScrollTop = 0;
+    this.render();
+  }
+
+  requestMore() {
+    if (!this.visible() || this.moreFrame !== null || this.limit >= this.files.length) return;
+    this.moreFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
+      this.moreFrame = null;
+      if (!this.visible()) return;
+      this.limit = Math.min(MAX_CARDS, this.limit + CARD_STEP);
+      this.render();
+    });
+  }
 
   render() {
     if (this.disposed) return;
-    const window = pageWindow(this.files, this.page);
-    this.page = window.page;
-    this.prev.disabled = this.page === 0;
-    this.next.disabled = this.page === window.last;
-    this.status.textContent = this.files.length ?
-      `${this.page * PAGE_SIZE + 1}–${Math.min((this.page + 1) * PAGE_SIZE, this.files.length)} / ${this.files.length}` : 'ノートはありません';
-    const wanted = new Set(window.files.map(file => file.path));
+    const shown = this.files.slice(0, this.limit);
+    const wanted = new Set(shown.map(file => file.path));
+    // Remember one visible card so an update above it does not jump the viewport.
+    const top = this.parent.getBoundingClientRect().top;
+    const anchor = this.parent.scrollTop > 0 ? [...this.cards.values()].find(card =>
+      wanted.has(card.path) && card.el.getBoundingClientRect().bottom > top) : null;
+    const anchorTop = anchor?.el.getBoundingClientRect().top;
     for (const [path, card] of this.cards) {
-      if (!wanted.has(path)) {
-        this.observer?.unobserve(card.el); card.el.remove(); this.cards.delete(path); this.pending.delete(path);
-      }
+      if (!wanted.has(path)) this.removeCard(card);
     }
-    for (const file of window.files) {
+    let cursor = this.grid.firstElementChild;
+    for (const file of shown) {
       let card = this.cards.get(file.path);
-      if (!card || card.mtime !== file.stat.mtime || card.size !== file.stat.size) {
-        if (card) { this.observer?.unobserve(card.el); card.el.remove(); this.pending.delete(file.path); }
+      if (!card || card.key !== snapshotKey(file)) {
+        if (card) {
+          if (cursor === card.el) cursor = card.el.nextElementSibling;
+          this.removeCard(card);
+        }
         card = this.makeCard(file);
         this.cards.set(file.path, card);
-        if (this.observer) this.observer.observe(card.el);
-        else this.queuePreview(card);
+        this.observer?.observe(card.el);
       }
-      // Append moves existing elements, preserving their previews and listeners.
-      this.grid.append(card.el);
+      // Unchanged cards stay where they are. Adding 24 does not move/repaint all 300.
+      if (card.el === cursor) cursor = cursor.nextElementSibling;
+      else this.grid.insertBefore(card.el, cursor);
+      if (card.near) this.updateImage(card);
     }
+    if (anchor && this.cards.get(anchor.path) === anchor) {
+      this.parent.scrollTop += anchor.el.getBoundingClientRect().top - anchorTop;
+      this.lastScrollTop = this.parent.scrollTop;
+    }
+    this.status.textContent = this.total ? `${shown.length} / ${this.total}件` : 'ノートはありません';
+    this.more.hidden = shown.length >= this.files.length;
+    this.more.textContent = `続きの${Math.min(CARD_STEP, this.files.length - shown.length)}件を表示`;
+    this.footer.setAttribute('aria-label', shown.length >= MAX_CARDS && this.total > MAX_CARDS ?
+      'この一覧は300件までです。古いノートは検索またはBasesのフィルターをご利用ください。' : '一覧の続き');
+    if (!this.endText) { this.endText = this.root.ownerDocument.createElement('span'); this.footer.append(this.endText); }
+    this.endText.textContent = shown.length >= MAX_CARDS && this.total > MAX_CARDS ?
+      '表示は300件までです。続きは検索またはフィルターで絞り込んでください。' : '';
+    this.scheduleViewport();
+  }
+
+  scheduleViewport() {
+    if (this.disposed || this.viewportFrame !== null) return;
+    this.viewportFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
+      this.viewportFrame = null;
+      const visible = this.visible();
+      const bounds = this.parent.getBoundingClientRect();
+      for (const card of this.cards.values()) {
+        const rect = card.el.getBoundingClientRect();
+        this.setNear(card, visible && rect.bottom >= bounds.top - 160 && rect.top <= bounds.bottom + 160);
+      }
+    });
+  }
+
+  setNear(card, near) {
+    if (this.disposed || this.cards.get(card.path) !== card) return;
+    card.near = near;
+    if (near) { this.queuePreview(card); this.updateImage(card); }
+    else { this.imageQueue.delete(card.path); this.releaseImage(card); }
   }
 
   makeCard(file) {
@@ -329,8 +502,11 @@ class LiteCards extends BasesView {
     el.setAttribute('aria-label', file.basename);
     el.title = file.path;
     const title = doc.createElement('div'); title.className = 'palmwiki-lite-title'; title.textContent = file.basename;
-    const preview = doc.createElement('div'); preview.className = 'palmwiki-lite-preview'; preview.textContent = '…';
-    el.append(title, preview);
+    const media = doc.createElement('div'); media.className = 'palmwiki-lite-media'; media.hidden = true;
+    const preview = doc.createElement('div'); preview.className = 'palmwiki-lite-preview';
+    const cached = this.plugin.previews.get(file);
+    preview.textContent = cached === undefined ? '…' : cached || '本文プレビューなし';
+    el.append(title, media, preview);
     const open = event => {
       if (event.type === 'auxclick' && event.button !== 1) return;
       event.preventDefault();
@@ -348,39 +524,116 @@ class LiteCards extends BasesView {
       void target.openFile(current, { active: true }).catch(() => new Notice('ノートを開けませんでした。'));
     };
     el.addEventListener('click', open); el.addEventListener('auxclick', open);
-    return { el, preview, file, path: file.path, mtime: file.stat.mtime, size: file.stat.size, queued: false };
+    return { el, preview, media, file, path: file.path, key: snapshotKey(file),
+      near: false, reading: false, textReady: cached !== undefined, imageKey: null, imagePath: null,
+      img: null, finishImage: null, badImage: null };
   }
 
   queuePreview(card) {
-    if (this.disposed || card.queued || this.cards.get(card.path) !== card) return;
-    card.queued = true;
-    if (card.size > MAX_PREVIEW_BYTES) { card.preview.textContent = '大きなノート：開いて読む'; return; }
-    this.pending.set(card.path, card);
-    this.drain();
+    if (card.textReady || card.reading || !this.visible()) return;
+    if (card.file.stat.size > MAX_PREVIEW_BYTES) {
+      card.preview.textContent = '大きなノート：開いて読む'; card.textReady = true; return;
+    }
+    card.reading = true;
+    void this.plugin.previews.read(card.file, () => !this.disposed && this.visible() && card.near &&
+      this.cards.get(card.path) === card).then(text => {
+      card.reading = false;
+      if (this.disposed || this.cards.get(card.path) !== card) return;
+      if (text !== null) { card.preview.textContent = text || '本文プレビューなし'; card.textReady = true; }
+      // Cancelled/offscreen reads remain retryable when the card comes back.
+    });
   }
 
-  drain() {
-    while (!this.disposed && this.activeReads < 2 && this.pending.size) {
-      const [path, card] = this.pending.entries().next().value;
-      this.pending.delete(path);
-      if (this.cards.get(path) !== card) continue;
-      this.activeReads++;
-      void this.app.vault.cachedRead(card.file).then(body => {
-        if (this.disposed || this.cards.get(path) !== card) return;
-        const current = this.app.vault.getAbstractFileByPath(path);
-        if (!(current instanceof TFile) || current.stat.mtime !== card.mtime || current.stat.size !== card.size) return;
-        card.preview.textContent = excerpt(body) || '本文プレビューなし';
-      }).catch(() => {
-        if (!this.disposed && this.cards.get(path) === card) card.preview.textContent = 'プレビューを取得できませんでした';
-      }).finally(() => { this.activeReads--; this.drain(); });
+  updateImage(card) {
+    if (!card.near || !this.visible()) return;
+    const image = this.plugin.settings.showImages ? firstImage(this.app, card.file) : null;
+    const key = image ? snapshotKey(image) : null;
+    if (key !== card.imageKey) {
+      this.releaseImage(card);
+      this.imageQueue.delete(card.path);
+      card.imageKey = key; card.imagePath = image?.path || null; card.badImage = null;
     }
+    card.media.hidden = !image || card.badImage === key;
+    if (!image || card.img || card.badImage === key) return;
+    this.imageQueue.set(card.path, { card, image, key });
+    this.scheduleImages();
+  }
+
+  refreshImages(notePath, attachmentPath, oldPath) {
+    if (this.disposed) return;
+    for (const card of this.cards.values()) {
+      if (notePath && notePath !== card.path) continue;
+      if (attachmentPath && card.imagePath && card.imagePath !== attachmentPath && card.imagePath !== oldPath) continue;
+      if (card.near) this.updateImage(card);
+    }
+  }
+
+  scheduleImages() {
+    if (this.disposed || this.imageTimer !== null || !this.imageQueue.size) return;
+    this.imageTimer = setTimeout(() => { this.imageTimer = null; this.drainImages(); }, 32);
+  }
+
+  drainImages() {
+    while (this.visible() && this.activeImages.size < 2 && this.imageQueue.size) {
+      const [path, job] = this.imageQueue.entries().next().value;
+      this.imageQueue.delete(path);
+      const { card, image, key } = job;
+      if (!card.near || this.cards.get(path) !== card || card.imageKey !== key || card.img) continue;
+      const current = this.app.vault.getAbstractFileByPath(image.path);
+      if (!(current instanceof TFile) || snapshotKey(current) !== key) continue;
+      const img = this.root.ownerDocument.createElement('img');
+      img.alt = ''; img.decoding = 'async'; img.loading = 'eager';
+      img.setAttribute('aria-hidden', 'true');
+      this.activeImages.add(card); card.img = img;
+      let finished = false;
+      let timeout = null;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (timeout !== null) clearTimeout(timeout);
+        this.activeImages.delete(card);
+        img.removeEventListener('load', loaded); img.removeEventListener('error', failed);
+        card.finishImage = null; this.scheduleImages();
+      };
+      const loaded = () => { finish(); };
+      const failed = () => {
+        finish();
+        if (card.img === img) { card.badImage = key; this.releaseImage(card); card.media.hidden = true; }
+      };
+      card.finishImage = finish;
+      img.addEventListener('load', loaded); img.addEventListener('error', failed);
+      card.media.append(img);
+      timeout = setTimeout(failed, 8000);
+      try {
+        const resource = this.app.vault.getResourcePath(current);
+        // Same file version reuses the browser cache; changed image bytes get a new URL.
+        img.src = resource + (resource.includes('?') ? '&' : '?') +
+          'palmwiki=' + current.stat.mtime + '-' + current.stat.size;
+      } catch { failed(); }
+    }
+  }
+
+  releaseImage(card) {
+    card.finishImage?.();
+    if (card.img) { card.img.removeAttribute('src'); card.img.remove(); card.img = null; }
+  }
+
+  removeCard(card) {
+    this.observer?.unobserve(card.el);
+    this.imageQueue.delete(card.path); this.releaseImage(card);
+    card.el.remove(); this.cards.delete(card.path);
   }
 
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    if (this.renderFrame !== null) this.root.ownerDocument.defaultView?.cancelAnimationFrame(this.renderFrame);
-    this.observer?.disconnect(); this.pending.clear(); this.cards.clear(); this.files = [];
+    const win = this.root.ownerDocument.defaultView;
+    for (const frame of [this.renderFrame, this.viewportFrame, this.moreFrame]) if (frame !== null) win?.cancelAnimationFrame(frame);
+    if (this.imageTimer !== null) clearTimeout(this.imageTimer);
+    this.observer?.disconnect();
+    this.imageQueue.clear();
+    for (const card of this.cards.values()) this.releaseImage(card);
+    this.cards.clear(); this.files = [];
     this.root.remove(); this.plugin.cardViews.delete(this);
   }
 }
@@ -401,6 +654,13 @@ class LiteSettings extends PluginSettingTab {
         this.plugin.settings.homePath = path;
         try { await this.plugin.saveSettings(); new Notice('Homeのパスを保存しました。'); }
         catch { new Notice('設定を保存できませんでした。'); }
+      }));
+    new Setting(containerEl).setName('カードに画像を表示')
+      .setDesc('最初のローカルPNG・JPEG・WebP（2 MiB以下）のみ。表示付近で読み込みます。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.showImages).onChange(async value => {
+        this.plugin.settings.showImages = value;
+        for (const view of this.plugin.cardViews) view.refreshImages();
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
     const registry = commandBridge(this.app);
     const commands = (registry?.listCommands() || []).filter(c => !c.id.startsWith(`${this.plugin.manifest.id}:`))

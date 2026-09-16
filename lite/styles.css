@@ -18,7 +18,7 @@
   display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 12px;
 }
 .palmwiki-lite-grid .palmwiki-lite-card {
-  display: flex; flex-direction: column; min-width: 0; height: 180px;
+  display: flex; flex-direction: column; min-width: 0; height: 220px;
   padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px;
   background: var(--background-primary); text-decoration: none; color: var(--text-normal);
   overflow: hidden; cursor: pointer; box-sizing: border-box;
@@ -30,6 +30,13 @@
 @media (max-width: 600px) {
   .palmwiki-lite-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .palmwiki-lite-home { padding: 8px; }
-  .palmwiki-lite-grid .palmwiki-lite-card { height: 165px; padding: 10px; }
+  .palmwiki-lite-grid .palmwiki-lite-card { height: 205px; padding: 10px; }
 }
 @media (max-width: 280px) { .palmwiki-lite-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.palmwiki-lite-status { margin-bottom: 10px; color: var(--text-muted); font-size: var(--font-ui-small); }
+.palmwiki-lite-media { height: 80px; flex: 0 0 80px; margin-bottom: 8px; overflow: hidden; border-radius: 4px; background: var(--background-secondary); }
+.palmwiki-lite-media[hidden], .palmwiki-lite-more[hidden] { display: none; }
+.palmwiki-lite-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.palmwiki-lite-footer { padding: 18px 0; text-align: center; font-size: var(--font-ui-small); color: var(--text-muted); }
+.palmwiki-lite-card { contain: layout style; }
