@@ -540,3 +540,17 @@ test('cards join page preview / Hover Editor through the standard hover-link eve
   assert.equal(f.calls.reads.length, 0); // announcing a hover reads nothing
   f.stop();
 });
+
+test('search rows preview notes with Cmd (selected row) or Cmd+hover, but not action rows', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  const rows = s.getSuggestions('機器 整備');
+  const els = rows.map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
+  els[1].emit('mouseover', { metaKey: true });
+  const hover = f.calls.triggers.at(-1);
+  assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.linktext, '10_Notes/Projects/機器整備_駒込2026.md');
+  assert.equal(hover.info.hoverParent, s); assert.equal(hover.info.source, 'palmwiki-home');
+  const before = f.calls.triggers.length;
+  s.preview(els[0], { metaKey: true }); // 本文を検索 row
+  assert.equal(f.calls.triggers.length, before);
+  f.stop();
+});

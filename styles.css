@@ -67,3 +67,6 @@
 /* Unified search (trial) */
 .palmwiki-search-title.is-action { color: var(--text-accent); font-weight: 600; }
 .palmwiki-search-meta { display: block; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+
+/* Previews opened from the search screen must sit above it (popovers normally sit below modals). */
+body.palmwiki-search-open .popover.hover-popover { z-index: calc(var(--layer-modal) + 1); }

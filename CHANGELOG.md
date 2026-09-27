@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2 — 2026-09-27
+
+- Unified search: press Cmd (Ctrl) to preview the selected note, or Cmd+hover a row, for recent notes and title/alias matches alike. Previews from the search screen sit above it and close with it.
+
 ## 1.3.1 — 2026-09-27
 
 - Cards announce hovers through Obsidian's standard `hover-link` event, so page preview and Hover Editor work on them (Cmd+hover by default; the "PalmWiki Home" row under Settings → Page preview changes that). Nothing is read until a preview opens.

@@ -1189,12 +1189,38 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     super(app);
     this.plugin = plugin;
     this.cache = null;
+    this.rows = new WeakMap(); // suggestion element → row, for previews
+    this.hoverPopover = null; // Lets this screen act as the hover parent for note previews.
     this.setPlaceholder?.('ノートを探す（Enterで本文検索）');
     this.setInstructions?.([
       { command: 'Enter', purpose: '本文を検索（↑↓で候補を選べばそのノート）' },
       { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
+      { command: 'Cmd', purpose: '選んでいるノートをプレビュー' },
       { command: 'Esc', purpose: '閉じる' },
     ]);
+  }
+
+  onOpen() {
+    super.onOpen?.();
+    this.modalEl?.ownerDocument?.body?.classList.add('palmwiki-search-open');
+    // Cmd (Ctrl) on its own previews the selected note, like Cmd+hover does for links.
+    this.modalEl?.addEventListener('keydown', event => {
+      if (event.repeat || !['Meta', 'Control'].includes(event.key) || !Keymap.isModEvent(event)) return;
+      const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
+      if (el) this.preview(el, event);
+    }, true);
+  }
+
+  onClose() {
+    super.onClose?.();
+    this.hoverPopover?.hide?.();
+    this.modalEl?.ownerDocument?.body?.classList.remove('palmwiki-search-open');
+  }
+
+  preview(el, event) {
+    const row = this.rows.get(el);
+    if (row?.kind !== 'note') return;
+    this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: row.file.path, sourcePath: '' });
   }
 
   notes() {
@@ -1220,6 +1246,8 @@ class UnifiedSearch extends (SuggestModal || class {}) {
   }
 
   renderSuggestion(row, el) {
+    this.rows.set(el, row);
+    if (row.kind === 'note') el.addEventListener('mouseover', event => this.preview(el, event));
     const doc = el.ownerDocument;
     const title = doc.createElement('div');
     const meta = doc.createElement('small');
