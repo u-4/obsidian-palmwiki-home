@@ -59,10 +59,11 @@ class TFile {
   }
 }
 class Component {
-  constructor() { this.disposers = []; }
+  constructor() { this.disposers = []; this.loaded = false; }
+  load() { this.loaded = true; }
   register(fn) { this.disposers.push(fn); }
   registerDomEvent(el, type, fn, opts) { el.addEventListener(type, fn, opts); this.register(() => el.removeEventListener(type, fn, opts)); }
-  unload() { for (const fn of this.disposers) fn(); }
+  unload() { this.loaded = false; for (const fn of this.disposers) fn(); }
 }
 class BasesView extends Component { constructor(controller) { super(); this.app = controller.app; } }
 class Plugin extends Component {
@@ -74,7 +75,7 @@ class Plugin extends Component {
   addCommand(command) { this.commands.push(command); }
 }
 function load() {
-  const { doc, clock } = environment(); const notices = []; const modals = []; const urls = [];
+  const { doc, clock } = environment(); const notices = []; const modals = []; const urls = []; const rendered = [];
   const context = { module: { exports: {} }, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
@@ -88,6 +89,7 @@ function load() {
       // Letters in order, like Obsidian's fuzzy search; a higher score for a tighter match.
       prepareFuzzySearch: query => text => { let i = 0, last = -1, gaps = 0; for (const ch of query.replace(/\s+/g, '')) { const at = text.indexOf(ch, last + 1); if (at < 0) return null; if (last >= 0) gaps += at - last - 1; last = at; i++; } return { score: -gaps }; },
       normalizePath: p => p.replace(/\/+/g, '/').replace(/^\//, ''),
+      Component, MarkdownRenderer: { async render(app, md, el) { rendered.push(md); el.textContent = md; } },
     }; },
     Event: class { constructor(type) { this.type = type; } },
     activeWindow: { open: url => urls.push(url) },
@@ -95,7 +97,7 @@ function load() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch };', context);
   const Main = context.module.exports;
-  return { Main, ...Main.testing, doc, clock, notices, modals, urls };
+  return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered };
 }
 function appDouble(doc, count = 0) {
   const files = new Map(), metadata = new Map(), bodies = new Map(), recentFiles = []; const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0, triggers: [] };
@@ -541,40 +543,29 @@ test('cards join page preview / Hover Editor through the standard hover-link eve
   f.stop();
 });
 
-test('search rows preview notes with Cmd (selected row) or Cmd+hover, but not action rows', async () => {
-  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
-  const rows = s.getSuggestions('機器 整備');
-  const els = rows.map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
-  els[1].emit('mouseover', { metaKey: true });
-  const hover = f.calls.triggers.at(-1);
-  assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.linktext, '10_Notes/Projects/機器整備_駒込2026.md');
-  assert.equal(hover.info.hoverParent, s); assert.equal(hover.info.source, 'palmwiki-home');
-  const before = f.calls.triggers.length;
-  s.preview(els[0], { metaKey: true }); // 本文を検索 row
-  assert.equal(f.calls.triggers.length, before);
-  f.stop();
-});
 
-test('tapping Cmd toggles previews that follow the selection after the key event; Cmd with another key does not', async () => {
+test('search preview pane shows the selected note (no frontmatter), hints for action rows, and follows the selection', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
-  s.modalEl = f.doc.createElement('div'); s.onOpen();
-  let hidden = 0; const popover = { hide() { hidden++; } }; s.hoverPopover = popover;
+  f.bodies.set('10_Notes/Projects/機器整備_駒込2026.md', '---\ntags: [Projects]\n---\n# 計画\n本文A');
+  f.bodies.set('00_Inbox/R7機器整備.md', '本文B');
+  s.modalEl = f.doc.createElement('div'); s.modalEl.classList = { add() {} };
+  const results = f.doc.createElement('div'); let selected = null; s.resultContainerEl = { querySelector: () => selected };
+  s.onOpen(); assert.ok(s.previewEl);
   const rows = s.getSuggestions('機器 整備');
   const [body, a, b] = rows.slice(0, 3).map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
-  let selected = a; s.resultContainerEl = { querySelector: () => selected };
-  const previews = () => f.calls.triggers.filter(t => t.name === 'hover-link').map(t => t.info.linktext);
-  const tap = () => { s.modalEl.emit('keydown', { key: 'Meta' }); s.modalEl.emit('keyup', { key: 'Meta' }); };
-  tap(); assert.equal(s.previewMode, true); assert.deepEqual(previews(), []); // waits for the key event to finish
-  f.clock.tick(); assert.deepEqual(previews(), ['10_Notes/Projects/機器整備_駒込2026.md']);
-  selected = b; s.followSelection(); selected = a; s.followSelection(); selected = b; s.followSelection();
-  f.clock.tick(); assert.equal(previews().length, 2); assert.equal(previews().at(-1), '00_Inbox/R7機器整備.md'); // rapid moves: one preview
-  popover.lockedOut = true; s.hoverPopover = popover;
-  selected = a; s.followSelection(); f.clock.tick(); assert.equal(previews().length, 3); assert.equal(s.hoverPopover, null);
-  selected = body; s.followSelection(); f.clock.tick(); assert.equal(previews().length, 3); // action row: no preview
-  s.hoverPopover = popover; const before = hidden;
-  tap(); assert.equal(s.previewMode, false); assert.equal(hidden, before + 1);
-  selected = a; s.followSelection(); f.clock.tick(); assert.equal(previews().length, 3); // off: nothing
-  s.modalEl.emit('keydown', { key: 'Meta' }); s.modalEl.emit('keydown', { key: 'Enter' }); s.modalEl.emit('keyup', { key: 'Meta' });
-  assert.equal(s.previewMode, false);
+  const text = el => [el.textContent, ...el.children.map(text)].join('|');
+  selected = body; s.followSelection(); f.clock.tick(); await settle();
+  assert.match(text(s.previewEl), /Omnisearch の本文検索/);
+  selected = a; s.followSelection(); selected = b; s.followSelection(); // fast moves settle on b
+  f.clock.tick(); await settle(); await settle();
+  assert.match(text(s.previewEl), /R7機器整備\|本文B/); assert.deepEqual([...f.rendered], ['本文B']);
+  selected = a; s.followSelection(); f.clock.tick(); await settle(); await settle();
+  assert.match(text(s.previewEl), /機器整備_駒込2026\|# 計画\n本文A/); assert.equal(f.rendered.at(-1).startsWith('---'), false);
+  const component = s.previewComponent; s.onClose(); assert.equal(component.loaded, false);
+  f.stop();
+});
+test('search preview can be turned off in settings', async () => {
+  const f = await fixture(0); f.plugin.settings.searchPreview = false; const s = new f.UnifiedSearch(f.app, f.plugin);
+  s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.previewEl, null);
   f.stop();
 });

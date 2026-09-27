@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
@@ -17,7 +17,9 @@ const DEFAULTS = Object.freeze({
   showImages: true,
   searchMode: 'separate', // 'separate': the two buttons; 'unified': PalmWiki's own search screen (trial)
   searchExcludeFolders: ['99_System'],
+  searchPreview: true,
 });
+const PREVIEW_CHARS = 20000;
 const MAX_NOTE_SUGGESTIONS = 30;
 const MAX_WORD_SUGGESTIONS = 5;
 const MAX_FAVORITES = 100;
@@ -339,6 +341,7 @@ class PalmWikiHome extends Plugin {
     }
     this.settings.showImages = saved?.showImages !== false;
     this.settings.searchMode = saved?.searchMode === 'unified' ? 'unified' : 'separate';
+    this.settings.searchPreview = saved?.searchPreview !== false;
     this.settings.searchExcludeFolders = Array.isArray(saved?.searchExcludeFolders)
       ? saved.searchExcludeFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')).slice(0, 50)
       : [...DEFAULTS.searchExcludeFolders];
@@ -1171,6 +1174,16 @@ class ScopePicker extends (FuzzySuggestModal || class {}) {
   }
 }
 
+// The search preview shows the body without frontmatter, up to PREVIEW_CHARS characters.
+function previewMarkdown(body) {
+  let text = String(body).replace(/^\uFEFF/, '');
+  if (/^---\r?\n/.test(text)) {
+    const end = text.slice(4).search(/\r?\n(?:---|\.\.\.)\s*(?:\r?\n|$)/);
+    if (end >= 0) text = text.slice(4 + end).replace(/^\r?\n(?:---|\.\.\.)\s*(?:\r?\n|$)/, '');
+  }
+  return text.length > PREVIEW_CHARS ? { text: text.slice(0, PREVIEW_CHARS), cut: true } : { text, cut: false };
+}
+
 // Rows come from sources in list order; a new source (e.g. another word list) is one more entry.
 const SEARCH_SOURCES = [
   (search, query) => query ? [] : search.recent().map(file => ({ kind: 'note', file, recent: true })),
@@ -1189,17 +1202,16 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     super(app);
     this.plugin = plugin;
     this.cache = null;
-    this.rows = new WeakMap(); // suggestion element → row, for previews
-    this.hoverPopover = null; // Lets this screen act as the hover parent for note previews.
-    this.previewMode = false; // Toggled by tapping Cmd; while on, the preview follows the selection.
+    this.rows = new WeakMap(); // suggestion element → row, for the preview pane
+    this.previewEl = null;
+    this.previewedEl = undefined;
     this.previewTimer = null;
-    this.modDown = false;
-    this.modCombined = false;
+    this.previewToken = 0;
+    this.previewComponent = null;
     this.setPlaceholder?.('ノートを探す（Enterで本文検索）');
     this.setInstructions?.([
       { command: 'Enter', purpose: '本文を検索（↑↓で候補を選べばそのノート）' },
       { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
-      { command: 'Cmd', purpose: 'プレビューの表示／非表示（表示中は選んだ候補に切り替わる）' },
       { command: 'Esc', purpose: '閉じる' },
     ]);
   }
@@ -1207,87 +1219,105 @@ class UnifiedSearch extends (SuggestModal || class {}) {
   onOpen() {
     super.onOpen?.();
     this.plugin.openSearchScreen = this;
-    this.modalEl?.ownerDocument?.body?.classList.add('palmwiki-search-open');
-    // Tapping Cmd (Ctrl) alone toggles previews; Cmd with another key (Cmd+Enter, …) does not.
-    this.modalEl?.addEventListener('keydown', event => {
-      if (['Meta', 'Control'].includes(event.key)) {
-        if (!event.repeat) { this.modDown = true; this.modCombined = false; }
-      } else if (this.modDown) this.modCombined = true;
-    }, true);
-    this.modalEl?.addEventListener('keyup', event => {
-      if (!['Meta', 'Control'].includes(event.key)) return;
-      if (this.modDown && !this.modCombined) this.togglePreview();
-      this.modDown = false;
-    }, true);
+    if (!this.plugin.settings.searchPreview || !this.modalEl) return;
+    // A fixed pane beside the list shows the selected note, rendered by Obsidian's own renderer.
+    const doc = this.modalEl.ownerDocument;
+    this.modalEl.classList?.add('palmwiki-search-modal');
+    this.previewEl = doc.createElement('div');
+    this.previewEl.className = 'palmwiki-search-preview markdown-rendered';
+    this.previewEl.addEventListener('click', event => this.followPreviewLink(event));
+    this.modalEl.append(this.previewEl);
     // Obsidian consumes the arrow keys itself, so the selection is watched on the result list.
-    const Observer = this.modalEl?.ownerDocument?.defaultView?.MutationObserver;
+    const Observer = doc.defaultView?.MutationObserver;
     if (Observer && this.resultContainerEl) {
       this.selectionObserver = new Observer(() => this.followSelection());
       this.selectionObserver.observe(this.resultContainerEl, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
     }
-  }
-
-  selectedEl() {
-    return this.resultContainerEl?.querySelector('.suggestion-item.is-selected') || null;
-  }
-
-  togglePreview() {
-    this.previewMode = !this.previewMode;
-    if (!this.previewMode) { this.cancelScheduledPreview(); this.closePreview(); return; }
-    this.schedulePreview();
-  }
-
-  followSelection() {
-    if (this.previewMode && this.selectedEl() !== this.previewedEl) this.schedulePreview();
-  }
-
-  // Ask for the preview after the key event that moved the selection has finished: Hover Editor
-  // cancels a pending preview (and locks out new ones for a second) on any non-Cmd keydown.
-  // Rapid moves only preview the row they end on.
-  schedulePreview() {
-    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
-    this.previewTimer = setTimeout(() => {
-      this.previewTimer = null;
-      if (!this.previewMode) return;
-      const el = this.selectedEl();
-      if (el === this.previewedEl) return;
-      this.closePreview();
-      if (this.hoverPopover?.lockedOut) this.hoverPopover = null; // a cancelled preview must not block the next
-      if (el) this.preview(el, this.modEvent());
-    }, 120);
-  }
-
-  // Page preview opens only for a Cmd/Ctrl event; selection changes carry none.
-  modEvent() {
-    const View = this.modalEl?.ownerDocument?.defaultView;
-    return View?.MouseEvent ? new View.MouseEvent('mouseover', { metaKey: true, ctrlKey: true }) : { metaKey: true, ctrlKey: true };
-  }
-
-  closePreview() {
-    this.previewedEl = null;
-    this.hoverPopover?.hide?.();
-  }
-
-  cancelScheduledPreview() {
-    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
-    this.previewTimer = null;
+    this.followSelection();
   }
 
   onClose() {
     super.onClose?.();
     if (this.plugin.openSearchScreen === this) this.plugin.openSearchScreen = null;
     this.selectionObserver?.disconnect();
-    this.previewMode = false;
-    this.cancelScheduledPreview();
-    this.closePreview();
-    this.modalEl?.ownerDocument?.body?.classList.remove('palmwiki-search-open');
+    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
+    this.previewTimer = null;
+    this.previewToken++;
+    this.previewComponent?.unload();
+    this.previewComponent = null;
   }
 
-  preview(el, event) {
-    const row = this.rows.get(el);
+  selectedEl() {
+    return this.resultContainerEl?.querySelector('.suggestion-item.is-selected') || null;
+  }
+
+  followSelection() {
+    if (!this.previewEl || this.previewEl.offsetParent === null) return; // hidden on narrow screens
+    const el = this.selectedEl();
+    if (el === this.previewedEl) return;
     this.previewedEl = el;
-    if (row?.kind !== 'note') return;
-    this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: row.file.path, sourcePath: '' });
+    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
+    // A short pause lets fast arrow presses settle on one row before reading a note.
+    this.previewTimer = setTimeout(() => { this.previewTimer = null; void this.showPreview(el); }, 60);
+  }
+
+  clearPreview() {
+    this.previewComponent?.unload();
+    this.previewComponent = null;
+    while (this.previewEl.firstChild) this.previewEl.firstChild.remove();
+  }
+
+  async showPreview(el) {
+    const token = ++this.previewToken;
+    const row = el ? this.rows.get(el) : null;
+    const doc = this.previewEl.ownerDocument;
+    if (row?.kind !== 'note') {
+      this.clearPreview();
+      const hint = doc.createElement('div');
+      hint.className = 'palmwiki-search-preview-hint';
+      hint.textContent = row?.kind === 'body' ? 'Enter で Omnisearch の本文検索を開きます'
+        : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
+        : row?.kind === 'word' ? '選ぶと入力に反映します' : '';
+      this.previewEl.append(hint);
+      return;
+    }
+    let body = null;
+    try { body = await this.app.vault.cachedRead(row.file); } catch { body = null; }
+    if (token !== this.previewToken) return;
+    this.clearPreview();
+    const title = doc.createElement('div');
+    title.className = 'palmwiki-search-preview-title';
+    title.textContent = row.file.basename;
+    const content = doc.createElement('div');
+    content.className = 'palmwiki-search-preview-body';
+    this.previewEl.append(title, content);
+    this.previewEl.scrollTop = 0;
+    if (body === null) { content.textContent = '読み込めませんでした。'; return; }
+    const { text, cut } = previewMarkdown(body);
+    const component = new Component();
+    component.load();
+    this.previewComponent = component;
+    try {
+      await MarkdownRenderer.render(this.app, text, content, row.file.path, component);
+    } catch {
+      content.textContent = text;
+    }
+    if (token !== this.previewToken) return;
+    if (cut) {
+      const more = doc.createElement('div');
+      more.className = 'palmwiki-search-preview-hint';
+      more.textContent = '（長いノートのため途中まで表示しています）';
+      this.previewEl.append(more);
+    }
+  }
+
+  followPreviewLink(event) {
+    const link = event.target?.closest?.('a.internal-link');
+    if (!link) return;
+    event.preventDefault();
+    const row = this.previewedEl ? this.rows.get(this.previewedEl) : null;
+    this.close();
+    void this.app.workspace.openLinkText(link.dataset.href || link.getAttribute('href') || '', row?.file?.path || '', Keymap.isModEvent(event));
   }
 
   notes() {
@@ -1314,7 +1344,6 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 
   renderSuggestion(row, el) {
     this.rows.set(el, row);
-    if (row.kind === 'note') el.addEventListener('mouseover', event => this.preview(el, event));
     const doc = el.ownerDocument;
     const title = doc.createElement('div');
     const meta = doc.createElement('small');
@@ -1389,6 +1418,12 @@ class LiteSettings extends PluginSettingTab {
           this.plugin.settings.searchMode = value === 'unified' ? 'unified' : 'separate';
           try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
         }));
+    new Setting(containerEl).setName('検索画面にプレビューを表示')
+      .setDesc('選んでいる候補のノートを、検索画面の右側に表示します（幅の狭い画面では表示しません）。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.searchPreview).onChange(async value => {
+        this.plugin.settings.searchPreview = value;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
     new Setting(containerEl).setName('検索候補から外すフォルダ')
       .setDesc('まとめた検索の候補に出さないフォルダ（カンマ区切り）。')
       .addText(text => text.setValue(this.plugin.settings.searchExcludeFolders.join(', ')).onChange(async value => {

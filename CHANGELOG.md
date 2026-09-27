@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0 — 2026-09-28
+
+- Unified search has a fixed preview pane beside the list, on by default (setting 「検索画面にプレビューを表示」). It shows the selected note (without frontmatter, up to 20,000 characters) through Obsidian's Markdown renderer and switches as the selection moves (about 0.1 s); 本文を検索 / 新規作成 rows show what Enter will do. Internal links in the pane open the note. Hidden on screens narrower than 760 px.
+- Removed the Cmd-toggled hover previews in the search screen (1.3.2–1.3.5); they depended on Hover Editor's timing and did not always appear. Card hover previews on the home are unchanged.
+
 ## 1.3.5 — 2026-09-27
 
 - Fix: in preview mode, moving to another row now shows that row's preview. The preview used to be requested while the arrow key event was still propagating, and Hover Editor cancels a pending preview (locking out new ones for a second) on any non-Cmd keydown. Previews are now requested 120 ms after the selection settles, and a locked-out popover no longer blocks the next one.
