@@ -2,46 +2,31 @@
 
 ## Communication
 
-- User-facing communication must be in Japanese.
-- Explain impact, validation, rollback, and required manual tests clearly.
+- User-facing communication must be in Japanese (polite form), in terms a non-programmer can follow.
+
+## How We Work
+
+- Claude Code implements; the goal is something the owner can check in real use on Mac, iPhone and iPad. Keep the process light: tests that run in seconds, Git history, and a backup before each vault deploy are enough.
+- Work directly on `main` for small changes; use a short-lived branch only when a change is large or risky. No PR or CI is required.
 
 ## Project Scope
 
-- This repository contains the PalmWiki Home Obsidian plugin.
-- Read `PROJECT_CONTEXT.md` before planning a new phase or public release.
-- Keep it independent from `2hop-links-plus`; do not add a runtime dependency.
-- Vault notes, attachments, personal paths, runtime data, and review archives stay outside Git.
+- PalmWiki Home 1.0 is a rebuild of the former 0.x plugin (tag `0.6.1`) on top of the Lite prototype. It is one dependency-free CommonJS file, `main.js`, loaded by Obsidian as is.
+- Lists, sorting and filtering belong to Obsidian Bases; this plugin adds the card view (`palmwiki-lite-cards`), the Home/search/switch buttons, and settings.
+- Search and page switching call Omnisearch and Another Quick Switcher commands. Do not bring back an own full-text index or PageRank; related-note ranking belongs to `2hop-links-plus`.
+- Keep it independent from `2hop-links-plus` at runtime.
+- `docs/ROADMAP.md` holds the next steps.
 
-## Build And Validation
+## Checks
 
-- Install dependencies from the lockfile with `npm ci` when possible.
-- Required checks after source changes:
-  - `npm run build`
-  - `npm run eslint`
-  - `git diff --check`
-- `npm run eslint` runs the official type-aware Obsidian ESLint rules. `npm run build` also runs the TypeScript type checker.
-
-## Git And Releases
-
-- Keep stable work on `main` and use focused `codex/*` branches for development.
-- Keep `package.json`, `manifest.json`, `versions.json`, and release tags aligned.
-- Do not commit generated `main.js`, source maps, `node_modules`, review bundles, or local test records.
-- GitHub releases must attach `main.js`, `manifest.json`, and `styles.css`.
+- `npm test` (syntax check and the tests in `tests/`) after each change.
 
 ## Vault Deployment
 
-- Current user authorization (2026-09-16): the standing deployment and real-device acceptance target is the existing `PalmWiki` Vault under iCloud Drive / Obsidian. Verified updates may be distributed there without requesting the same approval again.
-- `PalmWiki_LocalTest` remains optional for isolated regression checks; Mac-only testing is not the primary acceptance target. For Lite, follow the current procedure in `lite/DEPLOYMENT.md`; older test-only deployment text in historical records is superseded.
-- Prioritize iPhone/iPad startup, progressive card/image loading, note switching, offline use and background/foreground return. Record actual device results separately from desktop or synthetic tests.
-- The user-reported iPhone navigation-button placement problem is known and deferred; do not treat it as fixed or expand the current work to redesign it.
-- Confirm the target before deploying to any other Vault. This authorization does not include changing note contents, plugin settings, synchronization services, repository protection, merging, or public releases.
-- Back up an existing plugin installation outside `.obsidian/plugins/` before replacing it.
-- Deploy only `main.js`, `manifest.json`, and `styles.css` unless explicitly required.
-- Verify checksums after copying and never copy Vault notes into this repository.
+- The owner's iCloud PalmWiki vault is the standing target. `npm run deploy` backs up the installed files outside the vault, copies `main.js`, `manifest.json`, `styles.css`, and verifies checksums. It needs no approval each time.
+- Ask before changing plugin settings (`data.json`), enablement, hotkeys, notes, or `.base` files, and before deploying to any other vault.
+- The owner reloads the plugin or Obsidian after a deploy unless the Obsidian CLI is available to do it.
 
-## Editing Safety
+## Keep Out Of Git
 
-- Inspect Git status and relevant files before editing.
-- Preserve unrelated user changes.
-- Use canonical `TFile.path` identity and Obsidian public APIs.
-- Keep full-Vault reads and graph rebuilds out of React render paths.
+- `data.json`, vault notes and attachments, personal paths, and private handoff material.

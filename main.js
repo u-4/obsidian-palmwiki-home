@@ -161,7 +161,7 @@ function button(doc, text, action, className) {
   return el;
 }
 
-class PalmWikiHomeLite extends Plugin {
+class PalmWikiHome extends Plugin {
   async onload() {
     const saved = await this.loadData();
     this.settings = { ...DEFAULTS };
@@ -180,7 +180,7 @@ class PalmWikiHomeLite extends Plugin {
     this.syncTimer = null;
     this.saveChain = Promise.resolve();
     if (typeof this.registerBasesView !== 'function' || typeof BasesView !== 'function') {
-      new Notice('PalmWiki Home LiteにはBasesビュー対応版のObsidianが必要です。');
+      new Notice('PalmWiki HomeにはBasesビュー対応版のObsidianが必要です。');
       return;
     }
     this.registerBasesView(VIEW_TYPE, {
@@ -188,10 +188,11 @@ class PalmWikiHomeLite extends Plugin {
       factory: (controller, container) => new LiteCards(controller, container, this),
     });
     this.addSettingTab(new LiteSettings(this.app, this));
-    this.addCommand({ id: 'home', name: 'Open home', callback: () => void this.openHome() });
-    this.addCommand({ id: 'search', name: 'Open external search', callback: () => this.runExternal('searchCommand') });
-    this.addCommand({ id: 'switch', name: 'Open external page switcher', callback: () => this.runExternal('switchCommand') });
-    this.addRibbonIcon('home', 'PalmWiki Home Lite', () => void this.openHome());
+    // Command ids match PalmWiki Home 0.x so existing hotkeys keep working.
+    this.addCommand({ id: 'open-home', name: 'Open home', callback: () => void this.openHome() });
+    this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.runExternal('searchCommand') });
+    this.addCommand({ id: 'open-switcher', name: 'Open page switcher', callback: () => this.runExternal('switchCommand') });
+    this.addRibbonIcon('home', 'PalmWiki Home', () => void this.openHome());
     this.addRibbonIcon('search', '外部検索', () => this.runExternal('searchCommand'));
     this.app.workspace.onLayoutReady(() => {
       if (this.disposed) return;
@@ -208,10 +209,6 @@ class PalmWikiHomeLite extends Plugin {
         }));
       }
       this.syncBars();
-      const registry = commandBridge(this.app);
-      if (registry?.listCommands().some(c => c.id === 'palmwiki-home:open-home')) {
-        new Notice('速度を比較する際は、旧PalmWiki Homeを無効にしてください。Liteは旧版を自動変更しません。', 10000);
-      }
     });
   }
 
@@ -318,7 +315,7 @@ class PalmWikiHomeLite extends Plugin {
       const registry = commandBridge(this.app);
       const id = this.settings[key];
       if (!registry || !id || id.startsWith(`${this.manifest.id}:`) || !registry.listCommands().some(c => c.id === id)) {
-        new Notice('PalmWiki Home Liteの設定で、インストール済みの外部プラグインのコマンドを選んでください。');
+        new Notice('PalmWiki Homeの設定で、インストール済みの外部プラグインのコマンドを選んでください。');
         return;
       }
       if (!registry.executeCommandById(id)) new Notice('この画面では選択したコマンドを実行できません。');
@@ -643,7 +640,7 @@ class LiteSettings extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl('p', { text: '一覧とフィルターはBases、検索とページ移動は選択した外部コマンドが担当します。旧PalmWiki Homeは無効にして比較してください。' });
+    containerEl.createEl('p', { text: '一覧とフィルターはBases、検索とページ移動は選択した外部コマンドが担当します。' });
     let homeInput;
     new Setting(containerEl).setName('Homeの.baseファイル')
       .setDesc('初めてHomeを押したときだけ作成します。既存ファイル・ノート・設定は上書きしません。')
@@ -681,4 +678,4 @@ class LiteSettings extends PluginSettingTab {
   }
 }
 
-module.exports = PalmWikiHomeLite;
+module.exports = PalmWikiHome;

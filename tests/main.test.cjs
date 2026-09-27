@@ -66,7 +66,7 @@ class Component {
 }
 class BasesView extends Component { constructor(controller) { super(); this.app = controller.app; } }
 class Plugin extends Component {
-  constructor(app) { super(); this.app = app; this.manifest = { id: 'palmwiki-home-lite' }; this.commands = []; }
+  constructor(app) { super(); this.app = app; this.manifest = { id: 'palmwiki-home' }; this.commands = []; }
   async loadData() { return this.app.saved || null; }
   async saveData(data) { this.app.saved = { ...data }; }
   registerBasesView() {} addSettingTab() {} addRibbonIcon() {} registerEvent() {}
@@ -79,7 +79,7 @@ function load() {
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
       Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false }, setIcon() {} }; },
   };
-  const source = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices };
@@ -163,7 +163,7 @@ test('external search and switch settings are preserved across load and save', a
   assert.deepEqual(a.calls.commands, ['omnisearch:show-modal', 'aqs:recent']); assert.equal(a.app.saved.switchCommand, 'aqs:recent'); p.onunload();
 });
 test('missing external command does not fall back or recurse', async () => {
-  const f = await fixture(); f.plugin.runExternal('switchCommand'); f.plugin.settings.searchCommand = 'palmwiki-home-lite:search';
+  const f = await fixture(); f.plugin.runExternal('switchCommand'); f.plugin.settings.searchCommand = 'palmwiki-home:focus-search';
   f.plugin.runExternal('searchCommand'); assert.equal(f.calls.commands.length, 0); assert.ok(f.notices.length); f.stop();
 });
 test('initial DOM is 24, first frame reads nothing, pending body reads are capped at two', async () => {
