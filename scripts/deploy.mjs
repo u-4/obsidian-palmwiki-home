@@ -47,7 +47,12 @@ console.log(backedUp ? `Previous files backed up to ${backup}` : 'No previous fi
 // Best effort: reload the plugin in the running Obsidian through its CLI.
 const reload = spawnSync('obsidian', [`vault=${path.basename(vault)}`, 'plugin:reload', `id=${manifest.id}`], { encoding: 'utf8', timeout: 30000 });
 if (reload.status === 0 && /Reloaded/.test(reload.stdout)) {
-  console.log('Reloaded the plugin in Obsidian.');
+  // Open Bases tabs keep the unloaded view until rebuilt (internal API; best effort).
+  const code = "app.workspace.getLeavesOfType('bases').filter(l => typeof l.rebuildView === 'function').map(l => l.rebuildView()).length";
+  const rebuilt = spawnSync('obsidian', [`vault=${path.basename(vault)}`, 'eval', `code=${code}`], { encoding: 'utf8', timeout: 30000 });
+  const count = /=>\s*(\d+)/.exec(rebuilt.stdout || '')?.[1];
+  console.log(count === undefined ? 'Reloaded the plugin; reopen the Home tab if it looks empty.'
+    : `Reloaded the plugin and rebuilt ${count} open Bases tab(s).`);
 } else {
   console.log('Could not reload through the Obsidian CLI; reload the plugin or Obsidian by hand.');
 }
