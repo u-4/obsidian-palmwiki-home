@@ -13,6 +13,7 @@ Obsidian 用の軽いホーム画面プラグインです。Bases のカード�
 - Home / search / switch buttons in normal workspace tabs, a ribbon icon, and commands (`Open home`, `Open search`, `Open page switcher`).
 - Search and switch run a command you choose in settings, typically Omnisearch and Another Quick Switcher.
 - Projects and Areas (1.1): notes tagged `Projects` or `Areas` in frontmatter can be picked from a searchable list, and the home then shows that note and the notes linked to or from it. Favorite ones stay as chips above the cards.
+- Unified search (1.3, trial): one screen for recent notes, title/alias matches, a hand-off to Omnisearch for body search, and new-note creation. Switch between it and the two separate buttons in settings.
 - Filters (1.2): include or hide daily notes; within a Project/Area, add unlinked mentions of its name and search the bodies of just those notes. Bases' toolbar search and filters narrow the cards as usual.
 - No own search index, no persistent body cache, no network access.
 

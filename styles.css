@@ -63,3 +63,7 @@
 .palmwiki-scope-options .palmwiki-scope-body-search { flex: 1 1 180px; min-width: 0; max-width: 360px; height: 30px; font-size: var(--font-ui-small); }
 .palmwiki-scope-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 12px; font-size: var(--font-ui-small); color: var(--text-muted); border-bottom: 1px solid var(--background-modifier-border); }
 .palmwiki-scope-filters select { font-size: var(--font-ui-small); }
+
+/* Unified search (trial) */
+.palmwiki-search-title.is-action { color: var(--text-accent); font-weight: 600; }
+.palmwiki-search-meta { display: block; color: var(--text-muted); font-size: var(--font-ui-smaller); }

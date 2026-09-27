@@ -73,24 +73,35 @@ class Plugin extends Component {
   addCommand(command) { this.commands.push(command); }
 }
 function load() {
-  const { doc, clock } = environment(); const notices = []; const modals = [];
+  const { doc, clock } = environment(); const notices = []; const modals = []; const urls = [];
   const context = { module: { exports: {} }, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
       Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false }, setIcon() {},
-      FuzzySuggestModal: class { constructor(app) { this.app = app; } setPlaceholder(text) { this.placeholder = text; } open() { modals.push(this); } } }; },
+      FuzzySuggestModal: class { constructor(app) { this.app = app; } setPlaceholder(text) { this.placeholder = text; } open() { modals.push(this); } },
+      SuggestModal: class {
+        constructor(app) { this.app = app; this.inputEl = { value: '', inputs: 0, dispatchEvent() { this.inputs++; } }; }
+        setPlaceholder(text) { this.placeholder = text; } setInstructions() {} open() { modals.push(this); } close() { this.closed = true; }
+        selectSuggestion(value, evt) { this.close(); this.onChooseSuggestion(value, evt); }
+      },
+      // Letters in order, like Obsidian's fuzzy search; a higher score for a tighter match.
+      prepareFuzzySearch: query => text => { let i = 0, last = -1, gaps = 0; for (const ch of query.replace(/\s+/g, '')) { const at = text.indexOf(ch, last + 1); if (at < 0) return null; if (last >= 0) gaps += at - last - 1; last = at; i++; } return { score: -gaps }; },
+      normalizePath: p => p.replace(/\/+/g, '/').replace(/^\//, ''),
+    }; },
+    Event: class { constructor(type) { this.type = type; } },
+    activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch };', context);
   const Main = context.module.exports;
-  return { Main, ...Main.testing, doc, clock, notices, modals };
+  return { Main, ...Main.testing, doc, clock, notices, modals, urls };
 }
 function appDouble(doc, count = 0) {
-  const files = new Map(), metadata = new Map(), bodies = new Map(); const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0 };
+  const files = new Map(), metadata = new Map(), bodies = new Map(), recentFiles = []; const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0 };
   const leaf = { view: { containerEl: doc.createElement('div') }, getViewState: () => ({}), getRoot: () => ({}),
     async openFile(file) { calls.opens.push(file.path); } };
   const app = {
-    vault: { getAbstractFileByPath: p => files.get(p), on: () => ({}),
+    vault: { getAbstractFileByPath: p => files.get(p), on: () => ({}), getName: () => 'PalmWiki',
       async create(p, body) { assert.ok(!files.has(p)); calls.creates++; const file = new TFile(p, body.length); files.set(p, file); return file; },
       async cachedRead(file) { calls.reads.push(file.path); return bodies.get(file.path) ?? '# 見出し\n本文'; },
       getResourcePath(file) { calls.images.push(file.path); return 'app://local/' + file.path; },
@@ -100,7 +111,9 @@ function appDouble(doc, count = 0) {
     metadataCache: { on: () => ({}), getFileCache: file => metadata.get(file.path), resolvedLinks: {},
       getFirstLinkpathDest: (link, source) => files.get(link) || files.get(path.posix.normalize(path.posix.join(path.posix.dirname(source), link))),
     },
+    fileManager: { getNewFileParent: () => ({ path: '00_Inbox' }) },
     workspace: { getMostRecentLeaf: () => leaf, getLeaf: () => leaf, setActiveLeaf() {}, async revealLeaf() {},
+      getActiveFile: () => null, getLastOpenFiles: () => recentFiles,
       iterateAllLeaves: cb => cb(leaf), on: () => ({}), onLayoutReady: cb => cb(),
       async openLinkText(p) { calls.opens.push(p); },
     },
@@ -108,7 +121,7 @@ function appDouble(doc, count = 0) {
       executeCommandById(id) { calls.commands.push(id); return true; } },
   };
   const entries = Array.from({ length: count }, (_, i) => { const file = new TFile(`${i}.md`); files.set(file.path, file); return { file }; });
-  return { app, files, metadata, bodies, calls, leaf, data: { groupedData: [{ entries }] } };
+  return { app, files, metadata, bodies, recentFiles, calls, leaf, data: { groupedData: [{ entries }] } };
 }
 async function fixture(count = 24) {
   const h = load(); const a = appDouble(h.doc, count); const plugin = new h.Main(a.app); await plugin.onload();
@@ -430,5 +443,86 @@ test('body search inside a Project reads only its notes and narrows the cards', 
   assert.deepEqual([...f.view.files.map(file => file.path)], [v.daily.path]);
   assert.deepEqual([...new Set(f.calls.reads)].sort(), [v.daily.path, v.linked.path, v.project.path].sort());
   f.plugin.setScope(null); f.doc.flush(); assert.equal(f.view.bodyQuery, ''); assert.equal(f.view.total, 404);
+  f.stop();
+});
+
+// Unified search (trial)
+function searchVault(f) {
+  const note = (p, aliases, mtime = 1) => { const file = new TFile(p, 100, mtime); f.files.set(p, file); if (aliases) f.metadata.set(p, { frontmatter: { aliases } }); return file; };
+  note('10_Notes/Projects/機器整備_駒込2026.md', ['機器整備'], 3);
+  note('00_Inbox/R7機器整備.md', null, 9);
+  note('00_Inbox/整備機器リスト.md', null, 5);
+  note('00_Inbox/ANA SFC.md', ['エーエヌエー'], 2);
+  note('00_Inbox/カタカナのメモ.md', null, 1);
+  note('99_System/PKM 今日.md', null, 99);
+  f.recentFiles.push('99_System/PKM 今日.md', '00_Inbox/ANA SFC.md', 'missing.md', '00_Inbox/R7機器整備.md');
+}
+const titles = rows => [...rows.map(r => r.kind === 'note' ? r.file.basename : `${r.kind}:${r.text}`)];
+
+test('search text ignores full/half width, case, and hiragana/katakana differences', () => {
+  const { normalizeSearch } = load();
+  assert.equal(normalizeSearch('ＡＮＡ'), 'ana'); assert.equal(normalizeSearch('カタカナ'), 'かたかな');
+  assert.equal(normalizeSearch('ｶﾀｶﾅ'), 'かたかな'); assert.equal(normalizeSearch('ｱｲｳ ABC'), 'あいう abc');
+});
+test('empty query offers recently opened notes, skipping excluded folders and missing files', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  assert.deepEqual(titles(s.getSuggestions('')), ['ANA SFC', 'R7機器整備']);
+  f.stop();
+});
+test('typing puts 本文を検索 first, then title/alias matches: all words, prefix first, title over alias, recent', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  assert.deepEqual(titles(s.getSuggestions('機器 整備')), ['body:機器 整備', '機器整備_駒込2026', 'R7機器整備', '整備機器リスト', 'create:機器 整備']);
+  assert.deepEqual(titles(s.getSuggestions('えーえぬ')), ['body:えーえぬ', 'ANA SFC', 'create:えーえぬ']);
+  assert.deepEqual(titles(s.getSuggestions('かたかな')), ['body:かたかな', 'カタカナのメモ', 'create:かたかな']);
+  assert.equal(titles(s.getSuggestions('PKM')).includes('PKM 今日'), false);
+  f.stop();
+});
+test('fuzzy match is used only when no note contains every word', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  // Letters in order: both 機器整備 notes match (recently opened first); 整備機器リスト does not.
+  assert.deepEqual(titles(s.getSuggestions('機整')), ['body:機整', 'R7機器整備', '機器整備_駒込2026', 'create:機整']);
+  f.stop();
+});
+test('create row is offered only when no note has exactly that name', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  assert.equal(titles(s.getSuggestions('r7機器整備')).some(t => t.startsWith('create:')), false);
+  f.stop();
+});
+test('Enter on the first row hands the words to Omnisearch; choosing a note opens it', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  const rows = s.getSuggestions('機器 整備');
+  s.selectSuggestion(rows[0], { key: 'Enter' });
+  assert.deepEqual([...f.urls], ['obsidian://omnisearch?vault=PalmWiki&query=%E6%A9%9F%E5%99%A8%20%E6%95%B4%E5%82%99']);
+  s.selectSuggestion(rows[1], { key: 'Enter' }); await settle();
+  assert.equal(f.calls.opens.at(-1), '10_Notes/Projects/機器整備_駒込2026.md');
+  f.stop();
+});
+test('create makes a sanitized note in the new-note folder and opens it', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  const create = s.getSuggestions('会議: 9/27').find(r => r.kind === 'create');
+  s.selectSuggestion(create, {}); await settle(); await settle();
+  assert.ok(f.files.has('00_Inbox/会議 9 27.md')); assert.equal(f.calls.opens.at(-1), '00_Inbox/会議 9 27.md');
+  f.stop();
+});
+test('Various Complements words complete the last word and keep the screen open; absent index yields nothing', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  assert.equal(titles(s.getSuggestions('委員')).some(t => t.startsWith('word:')), false);
+  f.app.plugins = { plugins: { 'various-complements': { suggester: { indexedWords: {
+    currentVault: { '委': [{ value: '委員会' }, { value: '委員' }, { value: '委託' }] }, customDictionary: {}, currentFile: null } } } } };
+  const word = s.getSuggestions('機器 委員').find(r => r.kind === 'word');
+  assert.equal(word.text, '委員会');
+  s.inputEl.value = '機器 委員'; s.selectSuggestion(word, {});
+  assert.equal(s.inputEl.value, '機器 委員会 '); assert.equal(s.closed, undefined); assert.equal(s.inputEl.inputs, 1);
+  f.app.plugins.plugins['various-complements'].suggester = { indexedWords: 'broken' };
+  assert.deepEqual(titles(s.getSuggestions('委員')).filter(t => t.startsWith('word:')), []);
+  f.stop();
+});
+test('the 検索 button and Cmd+G follow the search mode setting, which persists', async () => {
+  const f = await fixture(0);
+  f.plugin.openSearch(); assert.deepEqual(f.calls.commands.slice(-1), ['omnisearch:show-modal']); assert.equal(f.modals.length, 0);
+  f.plugin.settings.searchMode = 'unified'; await f.plugin.saveSettings();
+  f.plugin.openSearch(); assert.equal(f.modals.length, 1); assert.ok(f.modals[0] instanceof f.UnifiedSearch);
+  const again = new f.Main(f.app); await again.onload(); assert.equal(again.settings.searchMode, 'unified');
+  assert.deepEqual([...again.settings.searchExcludeFolders], ['99_System']); again.onunload();
   f.stop();
 });

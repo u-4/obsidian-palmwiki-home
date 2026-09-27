@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — 2026-09-27
+
+- Unified search (trial), switchable in settings (「検索ボタンの動き」: 別々 / まとめる; default 別々). The 検索 button, ribbon icon and Cmd+G (`Open search`) follow the setting; `Open unified search (trial)` always opens the new screen.
+  - Empty: recently opened notes (Obsidian's own list).
+  - Typing: the first row 「本文を検索」 hands the words to Omnisearch's screen (its `obsidian://omnisearch` URL), so plain Enter searches bodies; move to a note with the arrow keys and Enter opens it. Notes match like Another Quick Switcher's Recent search (every word in the title or an alias; prefix, title, recently opened, modified), with Obsidian's fuzzy match only when nothing matches. Full/half width, case and hiragana/katakana are treated alike. 「新規作成」 when no note has that exact name.
+  - Word suggestions from Various Complements (its vault words or custom dictionary, when enabled there) complete the last word. It has no public API, so its index is read defensively and gives nothing if absent.
+- 「検索候補から外すフォルダ」 (default `99_System`).
+
 ## 1.2.0 — 2026-09-27
 
 - 「日誌を含む」 (on by default): turn it off to hide notes in the daily notes folder (read from Obsidian's Daily notes settings). The Project note itself always stays.

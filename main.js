@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const INITIAL_CARDS = 24;
@@ -14,7 +14,11 @@ const DEFAULTS = Object.freeze({
   searchCommand: 'omnisearch:show-modal',
   switchCommand: '',
   showImages: true,
+  searchMode: 'separate', // 'separate': the two buttons; 'unified': PalmWiki's own search screen (trial)
+  searchExcludeFolders: ['99_System'],
 });
+const MAX_NOTE_SUGGESTIONS = 30;
+const MAX_WORD_SUGGESTIONS = 5;
 const MAX_FAVORITES = 100;
 const MAX_SCAN_BYTES = 2 * 1024 * 1024;
 const SCAN_WORKERS = 4;
@@ -89,6 +93,84 @@ function queryTerms(query) {
 function dailyFolder(app) {
   const folder = app.internalPlugins?.plugins?.['daily-notes']?.instance?.options?.folder;
   return typeof folder === 'string' && folder.trim() ? folder.trim().replace(/\/+$/, '') + '/' : null;
+}
+
+// Search text is compared after NFKC (full/half width), lower case and katakana → hiragana.
+function normalizeSearch(text) {
+  return String(text).normalize('NFKC').toLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+
+function inFolders(path, folders) {
+  return folders.some(folder => path === folder || path.startsWith(folder + '/'));
+}
+
+// Names of the notes the unified search can offer; built when the screen opens.
+function searchableNotes(app, excludeFolders) {
+  const ignored = typeof app.metadataCache.isUserIgnored === 'function' ? p => app.metadataCache.isUserIgnored(p) : () => false;
+  const notes = [];
+  for (const file of app.vault.getMarkdownFiles()) {
+    if (inFolders(file.path, excludeFolders) || ignored(file.path)) continue;
+    const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
+    const aliases = [frontmatter?.aliases, frontmatter?.alias].flat().filter(alias => typeof alias === 'string' && alias.trim());
+    notes.push({ file, title: file.basename, titleKey: normalizeSearch(file.basename), aliases, aliasKeys: aliases.map(normalizeSearch) });
+  }
+  return notes;
+}
+
+// Like Another Quick Switcher's Recent search: every space-separated word must be in the
+// title or an alias; prefix matches first, then title over alias, recently opened, modified.
+// Only when nothing matches, fall back to Obsidian's fuzzy match (letters in order).
+function matchNotes(notes, query, recentPaths = []) {
+  const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const recent = new Map(recentPaths.map((path, index) => [path, index]));
+  const rank = note => recent.has(note.file.path) ? recent.get(note.file.path) : recentPaths.length;
+  const scored = [];
+  for (const note of notes) {
+    const keys = [note.titleKey, ...note.aliasKeys];
+    if (!terms.every(term => keys.some(key => key.includes(term)))) continue;
+    scored.push({ note, order: [keys.some(key => key.startsWith(terms[0])) ? 0 : 1,
+      terms.every(term => note.titleKey.includes(term)) ? 0 : 1, rank(note), -note.file.stat.mtime] });
+  }
+  if (!scored.length && typeof prepareFuzzySearch === 'function') {
+    const fuzzy = prepareFuzzySearch(terms.join(' '));
+    for (const note of notes) {
+      const best = Math.max(...[note.titleKey, ...note.aliasKeys].map(key => fuzzy(key)?.score ?? -Infinity));
+      if (best > -Infinity) scored.push({ note, order: [-best, rank(note), -note.file.stat.mtime] });
+    }
+  }
+  scored.sort((a, b) => {
+    for (let i = 0; i < a.order.length; i++) if (a.order[i] !== b.order[i]) return a.order[i] - b.order[i];
+    return 0;
+  });
+  return scored.slice(0, MAX_NOTE_SUGGESTIONS).map(item => item.note);
+}
+
+// Various Complements has no public API; its word index is read defensively and simply
+// yields nothing if the plugin, its vault/dictionary words, or this internal shape is absent.
+function complementWords(app, term) {
+  try {
+    const indexed = app.plugins?.plugins?.['various-complements']?.suggester?.indexedWords;
+    const key = normalizeSearch(term);
+    if (!indexed || !key) return [];
+    const words = new Map();
+    for (const kind of ['customDictionary', 'currentVault', 'currentFile']) {
+      const buckets = indexed[kind];
+      if (!buckets || typeof buckets !== 'object') continue;
+      for (const first of new Set([term[0], term[0].toLowerCase(), term[0].toUpperCase()])) {
+        for (const word of Array.isArray(buckets[first]) ? buckets[first] : []) {
+          const value = typeof word?.value === 'string' ? word.value : '';
+          const norm = normalizeSearch(value);
+          if (norm.length > key.length && norm.startsWith(key) && !words.has(norm)) words.set(norm, value);
+          if (words.size >= MAX_WORD_SUGGESTIONS) return [...words.values()];
+        }
+      }
+    }
+    return [...words.values()];
+  } catch {
+    return [];
+  }
 }
 
 function noteTitle(path) {
@@ -255,6 +337,10 @@ class PalmWikiHome extends Plugin {
       }
     }
     this.settings.showImages = saved?.showImages !== false;
+    this.settings.searchMode = saved?.searchMode === 'unified' ? 'unified' : 'separate';
+    this.settings.searchExcludeFolders = Array.isArray(saved?.searchExcludeFolders)
+      ? saved.searchExcludeFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')).slice(0, 50)
+      : [...DEFAULTS.searchExcludeFolders];
     this.settings.favoriteScopes = Array.isArray(saved?.favoriteScopes)
       ? [...new Set(saved.favoriteScopes.filter(p => typeof p === 'string' && /\.md$/i.test(p) && p.length < 1024))].slice(0, MAX_FAVORITES)
       : [];
@@ -278,11 +364,12 @@ class PalmWikiHome extends Plugin {
     this.addSettingTab(new LiteSettings(this.app, this));
     // Command ids match PalmWiki Home 0.x so existing hotkeys keep working.
     this.addCommand({ id: 'open-home', name: 'Open home', callback: () => void this.openHome() });
-    this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.runExternal('searchCommand') });
+    this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.openSearch() });
+    this.addCommand({ id: 'open-unified-search', name: 'Open unified search (trial)', callback: () => this.openUnifiedSearch() });
     this.addCommand({ id: 'open-switcher', name: 'Open page switcher', callback: () => this.runExternal('switchCommand') });
     this.addCommand({ id: 'open-scope', name: 'Open project or area', callback: () => this.openScopePicker(null, true) });
     this.addRibbonIcon('home', 'PalmWiki Home', () => void this.openHome());
-    this.addRibbonIcon('search', '外部検索', () => this.runExternal('searchCommand'));
+    this.addRibbonIcon('search', '検索', () => this.openSearch());
     this.app.workspace.onLayoutReady(() => {
       if (this.disposed) return;
       for (const name of ['layout-change', 'active-leaf-change', 'file-open', 'window-open', 'window-close']) {
@@ -335,7 +422,7 @@ class PalmWikiHome extends Plugin {
       bar.setAttribute('aria-label', 'PalmWiki navigation');
       const actions = [
         ['home', 'Home', () => void this.openHome(leaf)],
-        ['search', '検索', () => this.runExternal('searchCommand', leaf)],
+        ['search', '検索', () => this.openSearch(leaf)],
         ['arrow-right-left', '移動', () => this.runExternal('switchCommand', leaf)],
       ];
       for (const [icon, label, action] of actions) {
@@ -463,6 +550,41 @@ class PalmWikiHome extends Plugin {
       this.setScope(path);
       if (goHome) void this.openHome(leaf || undefined);
     }).open();
+  }
+
+  // The 検索 button and Cmd+G follow the setting, so both styles can be tried side by side.
+  openSearch(leaf) {
+    if (this.settings.searchMode === 'unified') this.openUnifiedSearch(leaf);
+    else this.runExternal('searchCommand', leaf);
+  }
+
+  openUnifiedSearch(leaf) {
+    if (this.disposed || typeof SuggestModal !== 'function') return;
+    if (leaf) this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    new UnifiedSearch(this.app, this).open();
+  }
+
+  searchBodies(query) {
+    const text = query.trim();
+    const registry = commandBridge(this.app);
+    if (registry?.listCommands().some(c => c.id === 'omnisearch:show-modal')) {
+      // Omnisearch's documented URL scheme opens its own screen with the query filled in.
+      const url = `obsidian://omnisearch?vault=${encodeURIComponent(this.app.vault.getName())}&query=${encodeURIComponent(text)}`;
+      (globalThis.activeWindow || globalThis.window || globalThis).open?.(url);
+      return;
+    }
+    this.runExternal('searchCommand');
+  }
+
+  async createNote(name) {
+    const title = name.replace(/[\\/:*?"<>|#^[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!title) { new Notice('ノート名にできる文字がありません。'); return; }
+    const parent = this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path || '');
+    const folder = parent?.path && parent.path !== '/' ? parent.path + '/' : '';
+    const path = typeof normalizePath === 'function' ? normalizePath(folder + title + '.md') : folder + title + '.md';
+    let file = this.app.vault.getAbstractFileByPath(path);
+    if (!file) file = await this.app.vault.create(path, '');
+    if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file, { active: true });
   }
 
   runExternal(key, leaf) {
@@ -1037,6 +1159,102 @@ class ScopePicker extends (FuzzySuggestModal || class {}) {
   }
 }
 
+// Rows come from sources in list order; a new source (e.g. another word list) is one more entry.
+const SEARCH_SOURCES = [
+  (search, query) => query ? [] : search.recent().map(file => ({ kind: 'note', file, recent: true })),
+  (search, query) => query ? [{ kind: 'body', text: query }] : [],
+  (search, query) => query ? matchNotes(search.notes(), query, search.recentPaths()).map(note => ({ kind: 'note', file: note.file, note })) : [],
+  (search, query) => {
+    const last = query.split(/\s+/).pop();
+    return last ? complementWords(search.app, last).map(word => ({ kind: 'word', text: word })) : [];
+  },
+  (search, query, rows) => query && !rows.some(row => row.kind === 'note' && normalizeSearch(row.file.basename) === normalizeSearch(query))
+    ? [{ kind: 'create', text: query }] : [],
+];
+
+class UnifiedSearch extends (SuggestModal || class {}) {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.cache = null;
+    this.setPlaceholder?.('ノートを探す（Enterで本文検索）');
+    this.setInstructions?.([
+      { command: 'Enter', purpose: '本文を検索（↑↓で候補を選べばそのノート）' },
+      { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
+      { command: 'Esc', purpose: '閉じる' },
+    ]);
+  }
+
+  notes() {
+    if (!this.cache) this.cache = searchableNotes(this.app, this.plugin.settings.searchExcludeFolders);
+    return this.cache;
+  }
+
+  recentPaths() {
+    return this.app.workspace.getLastOpenFiles?.() || [];
+  }
+
+  recent() {
+    const excluded = this.plugin.settings.searchExcludeFolders;
+    return this.recentPaths().map(path => this.app.vault.getAbstractFileByPath(path))
+      .filter(file => file instanceof TFile && file.extension === 'md' && !inFolders(file.path, excluded));
+  }
+
+  getSuggestions(input) {
+    const query = input.trim();
+    const rows = [];
+    for (const source of SEARCH_SOURCES) rows.push(...source(this, query, rows));
+    return rows;
+  }
+
+  renderSuggestion(row, el) {
+    const doc = el.ownerDocument;
+    const title = doc.createElement('div');
+    const meta = doc.createElement('small');
+    meta.className = 'palmwiki-search-meta';
+    if (row.kind === 'note') {
+      title.textContent = row.file.basename;
+      const terms = normalizeSearch(this.inputEl?.value || '').split(/\s+/).filter(Boolean);
+      const viaAlias = row.note && terms.length && !terms.every(term => row.note.titleKey.includes(term));
+      const alias = viaAlias ? row.note.aliases.find(a => terms.some(term => normalizeSearch(a).includes(term))) : null;
+      const folder = row.file.parent?.path && row.file.parent.path !== '/' ? row.file.parent.path : '';
+      meta.textContent = [row.recent ? '最近開いた' : '', alias ? `別名: ${alias}` : '', folder].filter(Boolean).join(' · ');
+    } else if (row.kind === 'body') {
+      title.textContent = `本文を検索：「${row.text}」`;
+      meta.textContent = 'Omnisearch で開く';
+    } else if (row.kind === 'word') {
+      title.textContent = `語句の候補：${row.text}`;
+      meta.textContent = 'Various Complements（選ぶと入力に反映）';
+    } else {
+      title.textContent = `新規作成：「${row.text}」`;
+    }
+    title.className = 'palmwiki-search-title' + (row.kind === 'note' ? '' : ' is-action');
+    el.append(title);
+    if (meta.textContent) el.append(meta);
+  }
+
+  selectSuggestion(row, evt) {
+    if (row.kind === 'word' && this.inputEl) {
+      // Complete the last word and keep the screen open.
+      const words = this.inputEl.value.split(/(\s+)/);
+      words[words.length - 1] = row.text;
+      this.inputEl.value = words.join('') + ' ';
+      this.inputEl.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
+      return;
+    }
+    super.selectSuggestion(row, evt);
+  }
+
+  onChooseSuggestion(row, evt) {
+    if (row.kind === 'body') { this.plugin.searchBodies(row.text); return; }
+    if (row.kind === 'create') { void this.plugin.createNote(row.text).catch(() => new Notice('ノートを作れませんでした。')); return; }
+    if (row.kind !== 'note') return;
+    const mode = evt && Keymap.isModEvent(evt);
+    const leaf = mode ? this.app.workspace.getLeaf('tab') : this.app.workspace.getLeaf(false);
+    void leaf.openFile(row.file, { active: true }).catch(() => new Notice('ノートを開けませんでした。'));
+  }
+}
+
 class LiteSettings extends PluginSettingTab {
   constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
   display() {
@@ -1053,6 +1271,22 @@ class LiteSettings extends PluginSettingTab {
         this.plugin.settings.homePath = path;
         try { await this.plugin.saveSettings(); new Notice('Homeのパスを保存しました。'); }
         catch { new Notice('設定を保存できませんでした。'); }
+      }));
+    new Setting(containerEl).setName('検索ボタンの動き')
+      .setDesc('「まとめる」は試験中の検索画面です（最近のノート・題名と別名・本文検索・新規作成）。Cmd+G も同じになります。')
+      .addDropdown(dropdown => dropdown
+        .addOption('separate', '別々（検索と移動の2ボタン）')
+        .addOption('unified', 'まとめる（試験）')
+        .setValue(this.plugin.settings.searchMode)
+        .onChange(async value => {
+          this.plugin.settings.searchMode = value === 'unified' ? 'unified' : 'separate';
+          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+        }));
+    new Setting(containerEl).setName('検索候補から外すフォルダ')
+      .setDesc('まとめた検索の候補に出さないフォルダ（カンマ区切り）。')
+      .addText(text => text.setValue(this.plugin.settings.searchExcludeFolders.join(', ')).onChange(async value => {
+        this.plugin.settings.searchExcludeFolders = value.split(',').map(f => f.trim().replace(/\/+$/, '')).filter(Boolean).slice(0, 50);
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
     new Setting(containerEl).setName('カードに画像を表示')
       .setDesc('最初のローカルPNG・JPEG・WebP（2 MiB以下）のみ。表示付近で読み込みます。')
