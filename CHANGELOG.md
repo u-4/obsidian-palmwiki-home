@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1 — 2026-09-27
+
+- Cards announce hovers through Obsidian's standard `hover-link` event, so page preview and Hover Editor work on them (Cmd+hover by default; the "PalmWiki Home" row under Settings → Page preview changes that). Nothing is read until a preview opens.
+
 ## 1.3.0 — 2026-09-27
 
 - Unified search (trial), switchable in settings (「検索ボタンの動き」: 別々 / まとめる; default 別々). The 検索 button, ribbon icon and Cmd+G (`Open search`) follow the setting; `Open unified search (trial)` always opens the new screen.

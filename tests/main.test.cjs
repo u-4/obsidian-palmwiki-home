@@ -70,6 +70,7 @@ class Plugin extends Component {
   async loadData() { return this.app.saved || null; }
   async saveData(data) { this.app.saved = { ...data }; }
   registerBasesView() {} addSettingTab() {} addRibbonIcon() {} registerEvent() {}
+  registerHoverLinkSource(id, info) { this.hoverSources = { ...this.hoverSources, [id]: info }; }
   addCommand(command) { this.commands.push(command); }
 }
 function load() {
@@ -97,7 +98,7 @@ function load() {
   return { Main, ...Main.testing, doc, clock, notices, modals, urls };
 }
 function appDouble(doc, count = 0) {
-  const files = new Map(), metadata = new Map(), bodies = new Map(), recentFiles = []; const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0 };
+  const files = new Map(), metadata = new Map(), bodies = new Map(), recentFiles = []; const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0, triggers: [] };
   const leaf = { view: { containerEl: doc.createElement('div') }, getViewState: () => ({}), getRoot: () => ({}),
     async openFile(file) { calls.opens.push(file.path); } };
   const app = {
@@ -115,6 +116,7 @@ function appDouble(doc, count = 0) {
     workspace: { getMostRecentLeaf: () => leaf, getLeaf: () => leaf, setActiveLeaf() {}, async revealLeaf() {},
       getActiveFile: () => null, getLastOpenFiles: () => recentFiles,
       iterateAllLeaves: cb => cb(leaf), on: () => ({}), onLayoutReady: cb => cb(),
+      trigger(name, info) { calls.triggers.push({ name, info }); },
       async openLinkText(p) { calls.opens.push(p); },
     },
     commands: { listCommands: () => [{ id: 'omnisearch:show-modal', name: 'Omnisearch' }, { id: 'aqs:recent', name: 'Recent' }],
@@ -524,5 +526,17 @@ test('the 検索 button and Cmd+G follow the search mode setting, which persists
   f.plugin.openSearch(); assert.equal(f.modals.length, 1); assert.ok(f.modals[0] instanceof f.UnifiedSearch);
   const again = new f.Main(f.app); await again.onload(); assert.equal(again.settings.searchMode, 'unified');
   assert.deepEqual([...again.settings.searchExcludeFolders], ['99_System']); again.onunload();
+  f.stop();
+});
+
+test('cards join page preview / Hover Editor through the standard hover-link event, Cmd by default', async () => {
+  const f = await fixture(3); f.refresh();
+  assert.equal(f.plugin.hoverSources['palmwiki-home'].defaultMod, true);
+  const card = f.view.grid.children[1];
+  card.emit('mouseover', { metaKey: true });
+  const hover = f.calls.triggers.at(-1);
+  assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.source, 'palmwiki-home');
+  assert.equal(hover.info.linktext, card.dataset.path); assert.equal(hover.info.targetEl, card); assert.equal(hover.info.hoverParent, f.view);
+  assert.equal(f.calls.reads.length, 0); // announcing a hover reads nothing
   f.stop();
 });

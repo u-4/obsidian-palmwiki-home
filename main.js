@@ -3,6 +3,7 @@
 const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
+const HOVER_SOURCE = 'palmwiki-home';
 const INITIAL_CARDS = 24;
 const CARD_STEP = 24;
 const MAX_CARDS = 300;
@@ -362,6 +363,11 @@ class PalmWikiHome extends Plugin {
       factory: (controller, container) => new LiteCards(controller, container, this),
     });
     this.addSettingTab(new LiteSettings(this.app, this));
+    // Cards join Obsidian's page preview (and Hover Editor) like other links: Cmd+hover by default,
+    // adjustable under Settings → Page preview.
+    if (typeof this.registerHoverLinkSource === 'function') {
+      this.registerHoverLinkSource(HOVER_SOURCE, { display: 'PalmWiki Home', defaultMod: true });
+    }
     // Command ids match PalmWiki Home 0.x so existing hotkeys keep working.
     this.addCommand({ id: 'open-home', name: 'Open home', callback: () => void this.openHome() });
     this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.openSearch() });
@@ -638,6 +644,7 @@ class LiteCards extends BasesView {
     this.moreFrame = null;
     this.disposed = false;
     this.lastScrollTop = parent.scrollTop;
+    this.hoverPopover = null; // Lets this view act as the hover parent for card previews.
     const doc = parent.ownerDocument;
     this.root = doc.createElement('div');
     this.root.className = 'palmwiki-lite-home';
@@ -964,6 +971,11 @@ class LiteCards extends BasesView {
       void target.openFile(current, { active: true }).catch(() => new Notice('ノートを開けませんでした。'));
     };
     el.addEventListener('click', open); el.addEventListener('auxclick', open);
+    // Only announces the hover; Obsidian decides whether to preview (e.g. Cmd held).
+    el.addEventListener('mouseover', event => {
+      if (this.disposed) return;
+      this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: file.path, sourcePath: '' });
+    });
     return { el, preview, media, file, path: file.path, key: snapshotKey(file),
       near: false, reading: false, textReady: cached !== undefined, imageKey: null, imagePath: null,
       img: null, finishImage: null, badImage: null };
