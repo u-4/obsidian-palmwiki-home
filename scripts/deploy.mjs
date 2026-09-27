@@ -4,6 +4,7 @@
 // Override the vault with PALMWIKI_VAULT=/path/to/vault.
 import { copyFile, mkdir, readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,3 +43,11 @@ for (const name of files) {
 
 console.log(`Deployed ${manifest.name} ${manifest.version} to ${target}`);
 console.log(backedUp ? `Previous files backed up to ${backup}` : 'No previous files to back up.');
+
+// Best effort: reload the plugin in the running Obsidian through its CLI.
+const reload = spawnSync('obsidian', [`vault=${path.basename(vault)}`, 'plugin:reload', `id=${manifest.id}`], { encoding: 'utf8', timeout: 30000 });
+if (reload.status === 0 && /Reloaded/.test(reload.stdout)) {
+  console.log('Reloaded the plugin in Obsidian.');
+} else {
+  console.log('Could not reload through the Obsidian CLI; reload the plugin or Obsidian by hand.');
+}

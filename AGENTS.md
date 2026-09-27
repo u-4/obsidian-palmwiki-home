@@ -25,7 +25,7 @@
 
 - The owner's iCloud PalmWiki vault is the standing target. `npm run deploy` backs up the installed files outside the vault, copies `main.js`, `manifest.json`, `styles.css`, and verifies checksums. It needs no approval each time.
 - Ask before changing plugin settings (`data.json`), enablement, hotkeys, notes, or `.base` files, and before deploying to any other vault.
-- The owner reloads the plugin or Obsidian after a deploy unless the Obsidian CLI is available to do it.
+- `npm run deploy` then reloads the plugin through the Obsidian CLI (`obsidian vault=PalmWiki plugin:reload id=palmwiki-home`) when Obsidian is running; otherwise the owner reloads it.
 
 ## Keep Out Of Git
 
