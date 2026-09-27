@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0 — 2026-09-28
+
+- Omnisearch's search screen gets the same preview pane (setting 「Omnisearch の画面にもプレビューを表示」, on by default): the selected result is rendered beside the list, the query words are marked, and the pane scrolls to the first match. Omnisearch itself is not changed; the pane reads the selected result's `data-result-id`, and simply does not appear if that markup changes. Its screen is re-checked briefly after opening because Omnisearch builds the list a moment later.
+- The preview pane is now one shared component. It waits for the screen to be laid out before the first preview (the unified search could miss its first preview).
+- Fix: the unified search's selection helper no longer shadows Obsidian Modal's own `selection` property.
+
 ## 1.4.0 — 2026-09-28
 
 - Unified search has a fixed preview pane beside the list, on by default (setting 「検索画面にプレビューを表示」). It shows the selected note (without frontmatter, up to 20,000 characters) through Obsidian's Markdown renderer and switches as the selection moves (about 0.1 s); 本文を検索 / 新規作成 rows show what Enter will do. Internal links in the pane open the note. Hidden on screens narrower than 760 px.

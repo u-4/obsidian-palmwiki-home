@@ -82,7 +82,8 @@ function load() {
       Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false }, setIcon() {},
       FuzzySuggestModal: class { constructor(app) { this.app = app; } setPlaceholder(text) { this.placeholder = text; } open() { modals.push(this); } },
       SuggestModal: class {
-        constructor(app) { this.app = app; this.inputEl = { value: '', inputs: 0, dispatchEvent() { this.inputs++; } }; }
+        // Mirrors instance fields of Obsidian's Modal that a subclass must not shadow (e.g. `selection`).
+        constructor(app) { this.app = app; this.selection = null; this.inputEl = { value: '', inputs: 0, dispatchEvent() { this.inputs++; } }; }
         setPlaceholder(text) { this.placeholder = text; } setInstructions() {} open() { modals.push(this); } close() { this.closed = true; }
         selectSuggestion(value, evt) { this.close(); this.onChooseSuggestion(value, evt); }
       },
@@ -95,7 +96,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered };
 }
@@ -548,24 +549,37 @@ test('search preview pane shows the selected note (no frontmatter), hints for ac
   const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
   f.bodies.set('10_Notes/Projects/機器整備_駒込2026.md', '---\ntags: [Projects]\n---\n# 計画\n本文A');
   f.bodies.set('00_Inbox/R7機器整備.md', '本文B');
-  s.modalEl = f.doc.createElement('div'); s.modalEl.classList = { add() {} };
+  s.modalEl = f.doc.createElement('div'); s.modalEl.classList = { add() {}, remove() {} };
   const results = f.doc.createElement('div'); let selected = null; s.resultContainerEl = { querySelector: () => selected };
-  s.onOpen(); assert.ok(s.previewEl);
+  s.onOpen(); assert.ok(s.pane);
   const rows = s.getSuggestions('機器 整備');
   const [body, a, b] = rows.slice(0, 3).map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
   const text = el => [el.textContent, ...el.children.map(text)].join('|');
-  selected = body; s.followSelection(); f.clock.tick(); await settle();
-  assert.match(text(s.previewEl), /Omnisearch の本文検索/);
-  selected = a; s.followSelection(); selected = b; s.followSelection(); // fast moves settle on b
+  selected = body; s.pane.follow(); f.clock.tick(); await settle();
+  assert.match(text(s.pane.el), /Omnisearch の本文検索/);
+  selected = a; s.pane.follow(); selected = b; s.pane.follow(); // fast moves settle on b
   f.clock.tick(); await settle(); await settle();
-  assert.match(text(s.previewEl), /R7機器整備\|本文B/); assert.deepEqual([...f.rendered], ['本文B']);
-  selected = a; s.followSelection(); f.clock.tick(); await settle(); await settle();
-  assert.match(text(s.previewEl), /機器整備_駒込2026\|# 計画\n本文A/); assert.equal(f.rendered.at(-1).startsWith('---'), false);
-  const component = s.previewComponent; s.onClose(); assert.equal(component.loaded, false);
+  assert.match(text(s.pane.el), /R7機器整備\|本文B/); assert.deepEqual([...f.rendered], ['本文B']);
+  selected = a; s.pane.follow(); f.clock.tick(); await settle(); await settle();
+  assert.match(text(s.pane.el), /機器整備_駒込2026\|# 計画\n本文A/); assert.equal(f.rendered.at(-1).startsWith('---'), false);
+  const component = s.pane.component; s.onClose(); assert.equal(component.loaded, false); assert.equal(s.pane, null);
   f.stop();
 });
 test('search preview can be turned off in settings', async () => {
   const f = await fixture(0); f.plugin.settings.searchPreview = false; const s = new f.UnifiedSearch(f.app, f.plugin);
-  s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.previewEl, null);
+  s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null);
+  f.stop();
+});
+
+test('Omnisearch query words to mark skip exclusions, field filters and quotes', () => {
+  const { omnisearchTerms } = load();
+  assert.deepEqual([...omnisearchTerms('機器 -除外 "委員会" path:10_Notes ext:md 整備')], ['機器', '委員会', '整備']);
+});
+test('Omnisearch selection maps the selected result id to a note, anything else to nothing', async () => {
+  const f = await fixture(0); searchVault(f);
+  const modal = id => ({ querySelector: () => (id === null ? null : { dataset: { resultId: id } }) });
+  assert.equal(f.omnisearchSelection(f.app, modal('00_Inbox/R7機器整備.md')).file.path, '00_Inbox/R7機器整備.md');
+  assert.equal(f.omnisearchSelection(f.app, modal('missing.md')).file, undefined);
+  assert.equal(f.omnisearchSelection(f.app, modal(null)).file, undefined);
   f.stop();
 });

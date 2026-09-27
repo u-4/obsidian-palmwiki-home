@@ -75,7 +75,8 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas: "input preview" "results preview" "help preview";
 }
-.palmwiki-search-modal > .prompt-input-container { grid-area: input; }
+.palmwiki-search-modal > .prompt-input-container,
+.palmwiki-search-modal > .omnisearch-input-container { grid-area: input; }
 .palmwiki-search-modal > .prompt-results { grid-area: results; max-height: none; overflow-y: auto; }
 .palmwiki-search-modal > .prompt-instructions { grid-area: help; }
 .palmwiki-search-preview {
@@ -89,3 +90,4 @@
   .prompt.palmwiki-search-modal { display: flex; width: auto; height: auto; max-width: none; }
   .palmwiki-search-preview { display: none; }
 }
+.palmwiki-search-preview mark.palmwiki-search-preview-match { background: var(--text-highlight-bg); color: inherit; border-radius: 2px; }

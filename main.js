@@ -18,6 +18,7 @@ const DEFAULTS = Object.freeze({
   searchMode: 'separate', // 'separate': the two buttons; 'unified': PalmWiki's own search screen (trial)
   searchExcludeFolders: ['99_System'],
   searchPreview: true,
+  omnisearchPreview: true,
 });
 const PREVIEW_CHARS = 20000;
 const MAX_NOTE_SUGGESTIONS = 30;
@@ -174,6 +175,12 @@ function complementWords(app, term) {
   } catch {
     return [];
   }
+}
+
+function omnisearchSelection(app, modal) {
+  const path = modal.querySelector('.omnisearch-result.is-selected')?.dataset?.resultId;
+  const file = path ? app.vault.getAbstractFileByPath(path) : null;
+  return file instanceof TFile && file.extension === 'md' ? { file } : { hint: '' };
 }
 
 function noteTitle(path) {
@@ -342,6 +349,7 @@ class PalmWikiHome extends Plugin {
     this.settings.showImages = saved?.showImages !== false;
     this.settings.searchMode = saved?.searchMode === 'unified' ? 'unified' : 'separate';
     this.settings.searchPreview = saved?.searchPreview !== false;
+    this.settings.omnisearchPreview = saved?.omnisearchPreview !== false;
     this.settings.searchExcludeFolders = Array.isArray(saved?.searchExcludeFolders)
       ? saved.searchExcludeFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')).slice(0, 50)
       : [...DEFAULTS.searchExcludeFolders];
@@ -402,6 +410,43 @@ class PalmWikiHome extends Plugin {
       this.registerEvent(this.app.vault.on('rename', (file, oldPath) => this.followRename(file, oldPath)));
       this.registerEvent(this.app.vault.on('delete', file => this.followDelete(file)));
       this.syncBars();
+      this.watchOmnisearch();
+    });
+  }
+
+  // Adds the same preview pane to Omnisearch's screen when it opens. Omnisearch is not changed:
+  // the pane reads the selected result's data-result-id; if that markup changes, no pane appears.
+  watchOmnisearch() {
+    const doc = globalThis.activeDocument || globalThis.document;
+    const Observer = doc?.defaultView?.MutationObserver;
+    if (!Observer || !doc.body) return;
+    this.omnisearchPanes = new Map();
+    // Omnisearch builds its list a moment after its screen appears, so a new screen is re-checked briefly.
+    const attach = (container, tries) => {
+      if (this.disposed || !container.isConnected || this.omnisearchPanes.has(container)) return;
+      const modal = container.querySelector('.omnisearch-modal');
+      if (!modal) return;
+      const results = modal.querySelector('.prompt-results');
+      if (!results) { if (tries < 40) setTimeout(() => attach(container, tries + 1), 50); return; }
+      const input = modal.querySelector('input');
+      const pane = new NotePreviewPane(this.app, modal, results, () => omnisearchSelection(this.app, modal), {
+        terms: () => omnisearchTerms(input?.value || ''),
+      });
+      this.omnisearchPanes.set(container, pane);
+      pane.follow();
+    };
+    const observer = new Observer(() => {
+      for (const [container, pane] of this.omnisearchPanes) {
+        if (!container.isConnected) { pane.dispose(); this.omnisearchPanes.delete(container); }
+      }
+      if (!this.settings.omnisearchPreview) return;
+      for (const container of doc.body.querySelectorAll(':scope > .modal-container')) attach(container, 0);
+    });
+    observer.observe(doc.body, { childList: true }); // top-level additions only
+    this.register(() => {
+      observer.disconnect();
+      for (const pane of this.omnisearchPanes.values()) pane.dispose();
+      this.omnisearchPanes.clear();
     });
   }
 
@@ -1184,6 +1229,165 @@ function previewMarkdown(body) {
   return text.length > PREVIEW_CHARS ? { text: text.slice(0, PREVIEW_CHARS), cut: true } : { text, cut: false };
 }
 
+// Words to mark in a preview, from an Omnisearch query: drops -exclusions, field filters and quotes.
+function omnisearchTerms(query) {
+  return String(query).split(/\s+/).map(word => word.replace(/^"+|"+$/g, ''))
+    .filter(word => word && !word.startsWith('-') && !/^[a-z]+:/i.test(word));
+}
+
+// A pane beside a result list that renders the selected note with Obsidian's Markdown renderer.
+// Shared by the unified search and Omnisearch's screen. `select()` returns { file } for a note
+// row, { hint } for anything else; `terms()` gives words to mark and scroll to.
+class NotePreviewPane {
+  constructor(app, modalEl, resultEl, select, options = {}) {
+    this.app = app;
+    this.modalEl = modalEl;
+    this.resultEl = resultEl;
+    this.select = select;
+    this.terms = options.terms || (() => []);
+    this.onLink = options.onLink || null;
+    this.key = undefined;
+    this.timer = null;
+    this.waitTimer = null;
+    this.waits = 0;
+    this.token = 0;
+    this.component = null;
+    this.file = null;
+    const doc = modalEl.ownerDocument;
+    modalEl.classList?.add('palmwiki-search-modal');
+    this.el = doc.createElement('div');
+    this.el.className = 'palmwiki-search-preview markdown-rendered';
+    this.el.addEventListener('click', event => {
+      const link = event.target?.closest?.('a.internal-link');
+      if (!link || !this.onLink) return;
+      event.preventDefault();
+      this.onLink(link.dataset.href || link.getAttribute('href') || '', this.file?.path || '', event);
+    });
+    modalEl.append(this.el);
+    // Obsidian (and Omnisearch) handle the arrow keys themselves, so the selection is watched instead.
+    const Observer = doc.defaultView?.MutationObserver;
+    if (Observer && resultEl) {
+      this.observer = new Observer(() => this.follow());
+      this.observer.observe(resultEl, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
+  follow() {
+    if (this.el.offsetParent === null) {
+      // Not laid out yet (a screen that is still opening) or hidden on a narrow screen: look again shortly.
+      if (this.waits++ < 20) {
+        if (this.waitTimer !== null) clearTimeout(this.waitTimer);
+        this.waitTimer = setTimeout(() => { this.waitTimer = null; this.follow(); }, 50);
+      }
+      return;
+    }
+    this.waits = 0;
+    const selected = this.select() || {};
+    const key = selected.file ? 'file:' + selected.file.path : 'hint:' + (selected.hint || '');
+    if (key === this.key) return;
+    this.key = key;
+    if (this.timer !== null) clearTimeout(this.timer);
+    // A short pause lets fast moves settle on one row before reading a note.
+    this.timer = setTimeout(() => { this.timer = null; void this.show(selected); }, 60);
+  }
+
+  clear() {
+    this.component?.unload();
+    this.component = null;
+    while (this.el.firstChild) this.el.firstChild.remove();
+  }
+
+  async show(selected) {
+    const token = ++this.token;
+    const doc = this.el.ownerDocument;
+    if (!selected.file) {
+      this.clear();
+      this.file = null;
+      if (selected.hint) {
+        const hint = doc.createElement('div');
+        hint.className = 'palmwiki-search-preview-hint';
+        hint.textContent = selected.hint;
+        this.el.append(hint);
+      }
+      return;
+    }
+    let body = null;
+    try { body = await this.app.vault.cachedRead(selected.file); } catch { body = null; }
+    if (token !== this.token) return;
+    this.clear();
+    this.file = selected.file;
+    const title = doc.createElement('div');
+    title.className = 'palmwiki-search-preview-title';
+    title.textContent = selected.file.basename;
+    const content = doc.createElement('div');
+    content.className = 'palmwiki-search-preview-body';
+    this.el.append(title, content);
+    this.el.scrollTop = 0;
+    if (body === null) { content.textContent = '読み込めませんでした。'; return; }
+    const { text, cut } = previewMarkdown(body);
+    const component = new Component();
+    component.load();
+    this.component = component;
+    try {
+      await MarkdownRenderer.render(this.app, text, content, selected.file.path, component);
+    } catch {
+      content.textContent = text;
+    }
+    if (token !== this.token) return;
+    if (cut) {
+      const more = doc.createElement('div');
+      more.className = 'palmwiki-search-preview-hint';
+      more.textContent = '（長いノートのため途中まで表示しています）';
+      this.el.append(more);
+    }
+    this.markTerms(content);
+  }
+
+  // Marks the query words in the rendered preview and scrolls to the first one.
+  markTerms(content) {
+    const terms = this.terms().map(term => term.toLowerCase()).filter(term => term.length > 0);
+    const doc = content.ownerDocument;
+    if (!terms.length || typeof doc.createTreeWalker !== 'function') return;
+    const walker = doc.createTreeWalker(content, 4 /* NodeFilter.SHOW_TEXT */);
+    const nodes = [];
+    while (walker.nextNode() && nodes.length < 2000) nodes.push(walker.currentNode);
+    let first = null;
+    let marks = 0;
+    for (const node of nodes) {
+      const lower = node.nodeValue.toLowerCase();
+      let at = -1;
+      let length = 0;
+      for (const term of terms) {
+        const i = lower.indexOf(term);
+        if (i >= 0 && (at < 0 || i < at)) { at = i; length = term.length; }
+      }
+      if (at < 0) continue;
+      const hit = node.splitText(at);
+      hit.splitText(length);
+      const mark = doc.createElement('mark');
+      mark.className = 'palmwiki-search-preview-match';
+      hit.replaceWith(mark);
+      mark.append(hit);
+      first = first || mark;
+      if (++marks >= 200) break;
+    }
+    if (first) this.el.scrollTop = Math.max(0, first.offsetTop - this.el.clientHeight / 3);
+  }
+
+  dispose() {
+    this.observer?.disconnect();
+    if (this.timer !== null) clearTimeout(this.timer);
+    if (this.waitTimer !== null) clearTimeout(this.waitTimer);
+    this.timer = null;
+    this.waitTimer = null;
+    this.token++;
+    this.component?.unload();
+    this.component = null;
+    this.el.remove();
+    this.modalEl.classList?.remove('palmwiki-search-modal');
+  }
+}
+
 // Rows come from sources in list order; a new source (e.g. another word list) is one more entry.
 const SEARCH_SOURCES = [
   (search, query) => query ? [] : search.recent().map(file => ({ kind: 'note', file, recent: true })),
@@ -1203,11 +1407,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     this.plugin = plugin;
     this.cache = null;
     this.rows = new WeakMap(); // suggestion element → row, for the preview pane
-    this.previewEl = null;
-    this.previewedEl = undefined;
-    this.previewTimer = null;
-    this.previewToken = 0;
-    this.previewComponent = null;
+    this.pane = null;
     this.setPlaceholder?.('ノートを探す（Enterで本文検索）');
     this.setInstructions?.([
       { command: 'Enter', purpose: '本文を検索（↑↓で候補を選べばそのノート）' },
@@ -1220,104 +1420,30 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     super.onOpen?.();
     this.plugin.openSearchScreen = this;
     if (!this.plugin.settings.searchPreview || !this.modalEl) return;
-    // A fixed pane beside the list shows the selected note, rendered by Obsidian's own renderer.
-    const doc = this.modalEl.ownerDocument;
-    this.modalEl.classList?.add('palmwiki-search-modal');
-    this.previewEl = doc.createElement('div');
-    this.previewEl.className = 'palmwiki-search-preview markdown-rendered';
-    this.previewEl.addEventListener('click', event => this.followPreviewLink(event));
-    this.modalEl.append(this.previewEl);
-    // Obsidian consumes the arrow keys itself, so the selection is watched on the result list.
-    const Observer = doc.defaultView?.MutationObserver;
-    if (Observer && this.resultContainerEl) {
-      this.selectionObserver = new Observer(() => this.followSelection());
-      this.selectionObserver.observe(this.resultContainerEl, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
-    }
-    this.followSelection();
+    this.pane = new NotePreviewPane(this.app, this.modalEl, this.resultContainerEl, () => this.paneSelection(), {
+      onLink: (link, source, event) => {
+        this.close();
+        void this.app.workspace.openLinkText(link, source, Keymap.isModEvent(event));
+      },
+    });
+    this.pane.follow();
   }
 
   onClose() {
     super.onClose?.();
     if (this.plugin.openSearchScreen === this) this.plugin.openSearchScreen = null;
-    this.selectionObserver?.disconnect();
-    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
-    this.previewTimer = null;
-    this.previewToken++;
-    this.previewComponent?.unload();
-    this.previewComponent = null;
+    this.pane?.dispose();
+    this.pane = null;
   }
 
-  selectedEl() {
-    return this.resultContainerEl?.querySelector('.suggestion-item.is-selected') || null;
-  }
-
-  followSelection() {
-    if (!this.previewEl || this.previewEl.offsetParent === null) return; // hidden on narrow screens
-    const el = this.selectedEl();
-    if (el === this.previewedEl) return;
-    this.previewedEl = el;
-    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
-    // A short pause lets fast arrow presses settle on one row before reading a note.
-    this.previewTimer = setTimeout(() => { this.previewTimer = null; void this.showPreview(el); }, 60);
-  }
-
-  clearPreview() {
-    this.previewComponent?.unload();
-    this.previewComponent = null;
-    while (this.previewEl.firstChild) this.previewEl.firstChild.remove();
-  }
-
-  async showPreview(el) {
-    const token = ++this.previewToken;
+  // Not named `selection`: Obsidian's Modal already uses that property.
+  paneSelection() {
+    const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
     const row = el ? this.rows.get(el) : null;
-    const doc = this.previewEl.ownerDocument;
-    if (row?.kind !== 'note') {
-      this.clearPreview();
-      const hint = doc.createElement('div');
-      hint.className = 'palmwiki-search-preview-hint';
-      hint.textContent = row?.kind === 'body' ? 'Enter で Omnisearch の本文検索を開きます'
-        : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
-        : row?.kind === 'word' ? '選ぶと入力に反映します' : '';
-      this.previewEl.append(hint);
-      return;
-    }
-    let body = null;
-    try { body = await this.app.vault.cachedRead(row.file); } catch { body = null; }
-    if (token !== this.previewToken) return;
-    this.clearPreview();
-    const title = doc.createElement('div');
-    title.className = 'palmwiki-search-preview-title';
-    title.textContent = row.file.basename;
-    const content = doc.createElement('div');
-    content.className = 'palmwiki-search-preview-body';
-    this.previewEl.append(title, content);
-    this.previewEl.scrollTop = 0;
-    if (body === null) { content.textContent = '読み込めませんでした。'; return; }
-    const { text, cut } = previewMarkdown(body);
-    const component = new Component();
-    component.load();
-    this.previewComponent = component;
-    try {
-      await MarkdownRenderer.render(this.app, text, content, row.file.path, component);
-    } catch {
-      content.textContent = text;
-    }
-    if (token !== this.previewToken) return;
-    if (cut) {
-      const more = doc.createElement('div');
-      more.className = 'palmwiki-search-preview-hint';
-      more.textContent = '（長いノートのため途中まで表示しています）';
-      this.previewEl.append(more);
-    }
-  }
-
-  followPreviewLink(event) {
-    const link = event.target?.closest?.('a.internal-link');
-    if (!link) return;
-    event.preventDefault();
-    const row = this.previewedEl ? this.rows.get(this.previewedEl) : null;
-    this.close();
-    void this.app.workspace.openLinkText(link.dataset.href || link.getAttribute('href') || '', row?.file?.path || '', Keymap.isModEvent(event));
+    if (row?.kind === 'note') return { file: row.file };
+    return { hint: row?.kind === 'body' ? 'Enter で Omnisearch の本文検索を開きます'
+      : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
+      : row?.kind === 'word' ? '選ぶと入力に反映します' : '' };
   }
 
   notes() {
@@ -1422,6 +1548,12 @@ class LiteSettings extends PluginSettingTab {
       .setDesc('選んでいる候補のノートを、検索画面の右側に表示します（幅の狭い画面では表示しません）。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.searchPreview).onChange(async value => {
         this.plugin.settings.searchPreview = value;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
+    new Setting(containerEl).setName('Omnisearch の画面にもプレビューを表示')
+      .setDesc('Omnisearch の検索画面の右側に、選んでいる結果のノートを表示し、検索語に印を付けます。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.omnisearchPreview).onChange(async value => {
+        this.plugin.settings.omnisearchPreview = value;
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
     new Setting(containerEl).setName('検索候補から外すフォルダ')
