@@ -40,3 +40,20 @@
 .palmwiki-lite-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .palmwiki-lite-footer { padding: 18px 0; text-align: center; font-size: var(--font-ui-small); color: var(--text-muted); }
 .palmwiki-lite-card { contain: layout style; }
+
+/* Projects and Areas */
+.palmwiki-scope { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; min-width: 0; }
+.palmwiki-scope-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.palmwiki-scope-chips::-webkit-scrollbar { display: none; }
+.palmwiki-scope-chips button {
+  flex: 0 0 auto; white-space: nowrap; min-height: 30px; padding: 3px 11px;
+  border-radius: 999px; font-size: var(--font-ui-small); box-shadow: none;
+}
+.palmwiki-scope-chips .palmwiki-scope-chip.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }
+.palmwiki-scope-find { display: inline-flex; align-items: center; gap: 4px; }
+.palmwiki-scope-find svg { width: 14px; height: 14px; }
+.palmwiki-scope-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: var(--font-ui-small); }
+.palmwiki-scope-name { font-weight: 600; margin-right: auto; overflow-wrap: anywhere; }
+.palmwiki-scope-head button { min-height: 28px; padding: 2px 10px; font-size: var(--font-ui-small); box-shadow: none; }
+.palmwiki-scope-chips button:focus-visible, .palmwiki-scope-head button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+.palmwiki-scope-suggestion-meta { display: block; color: var(--text-muted); }

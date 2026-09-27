@@ -12,6 +12,7 @@ Obsidian 用の軽いホーム画面プラグインです。Bases のカード�
 - Lists, sorting and filters are Bases' job, so a `.base` file decides what the home shows. By default the home is `PalmWiki Home.base` at the vault root (all Markdown notes, newest first); it is created on the first Home click if missing.
 - Home / search / switch buttons in normal workspace tabs, a ribbon icon, and commands (`Open home`, `Open search`, `Open page switcher`).
 - Search and switch run a command you choose in settings, typically Omnisearch and Another Quick Switcher.
+- Projects and Areas (1.1): notes tagged `Projects` or `Areas` in frontmatter can be picked from a searchable list, and the home then shows that note and the notes linked to or from it. Favorite ones stay as chips above the cards.
 - No own search index, no persistent body cache, no network access.
 
 ## Install

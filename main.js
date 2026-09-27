@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const INITIAL_CARDS = 24;
@@ -15,6 +15,11 @@ const DEFAULTS = Object.freeze({
   switchCommand: '',
   showImages: true,
 });
+const MAX_FAVORITES = 100;
+// PARA-PKM marks Project and Area notes with these frontmatter tags.
+const SCOPE_KINDS = Object.freeze({ Projects: 'プロジェクト', Areas: 'エリア' });
+const DONE_STATUSES = new Set(['completed', 'done', 'archived', 'cancelled', 'canceled', '完了', '終了', '中止']);
+const STATUS_LABELS = Object.freeze({ active: '進行中', completed: '完了', done: '完了', archived: 'アーカイブ' });
 
 function safeHomePath(value) {
   if (typeof value !== 'string') return null;
@@ -43,17 +48,59 @@ function excerpt(body) {
 }
 
 // Keep file references only; never scan note bodies or build a second index.
-function cardWindow(data, limit) {
+// A scope ({ path, members }) filters before the 300 cap and puts its own note first.
+function cardWindow(data, limit, scope = null) {
   const files = [];
   let total = 0;
+  let head = null;
   for (const group of data?.groupedData || []) {
     for (const entry of group.entries) {
       if (entry.file.extension !== 'md') continue;
+      if (scope && !scope.members.has(entry.file.path)) continue;
       total++;
+      if (scope && entry.file.path === scope.path) { head = entry.file; continue; }
       if (files.length < MAX_CARDS) files.push(entry.file);
     }
   }
+  if (head) { files.unshift(head); if (files.length > MAX_CARDS) files.pop(); }
   return { files, total, shown: files.slice(0, Math.min(MAX_CARDS, Math.max(INITIAL_CARDS, limit))) };
+}
+
+function noteTitle(path) {
+  return String(path).split('/').pop().replace(/\.md$/i, '');
+}
+
+function scopeKind(frontmatter) {
+  const raw = [frontmatter?.tags, frontmatter?.tag].flat()
+    .flatMap(tag => typeof tag === 'string' ? tag.split(/[,\s]+/) : []);
+  const tags = raw.map(tag => tag.replace(/^#/, ''));
+  return Object.keys(SCOPE_KINDS).find(kind => tags.includes(kind)) || null;
+}
+
+// Runs only when the picker opens, never while the home renders.
+function listScopes(app) {
+  const items = [];
+  for (const file of app.vault.getMarkdownFiles()) {
+    const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
+    const kind = scopeKind(frontmatter);
+    if (!kind) continue;
+    const aliases = [frontmatter.aliases, frontmatter.alias].flat().filter(alias => typeof alias === 'string' && alias.trim());
+    const status = typeof frontmatter.status === 'string' ? frontmatter.status.trim() : '';
+    items.push({ path: file.path, title: file.basename, kind, status, aliases });
+  }
+  return items;
+}
+
+// Members of a Project/Area: its note plus every note linked to or from it
+// (body or frontmatter links, as resolved by Obsidian).
+function scopeMembers(app, scopePath) {
+  const links = app.metadataCache.resolvedLinks || {};
+  const members = new Set([scopePath]);
+  for (const target of Object.keys(links[scopePath] || {})) members.add(target);
+  for (const [source, targets] of Object.entries(links)) {
+    if (targets && Object.prototype.hasOwnProperty.call(targets, scopePath)) members.add(source);
+  }
+  return members;
 }
 
 function snapshotKey(file) {
@@ -172,6 +219,11 @@ class PalmWikiHome extends Plugin {
       }
     }
     this.settings.showImages = saved?.showImages !== false;
+    this.settings.favoriteScopes = Array.isArray(saved?.favoriteScopes)
+      ? [...new Set(saved.favoriteScopes.filter(p => typeof p === 'string' && /\.md$/i.test(p) && p.length < 1024))].slice(0, MAX_FAVORITES)
+      : [];
+    this.scope = null; // In memory only: Home and back navigation keep it; restart starts at すべて.
+    this.scopeCache = null;
     this.previews = new PreviewStore(this.app);
     this.disposed = false;
     this.bars = new Map();
@@ -192,6 +244,7 @@ class PalmWikiHome extends Plugin {
     this.addCommand({ id: 'open-home', name: 'Open home', callback: () => void this.openHome() });
     this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.runExternal('searchCommand') });
     this.addCommand({ id: 'open-switcher', name: 'Open page switcher', callback: () => this.runExternal('switchCommand') });
+    this.addCommand({ id: 'open-scope', name: 'Open project or area', callback: () => this.openScopePicker(null, true) });
     this.addRibbonIcon('home', 'PalmWiki Home', () => void this.openHome());
     this.addRibbonIcon('search', '外部検索', () => this.runExternal('searchCommand'));
     this.app.workspace.onLayoutReady(() => {
@@ -208,6 +261,14 @@ class PalmWikiHome extends Plugin {
           for (const view of this.cardViews) view.refreshImages(null, file.path, oldPath);
         }));
       }
+      // Scope membership follows links; favorites follow renamed or deleted notes.
+      this.registerEvent(this.app.metadataCache.on('resolved', () => {
+        if (!this.scope) return;
+        this.scopeCache = null;
+        for (const view of this.cardViews) view.onDataUpdated();
+      }));
+      this.registerEvent(this.app.vault.on('rename', (file, oldPath) => this.followRename(file, oldPath)));
+      this.registerEvent(this.app.vault.on('delete', file => this.followDelete(file)));
       this.syncBars();
     });
   }
@@ -308,6 +369,60 @@ class PalmWikiHome extends Plugin {
     return this.app.vault.create(path, defaultBase());
   }
 
+  currentScope() {
+    if (!this.scope) return null;
+    if (this.scopeCache?.path !== this.scope) {
+      this.scopeCache = { path: this.scope, members: scopeMembers(this.app, this.scope) };
+    }
+    return this.scopeCache;
+  }
+
+  setScope(path) {
+    if (this.disposed) return;
+    const next = path && this.app.vault.getAbstractFileByPath(path) instanceof TFile ? path : null;
+    this.scope = next;
+    this.scopeCache = null;
+    for (const view of this.cardViews) view.resetScope();
+  }
+
+  toggleFavorite(path) {
+    if (this.disposed || !path) return;
+    const favorites = this.settings.favoriteScopes;
+    this.settings.favoriteScopes = favorites.includes(path)
+      ? favorites.filter(p => p !== path) : [...favorites, path].slice(0, MAX_FAVORITES);
+    for (const view of this.cardViews) view.renderScopeBar();
+    this.saveSettings().catch(() => new Notice('お気に入りを保存できませんでした。'));
+  }
+
+  followRename(file, oldPath) {
+    if (!(file instanceof TFile) || file.extension !== 'md') return;
+    const favorites = this.settings.favoriteScopes;
+    const moved = favorites.includes(oldPath);
+    if (moved) this.settings.favoriteScopes = favorites.map(p => p === oldPath ? file.path : p);
+    if (this.scope === oldPath) { this.scope = file.path; this.scopeCache = null; }
+    if (moved) this.saveSettings().catch(() => {});
+    for (const view of this.cardViews) view.renderScopeBar();
+  }
+
+  followDelete(file) {
+    if (!(file instanceof TFile) || file.extension !== 'md') return;
+    const favorites = this.settings.favoriteScopes;
+    if (favorites.includes(file.path)) {
+      this.settings.favoriteScopes = favorites.filter(p => p !== file.path);
+      this.saveSettings().catch(() => {});
+    }
+    if (this.scope === file.path) this.setScope(null);
+    else for (const view of this.cardViews) view.renderScopeBar();
+  }
+
+  openScopePicker(leaf, goHome = false) {
+    if (this.disposed || typeof FuzzySuggestModal !== 'function') return;
+    new ScopePicker(this.app, this, path => {
+      this.setScope(path);
+      if (goHome) void this.openHome(leaf || undefined);
+    }).open();
+  }
+
   runExternal(key, leaf) {
     if (this.disposed) return;
     try {
@@ -362,6 +477,9 @@ class LiteCards extends BasesView {
     const doc = parent.ownerDocument;
     this.root = doc.createElement('div');
     this.root.className = 'palmwiki-lite-home';
+    this.scopeBar = doc.createElement('div');
+    this.scopeBar.className = 'palmwiki-scope';
+    this.scopeSig = null;
     this.status = doc.createElement('div');
     this.status.className = 'palmwiki-lite-status';
     this.status.setAttribute('role', 'status');
@@ -372,7 +490,7 @@ class LiteCards extends BasesView {
     this.footer = doc.createElement('div');
     this.footer.className = 'palmwiki-lite-footer';
     this.footer.append(this.more);
-    this.root.append(this.status, this.grid, this.footer);
+    this.root.append(this.scopeBar, this.status, this.grid, this.footer);
     parent.append(this.root);
     const Observer = doc.defaultView?.IntersectionObserver;
     this.observer = Observer ? new Observer(entries => {
@@ -404,10 +522,62 @@ class LiteCards extends BasesView {
     this.renderFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
       this.renderFrame = null;
       if (this.disposed) return;
-      const window = cardWindow(this.data, this.limit);
+      const window = cardWindow(this.data, this.limit, this.plugin.currentScope());
       this.files = window.files; this.total = window.total;
       this.render();
     });
+  }
+
+  resetScope() {
+    if (this.disposed) return;
+    this.limit = INITIAL_CARDS;
+    this.parent.scrollTop = 0; this.lastScrollTop = 0;
+    const window = cardWindow(this.data, this.limit, this.plugin.currentScope());
+    this.files = window.files; this.total = window.total;
+    this.render();
+  }
+
+  renderScopeBar() {
+    if (this.disposed) return;
+    const plugin = this.plugin;
+    const scope = plugin.scope;
+    const favorites = plugin.settings.favoriteScopes;
+    const sig = JSON.stringify([scope, favorites]);
+    if (sig === this.scopeSig) return;
+    this.scopeSig = sig;
+    const doc = this.root.ownerDocument;
+    while (this.scopeBar.firstElementChild) this.scopeBar.firstElementChild.remove();
+    const chips = doc.createElement('div');
+    chips.className = 'palmwiki-scope-chips';
+    chips.setAttribute('role', 'toolbar');
+    chips.setAttribute('aria-label', 'プロジェクト・エリア');
+    const chip = (label, path) => {
+      const el = button(doc, label, () => plugin.setScope(path), 'palmwiki-scope-chip' + (path === scope ? ' is-active' : ''));
+      el.setAttribute('aria-pressed', String(path === scope));
+      el.title = path ? noteTitle(path) : 'すべてのノート';
+      return el;
+    };
+    chips.append(chip('すべて', null));
+    for (const path of favorites) chips.append(chip('★ ' + noteTitle(path), path));
+    if (scope && !favorites.includes(scope)) chips.append(chip(noteTitle(scope), scope));
+    const find = button(doc, '', () => plugin.openScopePicker(), 'palmwiki-scope-find');
+    const icon = doc.createElement('span'); icon.setAttribute('aria-hidden', 'true'); setIcon(icon, 'search');
+    find.append(icon, doc.createTextNode('プロジェクト・エリア'));
+    find.setAttribute('aria-label', 'プロジェクト・エリアを検索して選ぶ');
+    chips.append(find);
+    this.scopeBar.append(chips);
+    if (!scope) return;
+    const head = doc.createElement('div');
+    head.className = 'palmwiki-scope-head';
+    const name = doc.createElement('span');
+    name.className = 'palmwiki-scope-name';
+    name.textContent = `「${noteTitle(scope)}」とリンクでつながるノート`;
+    const favorite = favorites.includes(scope);
+    const star = button(doc, favorite ? '★ お気に入り' : '☆ お気に入りに追加', () => plugin.toggleFavorite(scope), 'palmwiki-scope-star');
+    star.setAttribute('aria-pressed', String(favorite));
+    const clear = button(doc, '× 解除', () => plugin.setScope(null), 'palmwiki-scope-clear');
+    head.append(name, star, clear);
+    this.scopeBar.append(head);
   }
 
   goFirst() {
@@ -428,6 +598,7 @@ class LiteCards extends BasesView {
 
   render() {
     if (this.disposed) return;
+    this.renderScopeBar();
     const shown = this.files.slice(0, this.limit);
     const wanted = new Set(shown.map(file => file.path));
     // Remember one visible card so an update above it does not jump the viewport.
@@ -459,7 +630,8 @@ class LiteCards extends BasesView {
       this.parent.scrollTop += anchor.el.getBoundingClientRect().top - anchorTop;
       this.lastScrollTop = this.parent.scrollTop;
     }
-    this.status.textContent = this.total ? `${shown.length} / ${this.total}件` : 'ノートはありません';
+    this.status.textContent = this.total ? `${shown.length} / ${this.total}件` :
+      this.plugin.scope ? 'つながるノートはありません' : 'ノートはありません';
     this.more.hidden = shown.length >= this.files.length;
     this.more.textContent = `続きの${Math.min(CARD_STEP, this.files.length - shown.length)}件を表示`;
     this.footer.setAttribute('aria-label', shown.length >= MAX_CARDS && this.total > MAX_CARDS ?
@@ -632,6 +804,51 @@ class LiteCards extends BasesView {
     for (const card of this.cards.values()) this.releaseImage(card);
     this.cards.clear(); this.files = [];
     this.root.remove(); this.plugin.cardViews.delete(this);
+  }
+}
+
+class ScopePicker extends (FuzzySuggestModal || class {}) {
+  constructor(app, plugin, choose) {
+    super(app);
+    this.plugin = plugin;
+    this.choose = choose;
+    this.items = null;
+    this.setPlaceholder?.('プロジェクト・エリアを検索（名前・別名）');
+  }
+
+  getItems() {
+    if (this.items) return this.items;
+    const favorites = this.plugin.settings.favoriteScopes;
+    const rank = item => favorites.includes(item.path) ? 0 : DONE_STATUSES.has(item.status.toLowerCase()) ? 2 : 1;
+    const kinds = Object.keys(SCOPE_KINDS);
+    const items = listScopes(this.app).sort((a, b) => rank(a) - rank(b) ||
+      (rank(a) === 0 ? favorites.indexOf(a.path) - favorites.indexOf(b.path) : 0) ||
+      kinds.indexOf(a.kind) - kinds.indexOf(b.kind) || a.title.localeCompare(b.title, 'ja'));
+    this.items = [{ all: true, path: null, title: 'すべてのノート', kind: '', status: '', aliases: [] }, ...items];
+    return this.items;
+  }
+
+  getItemText(item) {
+    return [item.title, ...item.aliases].join(' ');
+  }
+
+  renderSuggestion(match, el) {
+    const item = match.item || match;
+    const doc = el.ownerDocument;
+    const title = doc.createElement('div');
+    title.className = 'palmwiki-scope-suggestion-title';
+    title.textContent = (item.path && this.plugin.settings.favoriteScopes.includes(item.path) ? '★ ' : '') + item.title;
+    el.append(title);
+    if (item.all) return;
+    const meta = doc.createElement('small');
+    meta.className = 'palmwiki-scope-suggestion-meta';
+    meta.textContent = [SCOPE_KINDS[item.kind], STATUS_LABELS[item.status.toLowerCase()] || item.status,
+      item.aliases.length ? `別名: ${item.aliases.join('、')}` : ''].filter(Boolean).join(' · ');
+    el.append(meta);
+  }
+
+  onChooseItem(item) {
+    this.choose(item.all ? null : item.path);
   }
 }
 

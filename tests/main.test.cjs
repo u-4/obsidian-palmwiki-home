@@ -73,19 +73,20 @@ class Plugin extends Component {
   addCommand(command) { this.commands.push(command); }
 }
 function load() {
-  const { doc, clock } = environment(); const notices = [];
+  const { doc, clock } = environment(); const notices = []; const modals = [];
   const context = { module: { exports: {} }, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
-      Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false }, setIcon() {} }; },
+      Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false }, setIcon() {},
+      FuzzySuggestModal: class { constructor(app) { this.app = app; } setPlaceholder(text) { this.placeholder = text; } open() { modals.push(this); } } }; },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker };', context);
   const Main = context.module.exports;
-  return { Main, ...Main.testing, doc, clock, notices };
+  return { Main, ...Main.testing, doc, clock, notices, modals };
 }
 function appDouble(doc, count = 0) {
-  const files = new Map(), metadata = new Map(); const calls = { reads: [], creates: 0, commands: [], images: [], opens: [] };
+  const files = new Map(), metadata = new Map(); const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0 };
   const leaf = { view: { containerEl: doc.createElement('div') }, getViewState: () => ({}), getRoot: () => ({}),
     async openFile(file) { calls.opens.push(file.path); } };
   const app = {
@@ -93,9 +94,10 @@ function appDouble(doc, count = 0) {
       async create(p, body) { assert.ok(!files.has(p)); calls.creates++; const file = new TFile(p, body.length); files.set(p, file); return file; },
       async cachedRead(file) { calls.reads.push(file.path); return '# 見出し\n本文'; },
       getResourcePath(file) { calls.images.push(file.path); return 'app://local/' + file.path; },
-      getMarkdownFiles() { throw new Error('Full-vault enumeration forbidden'); },
+      // Allowed only when the Project/Area picker opens; rendering must not enumerate.
+      getMarkdownFiles() { calls.enumerations++; return [...files.values()].filter(f => f.extension === 'md'); },
     },
-    metadataCache: { on: () => ({}), getFileCache: file => metadata.get(file.path),
+    metadataCache: { on: () => ({}), getFileCache: file => metadata.get(file.path), resolvedLinks: {},
       getFirstLinkpathDest: (link, source) => files.get(link) || files.get(path.posix.normalize(path.posix.join(path.posix.dirname(source), link))),
     },
     workspace: { getMostRecentLeaf: () => leaf, getLeaf: () => leaf, setActiveLeaf() {}, async revealLeaf() {},
@@ -141,8 +143,8 @@ test('default base still requests markdown and descending modified time', () => 
   const text = load().defaultBase(); assert.match(text, /file.ext == "md"/); assert.match(text, /property: file.mtime\n        direction: DESC/);
 });
 test('startup reads no bodies or images, creates no files and invokes no external commands', async () => {
-  const f = await fixture(); assert.equal(f.calls.reads.length, 0); assert.equal(f.calls.images.length, 0);
-  assert.equal(f.calls.creates, 0); assert.equal(f.calls.commands.length, 0); f.stop();
+  const f = await fixture(); f.refresh(); assert.equal(f.calls.reads.length, 0); assert.equal(f.calls.images.length, 0);
+  assert.equal(f.calls.creates, 0); assert.equal(f.calls.commands.length, 0); assert.equal(f.calls.enumerations, 0); f.stop();
 });
 test('toolbar deduplicates, survives view replacement and skips deferred tabs', async () => {
   const f = await fixture(); const old = f.leaf.view.containerEl; f.plugin.syncBars(); f.plugin.syncBars(); assert.equal(f.plugin.bars.size, 1);
@@ -297,4 +299,93 @@ test('image version URL changes with mtime without disabling same-version browse
   f.view.setNear(f.view.cards.get('0.md'), false); f.view.setNear(f.view.cards.get('0.md'), true); await f.pump();
   assert.equal(f.view.cards.get('0.md').img.src, first);
   image.stat.mtime++; f.view.refreshImages(null, 'a.png'); await f.pump(); assert.notEqual(f.view.cards.get('0.md').img.src, first); f.stop();
+});
+
+// Projects and Areas
+function scopeVault(f) {
+  const note = (p, frontmatter, mtime = 1) => { const file = new TFile(p, 100, mtime); f.files.set(p, file); if (frontmatter) f.metadata.set(p, { frontmatter }); return file; };
+  const project = note('10_Notes/Projects/機器整備.md', { tags: ['Projects'], status: 'active', aliases: ['equipment'] }, 5);
+  note('10_Notes/Projects/終わった件.md', { tags: 'Projects', status: 'completed' });
+  note('00_Inbox/家族の予定.md', { tags: ['#Areas'] });
+  note('00_Inbox/ただのメモ.md', { tags: ['memo'] });
+  const daily = note('01_Daily/2026/2026-09-27.md', null, 9);
+  const linked = note('00_Inbox/手順.md', null, 7);
+  const other = note('00_Inbox/無関係.md', null, 8);
+  f.app.metadataCache.resolvedLinks = {
+    [project.path]: { [linked.path]: 1 },
+    [daily.path]: { [project.path]: 2 },
+    [other.path]: { '00_Inbox/家族の予定.md': 1 },
+  };
+  const entries = [daily, other, linked, project].map(file => ({ file })); // Bases order: newest first
+  for (let i = 0; i < 400; i++) { const file = new TFile(`bulk/${i}.md`); f.files.set(file.path, file); entries.push({ file }); }
+  f.view.data = { groupedData: [{ entries }] };
+  return { project, daily, linked, other };
+}
+
+test('Project/Area kind comes from frontmatter tags, as array, string or #tag', () => {
+  const { scopeKind } = load();
+  assert.equal(scopeKind({ tags: ['Projects'] }), 'Projects');
+  assert.equal(scopeKind({ tags: 'Areas, other' }), 'Areas');
+  assert.equal(scopeKind({ tags: ['#Areas'] }), 'Areas');
+  assert.equal(scopeKind({ tags: ['projects'] }), null);
+  assert.equal(scopeKind(undefined), null);
+});
+test('picker lists Projects and Areas only, favorites first and completed last, with すべて on top', async () => {
+  const f = await fixture(0); scopeVault(f);
+  f.plugin.settings.favoriteScopes = ['00_Inbox/家族の予定.md'];
+  const picker = new f.ScopePicker(f.app, f.plugin, () => {});
+  const titles = [...picker.getItems().map(item => item.title)];
+  assert.deepEqual(titles, ['すべてのノート', '家族の予定', '機器整備', '終わった件']);
+  assert.equal(picker.getItemText(picker.getItems()[2]), '機器整備 equipment');
+  assert.equal(f.calls.enumerations, 1); picker.getItems(); assert.equal(f.calls.enumerations, 1);
+  f.stop();
+});
+test('scope members are the note plus direct links both ways, including frontmatter-resolved links', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  const members = f.scopeMembers(f.app, v.project.path);
+  assert.deepEqual([...members].sort(), [v.linked.path, v.daily.path, v.project.path].sort());
+  f.stop();
+});
+test('scoped home filters before the 300 cap, puts the Project note first and keeps Bases order', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.plugin.setScope(v.project.path); f.doc.flush();
+  const paths = f.view.grid.children.map(el => el.dataset.path);
+  assert.deepEqual(paths, [v.project.path, v.daily.path, v.linked.path]);
+  assert.equal(f.view.status.textContent, '3 / 3件');
+  f.plugin.setScope(null); f.doc.flush();
+  assert.equal(f.view.total, 404); assert.equal(f.view.grid.children.length, 24);
+  f.stop();
+});
+test('choosing in the picker scopes the home; すべて clears it; scope bar shows state', async () => {
+  const f = await fixture(0); const v = scopeVault(f); f.refresh();
+  f.plugin.openScopePicker(); const picker = f.modals.pop();
+  picker.onChooseItem(picker.getItems().find(item => item.path === v.project.path)); f.doc.flush();
+  assert.equal(f.plugin.scope, v.project.path);
+  const text = el => [el.textContent, ...el.children.map(text)].join('');
+  assert.match(text(f.view.scopeBar), /機器整備」とリンクでつながるノート/);
+  picker.onChooseItem(picker.getItems()[0]); f.doc.flush();
+  assert.equal(f.plugin.scope, null); assert.equal(f.view.total, 404);
+  f.stop();
+});
+test('favorites toggle, persist, follow renames and drop deleted notes', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.plugin.toggleFavorite(v.project.path); await f.plugin.saveChain;
+  assert.deepEqual([...f.app.saved.favoriteScopes], [v.project.path]);
+  f.plugin.setScope(v.project.path);
+  const renamed = new TFile('10_Notes/Projects/機器整備2026.md'); f.files.set(renamed.path, renamed);
+  f.plugin.followRename(renamed, v.project.path); await f.plugin.saveChain;
+  assert.deepEqual([...f.plugin.settings.favoriteScopes], [renamed.path]); assert.equal(f.plugin.scope, renamed.path);
+  f.plugin.followDelete(renamed); await f.plugin.saveChain;
+  assert.deepEqual([...f.app.saved.favoriteScopes], []); assert.equal(f.plugin.scope, null);
+  f.plugin.toggleFavorite(v.daily.path); f.plugin.toggleFavorite(v.daily.path); await f.plugin.saveChain;
+  assert.deepEqual([...f.app.saved.favoriteScopes], []);
+  f.stop();
+});
+test('saved favorites are sanitized on load and a missing scope note is ignored', async () => {
+  const h = load(); const a = appDouble(h.doc, 0);
+  a.app.saved = { favoriteScopes: ['a.md', 'a.md', 42, 'b.base', 'x'.repeat(2000) + '.md'] };
+  const plugin = new h.Main(a.app); await plugin.onload();
+  assert.deepEqual([...plugin.settings.favoriteScopes], ['a.md']);
+  plugin.setScope('a.md'); assert.equal(plugin.scope, null);
+  plugin.onunload();
 });

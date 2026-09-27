@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0 — 2026-09-27
+
+- Projects and Areas: pick one from a searchable list (name or alias; command `Open project or area`, or the button above the cards) to show only the notes linked to or from its note, with that note first. Project/Area notes are those tagged `Projects` or `Areas` (PARA-PKM's convention); favorites come first, completed ones last.
+- Favorites: star a Project/Area to keep it as a one-tap chip above the cards. Favorites follow renames and are dropped when the note is deleted.
+- The chosen Project/Area stays while you move around (Home keeps it); 「すべて」 clears it. It is not remembered across restarts.
+
 ## 1.0.0 — 2026-09-27
 
 Rebuilt from the Lite prototype (formerly `palmwiki-home-lite` 0.2.0, PR #32).

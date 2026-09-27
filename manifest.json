@@ -1,7 +1,7 @@
 {
   "id": "palmwiki-home",
   "name": "PalmWiki Home",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "1.10.0",
   "description": "A lightweight Cosense-style home: a Bases card view with on-demand previews, plus Home, search and page-switch buttons.",
   "author": "u-4",
