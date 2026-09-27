@@ -86,13 +86,13 @@ function load() {
   return { Main, ...Main.testing, doc, clock, notices, modals };
 }
 function appDouble(doc, count = 0) {
-  const files = new Map(), metadata = new Map(); const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0 };
+  const files = new Map(), metadata = new Map(), bodies = new Map(); const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0 };
   const leaf = { view: { containerEl: doc.createElement('div') }, getViewState: () => ({}), getRoot: () => ({}),
     async openFile(file) { calls.opens.push(file.path); } };
   const app = {
     vault: { getAbstractFileByPath: p => files.get(p), on: () => ({}),
       async create(p, body) { assert.ok(!files.has(p)); calls.creates++; const file = new TFile(p, body.length); files.set(p, file); return file; },
-      async cachedRead(file) { calls.reads.push(file.path); return '# 見出し\n本文'; },
+      async cachedRead(file) { calls.reads.push(file.path); return bodies.get(file.path) ?? '# 見出し\n本文'; },
       getResourcePath(file) { calls.images.push(file.path); return 'app://local/' + file.path; },
       // Allowed only when the Project/Area picker opens; rendering must not enumerate.
       getMarkdownFiles() { calls.enumerations++; return [...files.values()].filter(f => f.extension === 'md'); },
@@ -108,7 +108,7 @@ function appDouble(doc, count = 0) {
       executeCommandById(id) { calls.commands.push(id); return true; } },
   };
   const entries = Array.from({ length: count }, (_, i) => { const file = new TFile(`${i}.md`); files.set(file.path, file); return { file }; });
-  return { app, files, metadata, calls, leaf, data: { groupedData: [{ entries }] } };
+  return { app, files, metadata, bodies, calls, leaf, data: { groupedData: [{ entries }] } };
 }
 async function fixture(count = 24) {
   const h = load(); const a = appDouble(h.doc, count); const plugin = new h.Main(a.app); await plugin.onload();
@@ -330,12 +330,16 @@ test('Project/Area kind comes from frontmatter tags, as array, string or #tag', 
   assert.equal(scopeKind({ tags: ['projects'] }), null);
   assert.equal(scopeKind(undefined), null);
 });
-test('picker lists Projects and Areas only, favorites first and completed last, with すべて on top', async () => {
+test('picker lists Projects and Areas, favorites first, completed hidden unless shown or filtered by status', async () => {
   const f = await fixture(0); scopeVault(f);
   f.plugin.settings.favoriteScopes = ['00_Inbox/家族の予定.md'];
   const picker = new f.ScopePicker(f.app, f.plugin, () => {});
-  const titles = [...picker.getItems().map(item => item.title)];
-  assert.deepEqual(titles, ['すべてのノート', '家族の予定', '機器整備', '終わった件']);
+  const titles = () => [...picker.getItems().map(item => item.title)];
+  assert.deepEqual(titles(), ['すべてのノート', '家族の予定', '機器整備']);
+  picker.showDone = true; assert.deepEqual(titles(), ['すべてのノート', '家族の予定', '機器整備', '終わった件']);
+  picker.showDone = false; picker.status = 'completed'; assert.deepEqual(titles(), ['すべてのノート', '終わった件']);
+  picker.status = '\u0000none'; assert.deepEqual(titles(), ['すべてのノート', '家族の予定']);
+  picker.status = '';
   assert.equal(picker.getItemText(picker.getItems()[2]), '機器整備 equipment');
   assert.equal(f.calls.enumerations, 1); picker.getItems(); assert.equal(f.calls.enumerations, 1);
   f.stop();
@@ -388,4 +392,43 @@ test('saved favorites are sanitized on load and a missing scope note is ignored'
   assert.deepEqual([...plugin.settings.favoriteScopes], ['a.md']);
   plugin.setScope('a.md'); assert.equal(plugin.scope, null);
   plugin.onunload();
+});
+
+function withDaily(f) { f.app.internalPlugins = { plugins: { 'daily-notes': { instance: { options: { folder: '01_Daily' } } } } }; }
+const labelText = el => [el.textContent, ...el.children.map(labelText)].join('');
+function findCheckbox(root, text) {
+  const walk = el => el.tagName === 'label' && labelText(el).includes(text) ? el : el.children.map(walk).find(Boolean);
+  return walk(root)?.children.find(c => c.tagName === 'input');
+}
+test('日誌を含む is on by default and turning it off hides daily notes, but never the Project note', async () => {
+  const f = await fixture(0); const v = scopeVault(f); withDaily(f); f.refresh();
+  const box = findCheckbox(f.view.scopeBar, '日誌を含む'); assert.equal(box.checked, true);
+  box.checked = false; box.emit('change');
+  assert.equal(f.view.total, 403);
+  f.plugin.setScope(v.project.path); f.doc.flush();
+  assert.deepEqual([...f.view.files.map(file => file.path)], [v.project.path, v.linked.path]);
+  f.stop();
+});
+test('unlinked mentions are off by default and, when on, add notes naming the Project or its alias', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.bodies.set('bulk/3.md', 'きょうは機器整備の打合せ'); f.bodies.set('bulk/7.md', 'EQUIPMENT list');
+  f.plugin.setScope(v.project.path); f.doc.flush(); await f.pump();
+  assert.equal(f.calls.reads.filter(p => p.startsWith('bulk/')).length, 0);
+  const box = findCheckbox(f.view.scopeBar, 'リンクなしで名前を含む'); box.checked = true; box.emit('change');
+  for (let i = 0; i < 20; i++) await f.pump();
+  assert.ok(f.view.scans.mentions.done);
+  const paths = [...f.view.files.map(file => file.path)];
+  assert.ok(paths.includes('bulk/3.md') && paths.includes('bulk/7.md')); assert.equal(paths[0], v.project.path);
+  assert.equal(f.view.total, 5); assert.match(f.view.status.textContent, /名前を含むノート2件/);
+  f.stop();
+});
+test('body search inside a Project reads only its notes and narrows the cards', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.bodies.set(v.daily.path, '機器の点検予定'); f.bodies.set(v.linked.path, '手順書');
+  f.plugin.setScope(v.project.path); f.doc.flush();
+  f.view.setBodyQuery('点検'); f.clock.tick(); for (let i = 0; i < 10; i++) await f.pump();
+  assert.deepEqual([...f.view.files.map(file => file.path)], [v.daily.path]);
+  assert.deepEqual([...new Set(f.calls.reads)].sort(), [v.daily.path, v.linked.path, v.project.path].sort());
+  f.plugin.setScope(null); f.doc.flush(); assert.equal(f.view.bodyQuery, ''); assert.equal(f.view.total, 404);
+  f.stop();
 });

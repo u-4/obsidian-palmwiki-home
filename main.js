@@ -16,6 +16,8 @@ const DEFAULTS = Object.freeze({
   showImages: true,
 });
 const MAX_FAVORITES = 100;
+const MAX_SCAN_BYTES = 2 * 1024 * 1024;
+const SCAN_WORKERS = 4;
 // PARA-PKM marks Project and Area notes with these frontmatter tags.
 const SCOPE_KINDS = Object.freeze({ Projects: 'プロジェクト', Areas: 'エリア' });
 const DONE_STATUSES = new Set(['completed', 'done', 'archived', 'cancelled', 'canceled', '完了', '終了', '中止']);
@@ -48,22 +50,45 @@ function excerpt(body) {
 }
 
 // Keep file references only; never scan note bodies or build a second index.
-// A scope ({ path, members }) filters before the 300 cap and puts its own note first.
-function cardWindow(data, limit, scope = null) {
+// A filter ({ head, accept }) applies before the 300 cap; its head note goes first.
+function cardWindow(data, limit, filter = null) {
   const files = [];
   let total = 0;
   let head = null;
   for (const group of data?.groupedData || []) {
     for (const entry of group.entries) {
       if (entry.file.extension !== 'md') continue;
-      if (scope && !scope.members.has(entry.file.path)) continue;
+      if (filter && !filter.accept(entry.file)) continue;
       total++;
-      if (scope && entry.file.path === scope.path) { head = entry.file; continue; }
+      if (filter?.head && entry.file.path === filter.head) { head = entry.file; continue; }
       if (files.length < MAX_CARDS) files.push(entry.file);
     }
   }
   if (head) { files.unshift(head); if (files.length > MAX_CARDS) files.pop(); }
   return { files, total, shown: files.slice(0, Math.min(MAX_CARDS, Math.max(INITIAL_CARDS, limit))) };
+}
+
+function markdownFiles(data) {
+  const files = [];
+  for (const group of data?.groupedData || []) {
+    for (const entry of group.entries) if (entry.file.extension === 'md') files.push(entry.file);
+  }
+  return files;
+}
+
+// Terms for "mentioned without a link": the note name and its aliases, like Obsidian's unlinked mentions.
+function mentionTerms(title, aliases) {
+  return [...new Set([title, ...aliases].map(term => String(term).trim().toLowerCase()).filter(term => term.length >= 2))];
+}
+
+function queryTerms(query) {
+  return String(query).toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+// Obsidian keeps the daily notes folder in the core plugin's options (internal, feature-detected).
+function dailyFolder(app) {
+  const folder = app.internalPlugins?.plugins?.['daily-notes']?.instance?.options?.folder;
+  return typeof folder === 'string' && folder.trim() ? folder.trim().replace(/\/+$/, '') + '/' : null;
 }
 
 function noteTitle(path) {
@@ -197,6 +222,17 @@ function commandBridge(app) {
   const commands = app.commands;
   return commands && typeof commands.listCommands === 'function' &&
     typeof commands.executeCommandById === 'function' ? commands : null;
+}
+
+function checkbox(doc, text, checked, change) {
+  const label = doc.createElement('label');
+  label.className = 'palmwiki-check';
+  const input = doc.createElement('input');
+  input.type = 'checkbox';
+  input.checked = checked;
+  input.addEventListener('change', () => change(input.checked));
+  label.append(input, doc.createTextNode(text));
+  return label;
 }
 
 function button(doc, text, action, className) {
@@ -377,6 +413,12 @@ class PalmWikiHome extends Plugin {
     return this.scopeCache;
   }
 
+  aliasesOf(path) {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    const frontmatter = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : null;
+    return [frontmatter?.aliases, frontmatter?.alias].flat().filter(alias => typeof alias === 'string' && alias.trim());
+  }
+
   setScope(path) {
     if (this.disposed) return;
     const next = path && this.app.vault.getAbstractFileByPath(path) instanceof TFile ? path : null;
@@ -480,6 +522,11 @@ class LiteCards extends BasesView {
     this.scopeBar = doc.createElement('div');
     this.scopeBar.className = 'palmwiki-scope';
     this.scopeSig = null;
+    this.includeDaily = true;
+    this.includeMentions = false;
+    this.bodyQuery = '';
+    this.queryTimer = null;
+    this.scans = { mentions: null, body: null };
     this.status = doc.createElement('div');
     this.status.className = 'palmwiki-lite-status';
     this.status.setAttribute('role', 'status');
@@ -522,19 +569,99 @@ class LiteCards extends BasesView {
     this.renderFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
       this.renderFrame = null;
       if (this.disposed) return;
-      const window = cardWindow(this.data, this.limit, this.plugin.currentScope());
-      this.files = window.files; this.total = window.total;
-      this.render();
+      this.refreshWindow();
     });
+  }
+
+  refreshWindow() {
+    if (this.disposed) return;
+    this.ensureScans();
+    const window = cardWindow(this.data, this.limit, this.currentFilter());
+    this.files = window.files; this.total = window.total;
+    this.render();
   }
 
   resetScope() {
     if (this.disposed) return;
     this.limit = INITIAL_CARDS;
     this.parent.scrollTop = 0; this.lastScrollTop = 0;
-    const window = cardWindow(this.data, this.limit, this.plugin.currentScope());
-    this.files = window.files; this.total = window.total;
-    this.render();
+    this.bodyQuery = '';
+    this.scans = { mentions: null, body: null };
+    this.refreshWindow();
+  }
+
+  currentFilter() {
+    const scope = this.plugin.currentScope();
+    const daily = this.includeDaily ? null : dailyFolder(this.app);
+    if (!scope && !daily) return null;
+    const mentions = scope && this.includeMentions ? this.scans.mentions?.hits : null;
+    const body = scope && this.bodyQuery ? this.scans.body?.hits : null;
+    return {
+      head: scope?.path || null,
+      accept: file => (!daily || file.path === scope?.path || !file.path.startsWith(daily)) &&
+        (!scope || scope.members.has(file.path) || !!mentions?.has(file.path)) &&
+        (!body || body.has(file.path)),
+    };
+  }
+
+  // Bodies are read only for these opt-in filters, only while the Home is scoped,
+  // and never kept: the hits are file paths for the current scope and wording.
+  ensureScans() {
+    const scope = this.plugin.currentScope();
+    if (scope && this.includeMentions) {
+      const terms = mentionTerms(noteTitle(scope.path), this.plugin.aliasesOf(scope.path));
+      const key = JSON.stringify([scope.path, terms]);
+      if (this.scans.mentions?.key !== key) {
+        const files = markdownFiles(this.data).filter(file => !scope.members.has(file.path));
+        this.startScan('mentions', key, files, text => terms.some(term => text.includes(term)));
+      }
+    } else this.scans.mentions = null;
+    if (scope && this.bodyQuery) {
+      const terms = queryTerms(this.bodyQuery);
+      const mentions = this.includeMentions ? this.scans.mentions : null;
+      const key = JSON.stringify([scope.path, terms, !!mentions, !!mentions?.done]);
+      if (this.scans.body?.key !== key) {
+        const files = markdownFiles(this.data).filter(file => scope.members.has(file.path) || !!mentions?.hits.has(file.path));
+        this.startScan('body', key, files, text => terms.every(term => text.includes(term)));
+      }
+    } else this.scans.body = null;
+  }
+
+  startScan(kind, key, files, test) {
+    const state = { key, hits: new Set(), checked: 0, total: files.length, done: false };
+    this.scans[kind] = state;
+    let next = 0;
+    let painted = 0;
+    const live = () => !this.disposed && this.scans[kind] === state;
+    const worker = async () => {
+      while (next < files.length && live()) {
+        const file = files[next++];
+        if (file.stat.size <= MAX_SCAN_BYTES) {
+          try {
+            if (test((await this.app.vault.cachedRead(file)).toLowerCase())) state.hits.add(file.path);
+          } catch { /* unreadable notes are skipped */ }
+        }
+        state.checked++;
+        if (live() && state.checked - painted >= 250) { painted = state.checked; this.refreshWindow(); }
+      }
+    };
+    void Promise.all(Array.from({ length: SCAN_WORKERS }, worker)).then(() => {
+      if (!live()) return;
+      state.done = true;
+      this.refreshWindow();
+    });
+  }
+
+  setBodyQuery(value) {
+    if (this.queryTimer !== null) clearTimeout(this.queryTimer);
+    this.queryTimer = setTimeout(() => {
+      this.queryTimer = null;
+      const query = value.trim();
+      if (this.disposed || query === this.bodyQuery) return;
+      this.bodyQuery = query;
+      this.limit = INITIAL_CARDS;
+      this.refreshWindow();
+    }, 300);
   }
 
   renderScopeBar() {
@@ -542,7 +669,7 @@ class LiteCards extends BasesView {
     const plugin = this.plugin;
     const scope = plugin.scope;
     const favorites = plugin.settings.favoriteScopes;
-    const sig = JSON.stringify([scope, favorites]);
+    const sig = JSON.stringify([scope, favorites, this.includeDaily, this.includeMentions]);
     if (sig === this.scopeSig) return;
     this.scopeSig = sig;
     const doc = this.root.ownerDocument;
@@ -566,6 +693,23 @@ class LiteCards extends BasesView {
     find.setAttribute('aria-label', 'プロジェクト・エリアを検索して選ぶ');
     chips.append(find);
     this.scopeBar.append(chips);
+    const options = doc.createElement('div');
+    options.className = 'palmwiki-scope-options';
+    const toggle = (key, value) => { this[key] = value; this.limit = INITIAL_CARDS; this.refreshWindow(); };
+    if (dailyFolder(this.app)) options.append(checkbox(doc, '日誌を含む', this.includeDaily, value => toggle('includeDaily', value)));
+    if (scope) {
+      options.append(checkbox(doc, 'リンクなしで名前を含むノートも', this.includeMentions, value => toggle('includeMentions', value)));
+      const search = doc.createElement('input');
+      search.type = 'search';
+      search.className = 'palmwiki-scope-body-search';
+      search.placeholder = 'この中を本文検索';
+      search.setAttribute('aria-label', 'この中を本文検索');
+      search.value = this.bodyQuery;
+      search.addEventListener('input', event => { if (!event.isComposing) this.setBodyQuery(search.value); });
+      search.addEventListener('compositionend', () => this.setBodyQuery(search.value));
+      options.append(search);
+    }
+    if (options.firstElementChild) this.scopeBar.append(options);
     if (!scope) return;
     const head = doc.createElement('div');
     head.className = 'palmwiki-scope-head';
@@ -630,8 +774,13 @@ class LiteCards extends BasesView {
       this.parent.scrollTop += anchor.el.getBoundingClientRect().top - anchorTop;
       this.lastScrollTop = this.parent.scrollTop;
     }
-    this.status.textContent = this.total ? `${shown.length} / ${this.total}件` :
-      this.plugin.scope ? 'つながるノートはありません' : 'ノートはありません';
+    const notes = [];
+    const mentions = this.plugin.scope && this.includeMentions ? this.scans.mentions : null;
+    if (mentions) notes.push(mentions.done ? `名前を含むノート${mentions.hits.size}件を含む` : `名前を含むノートを検索中 ${mentions.checked} / ${mentions.total}`);
+    const body = this.plugin.scope && this.bodyQuery ? this.scans.body : null;
+    if (body) notes.push(body.done ? `本文に「${this.bodyQuery}」を含むもの` : `本文を検索中 ${body.checked} / ${body.total}`);
+    this.status.textContent = (this.total ? `${shown.length} / ${this.total}件` :
+      this.plugin.scope ? 'つながるノートはありません' : 'ノートはありません') + (notes.length ? `（${notes.join('、')}）` : '');
     this.more.hidden = shown.length >= this.files.length;
     this.more.textContent = `続きの${Math.min(CARD_STEP, this.files.length - shown.length)}件を表示`;
     this.footer.setAttribute('aria-label', shown.length >= MAX_CARDS && this.total > MAX_CARDS ?
@@ -799,6 +948,8 @@ class LiteCards extends BasesView {
     const win = this.root.ownerDocument.defaultView;
     for (const frame of [this.renderFrame, this.viewportFrame, this.moreFrame]) if (frame !== null) win?.cancelAnimationFrame(frame);
     if (this.imageTimer !== null) clearTimeout(this.imageTimer);
+    if (this.queryTimer !== null) clearTimeout(this.queryTimer);
+    this.scans = { mentions: null, body: null };
     this.observer?.disconnect();
     this.imageQueue.clear();
     for (const card of this.cards.values()) this.releaseImage(card);
@@ -807,25 +958,59 @@ class LiteCards extends BasesView {
   }
 }
 
+const NO_STATUS = '\u0000none';
+
 class ScopePicker extends (FuzzySuggestModal || class {}) {
   constructor(app, plugin, choose) {
     super(app);
     this.plugin = plugin;
     this.choose = choose;
     this.items = null;
+    this.showDone = false; // Completed Projects/Areas are hidden unless asked for.
+    this.status = '';
     this.setPlaceholder?.('プロジェクト・エリアを検索（名前・別名）');
   }
 
-  getItems() {
+  onOpen() {
+    super.onOpen?.();
+    const doc = this.modalEl?.ownerDocument;
+    if (!doc) return;
+    const row = doc.createElement('div');
+    row.className = 'palmwiki-scope-filters';
+    const done = checkbox(doc, '完了も表示', this.showDone, value => { this.showDone = value; this.refresh(); });
+    const select = doc.createElement('select');
+    select.className = 'dropdown';
+    select.setAttribute('aria-label', '状態で絞り込む');
+    const statuses = [...new Set(this.allItems().map(item => item.status).filter(Boolean))].sort();
+    for (const [value, label] of [['', '状態: すべて'], ...statuses.map(v => [v, `状態: ${STATUS_LABELS[v.toLowerCase()] || v}`]), [NO_STATUS, '状態: 未設定']]) {
+      const option = doc.createElement('option'); option.value = value; option.textContent = label; select.append(option);
+    }
+    select.addEventListener('change', () => { this.status = select.value; this.refresh(); });
+    row.append(done, select);
+    const input = this.inputEl?.closest?.('.prompt-input-container') || this.inputEl;
+    if (input?.after) input.after(row); else this.modalEl.prepend(row);
+  }
+
+  refresh() {
+    this.inputEl?.dispatchEvent(new (this.inputEl.ownerDocument.defaultView?.Event || Event)('input'));
+  }
+
+  allItems() {
     if (this.items) return this.items;
     const favorites = this.plugin.settings.favoriteScopes;
     const rank = item => favorites.includes(item.path) ? 0 : DONE_STATUSES.has(item.status.toLowerCase()) ? 2 : 1;
     const kinds = Object.keys(SCOPE_KINDS);
-    const items = listScopes(this.app).sort((a, b) => rank(a) - rank(b) ||
+    this.items = listScopes(this.app).sort((a, b) => rank(a) - rank(b) ||
       (rank(a) === 0 ? favorites.indexOf(a.path) - favorites.indexOf(b.path) : 0) ||
       kinds.indexOf(a.kind) - kinds.indexOf(b.kind) || a.title.localeCompare(b.title, 'ja'));
-    this.items = [{ all: true, path: null, title: 'すべてのノート', kind: '', status: '', aliases: [] }, ...items];
     return this.items;
+  }
+
+  getItems() {
+    const wanted = item => this.status === NO_STATUS ? !item.status
+      : this.status ? item.status === this.status
+      : this.showDone || !DONE_STATUSES.has(item.status.toLowerCase());
+    return [{ all: true, path: null, title: 'すべてのノート', kind: '', status: '', aliases: [] }, ...this.allItems().filter(wanted)];
   }
 
   getItemText(item) {
