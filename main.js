@@ -1191,11 +1191,14 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     this.cache = null;
     this.rows = new WeakMap(); // suggestion element → row, for previews
     this.hoverPopover = null; // Lets this screen act as the hover parent for note previews.
+    this.previewMode = false; // Toggled by tapping Cmd; while on, the preview follows the selection.
+    this.modDown = false;
+    this.modCombined = false;
     this.setPlaceholder?.('ノートを探す（Enterで本文検索）');
     this.setInstructions?.([
       { command: 'Enter', purpose: '本文を検索（↑↓で候補を選べばそのノート）' },
       { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
-      { command: 'Cmd', purpose: '選んでいるノートをプレビュー' },
+      { command: 'Cmd', purpose: 'プレビューの表示／非表示（表示中は選んだ候補に切り替わる）' },
       { command: 'Esc', purpose: '閉じる' },
     ]);
   }
@@ -1204,17 +1207,18 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     super.onOpen?.();
     this.plugin.openSearchScreen = this;
     this.modalEl?.ownerDocument?.body?.classList.add('palmwiki-search-open');
-    // Cmd (Ctrl) on its own previews the selected note, like Cmd+hover does for links.
+    // Tapping Cmd (Ctrl) alone toggles previews; Cmd with another key (Cmd+Enter, …) does not.
     this.modalEl?.addEventListener('keydown', event => {
-      if (event.repeat || !['Meta', 'Control'].includes(event.key) || !Keymap.isModEvent(event)) return;
-      const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
-      if (el) this.preview(el, event);
+      if (['Meta', 'Control'].includes(event.key)) {
+        if (!event.repeat) { this.modDown = true; this.modCombined = false; }
+      } else if (this.modDown) this.modCombined = true;
     }, true);
-    // The preview lasts while Cmd is held: releasing it, or selecting another row, closes it.
-    // (Arrow keys are consumed by Obsidian's own key handling, so selection is watched instead.)
     this.modalEl?.addEventListener('keyup', event => {
-      if (['Meta', 'Control'].includes(event.key)) this.closePreview();
+      if (!['Meta', 'Control'].includes(event.key)) return;
+      if (this.modDown && !this.modCombined) this.togglePreview();
+      this.modDown = false;
     }, true);
+    // Obsidian consumes the arrow keys itself, so the selection is watched on the result list.
     const Observer = this.modalEl?.ownerDocument?.defaultView?.MutationObserver;
     if (Observer && this.resultContainerEl) {
       this.selectionObserver = new Observer(() => this.followSelection());
@@ -1222,9 +1226,29 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     }
   }
 
+  selectedEl() {
+    return this.resultContainerEl?.querySelector('.suggestion-item.is-selected') || null;
+  }
+
+  togglePreview() {
+    this.previewMode = !this.previewMode;
+    if (!this.previewMode) { this.closePreview(); return; }
+    const el = this.selectedEl();
+    if (el) this.preview(el, this.modEvent());
+  }
+
   followSelection() {
-    const selected = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
-    if (this.previewedEl && selected !== this.previewedEl) this.closePreview();
+    if (!this.previewMode) return;
+    const el = this.selectedEl();
+    if (el === this.previewedEl) return;
+    this.closePreview();
+    if (el) this.preview(el, this.modEvent());
+  }
+
+  // Page preview opens only for a Cmd/Ctrl event; selection changes carry none.
+  modEvent() {
+    const View = this.modalEl?.ownerDocument?.defaultView;
+    return View?.MouseEvent ? new View.MouseEvent('mouseover', { metaKey: true, ctrlKey: true }) : { metaKey: true, ctrlKey: true };
   }
 
   closePreview() {
@@ -1236,14 +1260,15 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     super.onClose?.();
     if (this.plugin.openSearchScreen === this) this.plugin.openSearchScreen = null;
     this.selectionObserver?.disconnect();
+    this.previewMode = false;
     this.closePreview();
     this.modalEl?.ownerDocument?.body?.classList.remove('palmwiki-search-open');
   }
 
   preview(el, event) {
     const row = this.rows.get(el);
-    if (row?.kind !== 'note') return;
     this.previewedEl = el;
+    if (row?.kind !== 'note') return;
     this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: row.file.path, sourcePath: '' });
   }
 

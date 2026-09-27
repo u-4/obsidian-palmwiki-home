@@ -555,16 +555,22 @@ test('search rows preview notes with Cmd (selected row) or Cmd+hover, but not ac
   f.stop();
 });
 
-test('releasing Cmd or selecting another row closes a preview opened from the search screen', async () => {
+test('tapping Cmd toggles previews that follow the selection; Cmd with another key does not toggle', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
   s.modalEl = f.doc.createElement('div'); s.onOpen();
   let hidden = 0; s.hoverPopover = { hide() { hidden++; } };
   const rows = s.getSuggestions('機器 整備');
-  const [a, b] = rows.slice(1, 3).map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
+  const [body, a, b] = rows.slice(0, 3).map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
   let selected = a; s.resultContainerEl = { querySelector: () => selected };
-  s.preview(a, { metaKey: true }); s.followSelection(); assert.equal(hidden, 0);
-  selected = b; s.followSelection(); assert.equal(hidden, 1);
-  s.preview(b, { metaKey: true }); s.modalEl.emit('keyup', { key: 'Meta' }); assert.equal(hidden, 2);
-  s.modalEl.emit('keyup', { key: 'a' }); assert.equal(hidden, 2);
+  const previews = () => f.calls.triggers.filter(t => t.name === 'hover-link').map(t => t.info.linktext);
+  const tap = () => { s.modalEl.emit('keydown', { key: 'Meta' }); s.modalEl.emit('keyup', { key: 'Meta' }); };
+  tap(); assert.equal(s.previewMode, true); assert.deepEqual(previews(), ['10_Notes/Projects/機器整備_駒込2026.md']);
+  selected = b; s.followSelection(); assert.equal(hidden, 1); assert.equal(previews().at(-1), '00_Inbox/R7機器整備.md');
+  selected = body; s.followSelection(); assert.equal(hidden, 2); assert.equal(previews().length, 2); // action row: no preview
+  selected = b; s.followSelection(); assert.equal(previews().length, 3);
+  tap(); assert.equal(s.previewMode, false); assert.equal(hidden, 4);
+  selected = a; s.followSelection(); assert.equal(previews().length, 3); // off: selection changes do nothing
+  s.modalEl.emit('keydown', { key: 'Meta' }); s.modalEl.emit('keydown', { key: 'Enter' }); s.modalEl.emit('keyup', { key: 'Meta' });
+  assert.equal(s.previewMode, false);
   f.stop();
 });

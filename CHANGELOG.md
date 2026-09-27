@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.4 — 2026-09-27
+
+- Unified search: tapping Cmd (Ctrl) toggles previews. While on, the preview follows the selected row (arrow keys, Ctrl+N/P, mouse) and hides on 本文を検索 / 新規作成 rows; tapping Cmd again turns it off. Cmd together with another key (Cmd+Enter, …) does not toggle.
+
 ## 1.3.3 — 2026-09-27
 
 - Unified search previews last while Cmd is held: releasing Cmd, selecting another row (keyboard or mouse), or closing the screen closes the preview. Selection is watched on the result list because Obsidian consumes the arrow keys itself.
