@@ -1192,6 +1192,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     this.rows = new WeakMap(); // suggestion element → row, for previews
     this.hoverPopover = null; // Lets this screen act as the hover parent for note previews.
     this.previewMode = false; // Toggled by tapping Cmd; while on, the preview follows the selection.
+    this.previewTimer = null;
     this.modDown = false;
     this.modCombined = false;
     this.setPlaceholder?.('ノートを探す（Enterで本文検索）');
@@ -1232,17 +1233,28 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 
   togglePreview() {
     this.previewMode = !this.previewMode;
-    if (!this.previewMode) { this.closePreview(); return; }
-    const el = this.selectedEl();
-    if (el) this.preview(el, this.modEvent());
+    if (!this.previewMode) { this.cancelScheduledPreview(); this.closePreview(); return; }
+    this.schedulePreview();
   }
 
   followSelection() {
-    if (!this.previewMode) return;
-    const el = this.selectedEl();
-    if (el === this.previewedEl) return;
-    this.closePreview();
-    if (el) this.preview(el, this.modEvent());
+    if (this.previewMode && this.selectedEl() !== this.previewedEl) this.schedulePreview();
+  }
+
+  // Ask for the preview after the key event that moved the selection has finished: Hover Editor
+  // cancels a pending preview (and locks out new ones for a second) on any non-Cmd keydown.
+  // Rapid moves only preview the row they end on.
+  schedulePreview() {
+    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
+    this.previewTimer = setTimeout(() => {
+      this.previewTimer = null;
+      if (!this.previewMode) return;
+      const el = this.selectedEl();
+      if (el === this.previewedEl) return;
+      this.closePreview();
+      if (this.hoverPopover?.lockedOut) this.hoverPopover = null; // a cancelled preview must not block the next
+      if (el) this.preview(el, this.modEvent());
+    }, 120);
   }
 
   // Page preview opens only for a Cmd/Ctrl event; selection changes carry none.
@@ -1256,11 +1268,17 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     this.hoverPopover?.hide?.();
   }
 
+  cancelScheduledPreview() {
+    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
+    this.previewTimer = null;
+  }
+
   onClose() {
     super.onClose?.();
     if (this.plugin.openSearchScreen === this) this.plugin.openSearchScreen = null;
     this.selectionObserver?.disconnect();
     this.previewMode = false;
+    this.cancelScheduledPreview();
     this.closePreview();
     this.modalEl?.ownerDocument?.body?.classList.remove('palmwiki-search-open');
   }

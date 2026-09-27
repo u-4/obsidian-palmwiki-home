@@ -555,21 +555,25 @@ test('search rows preview notes with Cmd (selected row) or Cmd+hover, but not ac
   f.stop();
 });
 
-test('tapping Cmd toggles previews that follow the selection; Cmd with another key does not toggle', async () => {
+test('tapping Cmd toggles previews that follow the selection after the key event; Cmd with another key does not', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
   s.modalEl = f.doc.createElement('div'); s.onOpen();
-  let hidden = 0; s.hoverPopover = { hide() { hidden++; } };
+  let hidden = 0; const popover = { hide() { hidden++; } }; s.hoverPopover = popover;
   const rows = s.getSuggestions('機器 整備');
   const [body, a, b] = rows.slice(0, 3).map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
   let selected = a; s.resultContainerEl = { querySelector: () => selected };
   const previews = () => f.calls.triggers.filter(t => t.name === 'hover-link').map(t => t.info.linktext);
   const tap = () => { s.modalEl.emit('keydown', { key: 'Meta' }); s.modalEl.emit('keyup', { key: 'Meta' }); };
-  tap(); assert.equal(s.previewMode, true); assert.deepEqual(previews(), ['10_Notes/Projects/機器整備_駒込2026.md']);
-  selected = b; s.followSelection(); assert.equal(hidden, 1); assert.equal(previews().at(-1), '00_Inbox/R7機器整備.md');
-  selected = body; s.followSelection(); assert.equal(hidden, 2); assert.equal(previews().length, 2); // action row: no preview
-  selected = b; s.followSelection(); assert.equal(previews().length, 3);
-  tap(); assert.equal(s.previewMode, false); assert.equal(hidden, 4);
-  selected = a; s.followSelection(); assert.equal(previews().length, 3); // off: selection changes do nothing
+  tap(); assert.equal(s.previewMode, true); assert.deepEqual(previews(), []); // waits for the key event to finish
+  f.clock.tick(); assert.deepEqual(previews(), ['10_Notes/Projects/機器整備_駒込2026.md']);
+  selected = b; s.followSelection(); selected = a; s.followSelection(); selected = b; s.followSelection();
+  f.clock.tick(); assert.equal(previews().length, 2); assert.equal(previews().at(-1), '00_Inbox/R7機器整備.md'); // rapid moves: one preview
+  popover.lockedOut = true; s.hoverPopover = popover;
+  selected = a; s.followSelection(); f.clock.tick(); assert.equal(previews().length, 3); assert.equal(s.hoverPopover, null);
+  selected = body; s.followSelection(); f.clock.tick(); assert.equal(previews().length, 3); // action row: no preview
+  s.hoverPopover = popover; const before = hidden;
+  tap(); assert.equal(s.previewMode, false); assert.equal(hidden, before + 1);
+  selected = a; s.followSelection(); f.clock.tick(); assert.equal(previews().length, 3); // off: nothing
   s.modalEl.emit('keydown', { key: 'Meta' }); s.modalEl.emit('keydown', { key: 'Enter' }); s.modalEl.emit('keyup', { key: 'Meta' });
   assert.equal(s.previewMode, false);
   f.stop();

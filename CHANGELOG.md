@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.5 — 2026-09-27
+
+- Fix: in preview mode, moving to another row now shows that row's preview. The preview used to be requested while the arrow key event was still propagating, and Hover Editor cancels a pending preview (locking out new ones for a second) on any non-Cmd keydown. Previews are now requested 120 ms after the selection settles, and a locked-out popover no longer blocks the next one.
+
 ## 1.3.4 — 2026-09-27
 
 - Unified search: tapping Cmd (Ctrl) toggles previews. While on, the preview follows the selected row (arrow keys, Ctrl+N/P, mouse) and hides on 本文を検索 / 新規作成 rows; tapping Cmd again turns it off. Cmd together with another key (Cmd+Enter, …) does not toggle.
