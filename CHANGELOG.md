@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.3 — 2026-09-27
+
+- Unified search previews last while Cmd is held: releasing Cmd, selecting another row (keyboard or mouse), or closing the screen closes the preview. Selection is watched on the result list because Obsidian consumes the arrow keys itself.
+
 ## 1.3.2 — 2026-09-27
 
 - Unified search: press Cmd (Ctrl) to preview the selected note, or Cmd+hover a row, for recent notes and title/alias matches alike. Previews from the search screen sit above it and close with it.

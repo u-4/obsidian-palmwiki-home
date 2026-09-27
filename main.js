@@ -1202,6 +1202,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 
   onOpen() {
     super.onOpen?.();
+    this.plugin.openSearchScreen = this;
     this.modalEl?.ownerDocument?.body?.classList.add('palmwiki-search-open');
     // Cmd (Ctrl) on its own previews the selected note, like Cmd+hover does for links.
     this.modalEl?.addEventListener('keydown', event => {
@@ -1209,17 +1210,40 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
       if (el) this.preview(el, event);
     }, true);
+    // The preview lasts while Cmd is held: releasing it, or selecting another row, closes it.
+    // (Arrow keys are consumed by Obsidian's own key handling, so selection is watched instead.)
+    this.modalEl?.addEventListener('keyup', event => {
+      if (['Meta', 'Control'].includes(event.key)) this.closePreview();
+    }, true);
+    const Observer = this.modalEl?.ownerDocument?.defaultView?.MutationObserver;
+    if (Observer && this.resultContainerEl) {
+      this.selectionObserver = new Observer(() => this.followSelection());
+      this.selectionObserver.observe(this.resultContainerEl, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
+  followSelection() {
+    const selected = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
+    if (this.previewedEl && selected !== this.previewedEl) this.closePreview();
+  }
+
+  closePreview() {
+    this.previewedEl = null;
+    this.hoverPopover?.hide?.();
   }
 
   onClose() {
     super.onClose?.();
-    this.hoverPopover?.hide?.();
+    if (this.plugin.openSearchScreen === this) this.plugin.openSearchScreen = null;
+    this.selectionObserver?.disconnect();
+    this.closePreview();
     this.modalEl?.ownerDocument?.body?.classList.remove('palmwiki-search-open');
   }
 
   preview(el, event) {
     const row = this.rows.get(el);
     if (row?.kind !== 'note') return;
+    this.previewedEl = el;
     this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: row.file.path, sourcePath: '' });
   }
 

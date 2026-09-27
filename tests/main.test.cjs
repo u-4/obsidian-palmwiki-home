@@ -554,3 +554,17 @@ test('search rows preview notes with Cmd (selected row) or Cmd+hover, but not ac
   assert.equal(f.calls.triggers.length, before);
   f.stop();
 });
+
+test('releasing Cmd or selecting another row closes a preview opened from the search screen', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  s.modalEl = f.doc.createElement('div'); s.onOpen();
+  let hidden = 0; s.hoverPopover = { hide() { hidden++; } };
+  const rows = s.getSuggestions('機器 整備');
+  const [a, b] = rows.slice(1, 3).map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
+  let selected = a; s.resultContainerEl = { querySelector: () => selected };
+  s.preview(a, { metaKey: true }); s.followSelection(); assert.equal(hidden, 0);
+  selected = b; s.followSelection(); assert.equal(hidden, 1);
+  s.preview(b, { metaKey: true }); s.modalEl.emit('keyup', { key: 'Meta' }); assert.equal(hidden, 2);
+  s.modalEl.emit('keyup', { key: 'a' }); assert.equal(hidden, 2);
+  f.stop();
+});
