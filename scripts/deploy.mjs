@@ -11,7 +11,7 @@ import path from 'node:path';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const vault = process.env.PALMWIKI_VAULT
-  ?? path.join(os.homedir(), 'Library/Mobile Documents/iCloud~md~obsidian/Documents/PalmWiki');
+  ?? path.join(os.homedir(), 'PalmWiki');
 const manifest = JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
 const target = path.join(vault, '.obsidian/plugins', manifest.id);
 const files = ['main.js', 'manifest.json', 'styles.css'];
