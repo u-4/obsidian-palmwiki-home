@@ -1,6 +1,7 @@
 // Copies main.js, manifest.json and styles.css into the owner's PalmWiki vault.
-// The installed files are backed up outside the vault first; plugin settings
-// (data.json), enablement and hotkeys are left alone.
+// The installed files and the plugin settings (data.json) are backed up outside
+// the vault first, because a new version may migrate data.json when it loads.
+// Enablement and hotkeys are left alone.
 // Override the vault with PALMWIKI_VAULT=/path/to/vault.
 import { copyFile, mkdir, readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -26,7 +27,7 @@ if (!await exists(path.join(vault, '.obsidian'))) {
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
 const backup = path.join(os.homedir(), 'Library/Application Support/ObsidianOps/plugin-backups', manifest.id, stamp);
 let backedUp = 0;
-for (const name of files) {
+for (const name of [...files, 'data.json']) {
   if (!await exists(path.join(target, name))) continue;
   await mkdir(backup, { recursive: true });
   await copyFile(path.join(target, name), path.join(backup, name));

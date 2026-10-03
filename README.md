@@ -25,7 +25,7 @@ Copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins
 
 ```sh
 npm test            # syntax check + tests (Node 22+, no npm install needed)
-npm run deploy      # owner's vault; backs up the installed files first
+npm run deploy      # owner's vault; backs up the installed files and data.json first
 ```
 
 Known limitations: on iPhone the buttons can end up where they cannot be tapped; list position is not restored after the view is recreated.
