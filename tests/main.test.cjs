@@ -570,11 +570,11 @@ test('Cmd+hover on a card shows the light popup beside it; a click inside hands 
   card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle(); await settle();
   const popup = f.doc.body.children[0];
   assert.equal(popup.className, 'palmwiki-card-popover markdown-rendered');
-  assert.deepEqual({ ...popup.style }, { left: '508px', top: '328px', width: '520px', height: '440px' }); // below-right
+  assert.deepEqual({ ...popup.style }, { left: '480px', top: '300px', width: '520px', height: '440px' }); // below-right, over the corner
   // Near the bottom right of the window: above-left, clear of the card's row.
   const place = rect => { const el = f.doc.createElement('div'); const t = f.doc.createElement('div'); t.rect = rect; f.plugin.cardPopover.place(el, t, true); return [el.style.left, el.style.top]; };
-  assert.deepEqual(place({ top: 600, bottom: 820, left: 1100, right: 1300 }), ['572px', '152px']);
-  assert.deepEqual(place({ top: 500, bottom: 720, left: 300, right: 500 }), ['508px', '52px']); // above-right
+  assert.deepEqual(place({ top: 600, bottom: 820, left: 1100, right: 1300 }), ['600px', '180px']);
+  assert.deepEqual(place({ top: 500, bottom: 720, left: 300, right: 500 }), ['480px', '80px']); // above-right
   assert.equal(popup.children[0].textContent, f.plugin.cardPopover.card.file.basename);
   assert.equal(f.calls.triggers.length, 0); // Hover Editor is not asked while the light popup is used
   popup.emit('click', { target: popup });

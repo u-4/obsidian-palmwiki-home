@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.3 — 2026-10-04
+
+- Home card popups overlap the card's corner by 20 px instead of leaving a gap, so the pointer goes straight from the card into the popup.
+
 ## 1.7.2 — 2026-10-04
 
 - Home card popups open off a corner of the card instead of beside it: below-right, above-right, below-left or above-left, the first that fits in the window (else the one with the most room). The cards next to and below the pointed card stay uncovered, so the next one can be pointed at.

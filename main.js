@@ -1537,9 +1537,9 @@ class CardPopover {
     void entry.preview.show({ file });
   }
 
-  // A card's popup goes off a corner of the card (below-right, above-right, below-left, above-left:
-  // the first that fits, else the one with the most room), so the cards beside and below it stay
-  // free to point at next. A link's popup goes just below the link. Always inside the window.
+  // A card's popup goes off a corner of the card, overlapping that corner a little (below-right,
+  // above-right, below-left, above-left: the first that fits, else the one with the most room), so
+  // the cards beside and below it stay free to point at next. A link's popup goes just below the link. Always inside the window.
   place(el, target, beside) {
     const win = target.ownerDocument.defaultView;
     const vw = win?.innerWidth || 1024;
@@ -1550,9 +1550,10 @@ class CardPopover {
     let left;
     let top;
     if (beside) {
+      const o = 20; // overlap with the card's corner
       const corners = [
-        [r.right + 8, r.bottom + 8], [r.right + 8, r.top - 8 - height],
-        [r.left - 8 - width, r.bottom + 8], [r.left - 8 - width, r.top - 8 - height],
+        [r.right - o, r.bottom - o], [r.right - o, r.top + o - height],
+        [r.left + o - width, r.bottom - o], [r.left + o - width, r.top + o - height],
       ];
       const room = ([x, y]) => Math.max(0, Math.min(x + width, vw - 8) - Math.max(x, 8)) * Math.max(0, Math.min(y + height, vh - 8) - Math.max(y, 8));
       const best = corners.find(corner => room(corner) === width * height) || corners.reduce((a, b) => (room(b) > room(a) ? b : a));
