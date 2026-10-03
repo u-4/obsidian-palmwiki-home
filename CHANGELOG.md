@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.0 — 2026-10-04
+
+- Unified search: Shift+Enter makes the note named by the typed words (or opens it if it exists), whatever row is selected. This is the same key as Omnisearch's screen, so it works on both. The 新規作成 row shows the key in small text.
+
 ## 1.5.2 — 2026-10-04
 
 - Text in the search preview pane (unified search and Omnisearch's screen) can be selected and copied. Obsidian turns off text selection across the app, and the pane inherited that.

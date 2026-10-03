@@ -1417,6 +1417,19 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
       { command: 'Esc', purpose: '閉じる' },
     ]);
+    // Same key as Omnisearch's screen: make (or open) the note named by the words, whatever row is selected.
+    this.scope?.register?.(['Shift'], 'Enter', evt => {
+      evt?.preventDefault?.();
+      this.createFromInput();
+      return false;
+    });
+  }
+
+  createFromInput() {
+    const query = (this.inputEl?.value || '').trim();
+    if (!query) return;
+    this.close();
+    void this.plugin.createNote(query).catch(() => new Notice('ノートを作れませんでした。'));
   }
 
   onOpen() {
@@ -1492,6 +1505,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       meta.textContent = 'Various Complements（選ぶと入力に反映）';
     } else {
       title.textContent = `新規作成：「${row.text}」`;
+      meta.textContent = 'Shift+Enter';
     }
     title.className = 'palmwiki-search-title' + (row.kind === 'note' ? '' : ' is-action');
     el.append(title);

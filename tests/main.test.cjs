@@ -83,7 +83,8 @@ function load() {
       FuzzySuggestModal: class { constructor(app) { this.app = app; } setPlaceholder(text) { this.placeholder = text; } open() { modals.push(this); } },
       SuggestModal: class {
         // Mirrors instance fields of Obsidian's Modal that a subclass must not shadow (e.g. `selection`).
-        constructor(app) { this.app = app; this.selection = null; this.inputEl = { value: '', inputs: 0, dispatchEvent() { this.inputs++; } }; }
+        constructor(app) { this.app = app; this.selection = null; this.inputEl = { value: '', inputs: 0, dispatchEvent() { this.inputs++; } };
+          this.scope = { keys: [], register(modifiers, key, func) { this.keys.push({ modifiers, key, func }); } }; }
         setPlaceholder(text) { this.placeholder = text; } setInstructions() {} open() { modals.push(this); } close() { this.closed = true; }
         selectSuggestion(value, evt) { this.close(); this.onChooseSuggestion(value, evt); }
       },
@@ -507,6 +508,20 @@ test('create makes a sanitized note in the new-note folder and opens it', async 
   const create = s.getSuggestions('会議: 9/27').find(r => r.kind === 'create');
   s.selectSuggestion(create, {}); await settle(); await settle();
   assert.ok(f.files.has('00_Inbox/会議 9 27.md')); assert.equal(f.calls.opens.at(-1), '00_Inbox/会議 9 27.md');
+  f.stop();
+});
+test('Shift+Enter makes the note named by the words whatever row is selected; the create row shows the key', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  const shiftEnter = s.scope.keys.find(k => k.modifiers.join() === 'Shift' && k.key === 'Enter');
+  s.inputEl.value = '  ';
+  shiftEnter.func({ preventDefault() {} }); await settle();
+  assert.equal(s.closed, undefined);
+  s.inputEl.value = ' 新しい会議 ';
+  assert.equal(shiftEnter.func({ preventDefault() {} }), false); await settle(); await settle();
+  assert.equal(s.closed, true); assert.ok(f.files.has('00_Inbox/新しい会議.md'));
+  const create = s.getSuggestions('別の会議').find(r => r.kind === 'create');
+  const el = f.doc.createElement('div'); s.renderSuggestion(create, el);
+  assert.deepEqual(el.children.map(c => c.textContent), ['新規作成：「別の会議」', 'Shift+Enter']);
   f.stop();
 });
 test('Various Complements words complete the last word and keep the screen open; absent index yields nothing', async () => {
