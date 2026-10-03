@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.2 — 2026-10-04
+
+- Home card popups open off a corner of the card instead of beside it: below-right, above-right, below-left or above-left, the first that fits in the window (else the one with the most room). The cards next to and below the pointed card stay uncovered, so the next one can be pointed at.
+
 ## 1.7.1 — 2026-10-04
 
 - Home card popups: once one is open, pointing at another card switches to it (no Cmd needed; after 0.15 s so crossing a card on the way does not switch). Cmd+hover on a link inside a popup opens the next popup for the linked note below the link, and so on; they close together. Clicking any of them hands that note over to Hover Editor. Link hovers inside the popups are kept from Obsidian's own page preview, so Cmd over a link no longer opens Hover Editor as well.
