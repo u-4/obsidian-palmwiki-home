@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.5 — 2026-10-04
+
+- Hover Editor now opens exactly where the clicked light popup was (it opens 20 px below the pointer it is given, so the popup's corner is handed over).
+- Fix: clicking a deeper popup (opened from a link) just closed it. Its anchor link went away with the popups; the card now anchors the handover, and the linked note opens in Hover Editor.
+
 ## 1.7.4 — 2026-10-04
 
 - Fix: clicking inside a Home card popup did not switch to Hover Editor when Settings → Page preview required Cmd for 「PalmWiki Home（軽いプレビューから編集へ）」. The handover is now sent as a Cmd hover, so it works either way.

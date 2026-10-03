@@ -1569,14 +1569,21 @@ class CardPopover {
   }
 
   edit(entry, event) {
+    // Taken before closing: a deeper popup's anchor is a link inside a popup that is about to go,
+    // so the card anchors the handover.
+    const card = this.stack[0];
+    const box = entry.el.getBoundingClientRect?.();
     this.close();
-    if (entry.view.disposed || !entry.anchor.isConnected) return;
+    if (!card || entry.view.disposed || !card.anchor.isConnected) return;
+    // Hover Editor opens 20 px below the pointer it is given; this puts it where the light popup was.
+    const x = box ? box.left : event.clientX;
+    const y = box ? box.top - 20 : event.clientY;
     // Sent as if Cmd were held: the click already asked for it, even when Settings → Page preview
     // requires Cmd for this source.
-    const Ev = entry.anchor.ownerDocument.defaultView?.MouseEvent;
-    const hover = Ev ? new Ev('mouseover', { clientX: event.clientX, clientY: event.clientY, metaKey: true, ctrlKey: true }) : event;
+    const Ev = card.anchor.ownerDocument.defaultView?.MouseEvent;
+    const hover = Ev ? new Ev('mouseover', { clientX: x, clientY: y, metaKey: true, ctrlKey: true }) : event;
     this.app.workspace.trigger('hover-link', {
-      event: hover, source: HOVER_EDIT_SOURCE, hoverParent: entry.view, targetEl: entry.anchor, linktext: entry.file.path, sourcePath: '',
+      event: hover, source: HOVER_EDIT_SOURCE, hoverParent: entry.view, targetEl: card.anchor, linktext: entry.file.path, sourcePath: '',
     });
   }
 

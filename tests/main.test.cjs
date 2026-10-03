@@ -584,6 +584,7 @@ test('Cmd+hover on a card shows the light popup beside it; a click inside hands 
   assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.source, 'palmwiki-home-edit');
   assert.equal(hover.info.targetEl, card); assert.equal(hover.info.hoverParent, f.view);
   assert.equal(hover.info.event.metaKey, true); // passes even when Page preview requires Cmd
+  assert.deepEqual([hover.info.event.clientX, hover.info.event.clientY], [0, -20]); // where the light popup was (fake rect)
   f.stop();
 });
 test('once a popup is open, pointing at another card switches it; Cmd on a link inside opens the next popup', async () => {
@@ -603,7 +604,7 @@ test('once a popup is open, pointing at another card switches it; Cmd on a link 
   assert.equal(f.doc.body.children.length, 2); assert.equal(popover.stack[1].file, target); assert.equal(popover.stack[1].anchor, link);
   f.doc.body.children[1].emit('click', { target: f.doc.body.children[1] });
   assert.equal(f.doc.body.children.length, 0);
-  assert.equal(f.calls.triggers.at(-1).info.linktext, target.path); assert.equal(f.calls.triggers.at(-1).info.targetEl, link);
+  assert.equal(f.calls.triggers.at(-1).info.linktext, target.path); assert.equal(f.calls.triggers.at(-1).info.targetEl, second); // the card anchors it
   assert.deepEqual(f.app.keymap.scopes, []);
   f.stop();
 });
