@@ -34,3 +34,9 @@
 ## Keep Out Of Git
 
 - `data.json`, vault notes and attachments, personal paths, and private handoff material.
+
+## Other Sessions
+
+- PalmWiki Home, 2hop-links-plus and the Cosense-style CSS are each developed in a Claude Code session opened in its own folder. The ObsidianOps session is the hub for vault settings, diagnostics and the development status page.
+- When another repository needs a change (for example CSS for a new class name), do not edit it here: find that repository's session with `ListAgents` and ask it with `SendMessage`. If there is no such session, tell the owner.
+- After deploying to the vault, send the ObsidianOps session the version and a one-line summary so it can update the status page.
