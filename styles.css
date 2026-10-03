@@ -84,6 +84,8 @@
 .palmwiki-search-preview {
   grid-area: preview; min-width: 0; overflow-y: auto; padding: 14px 18px;
   border-left: 1px solid var(--background-modifier-border); font-size: var(--font-ui-small);
+  /* Obsidian turns off text selection app-wide; let the preview be selected and copied. */
+  user-select: text; -webkit-user-select: text;
 }
 .palmwiki-search-preview-title { font-weight: 700; font-size: var(--font-ui-medium); margin-bottom: 10px; overflow-wrap: anywhere; }
 .palmwiki-search-preview-body img { max-width: 100%; }

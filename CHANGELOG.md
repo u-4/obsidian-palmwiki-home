@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.2 — 2026-10-04
+
+- Text in the search preview pane (unified search and Omnisearch's screen) can be selected and copied. Obsidian turns off text selection across the app, and the pane inherited that.
+
 ## 1.5.1 — 2026-10-04
 
 - Cards read the shared `--cosense-card-*` CSS variables (bg, title, text, border, hover-bg, min-width, gap, height, height-narrow, padding, radius, media-height), which 2hop-links-plus cards also use, so the Cosense-style CSS can style both at once. Each falls back to the previous value, so the look does not change until a variable is defined.
