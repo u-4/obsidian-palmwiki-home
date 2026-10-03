@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0 — 2026-10-04
+
+- Home cards: Cmd+hover shows a light, read-only preview (520×440, beside the card) instead of Hover Editor. It uses the same renderer as the search preview pane, so it appears in about 0.06 s. Clicking inside it (not on a link, and not after selecting text) switches to the editable preview (Hover Editor) through Obsidian's standard hover-link event, with a new hover source 「PalmWiki Home（軽いプレビューから編集へ）」 that needs no Cmd. Links inside open the note; Esc (through a key scope, since Obsidian takes Escape first), leaving the card and popup, or scrolling the home closes it. Setting 「ホームのカードは軽いプレビューで表示」 (on by default) turns it off.
+- The note renderer of the search preview pane is now its own part (`NotePreview`), shared with the card popup.
+
 ## 1.6.0 — 2026-10-04
 
 - Unified search: Shift+Enter makes the note named by the typed words (or opens it if it exists), whatever row is selected. This is the same key as Omnisearch's screen, so it works on both. The 新規作成 row shows the key in small text.

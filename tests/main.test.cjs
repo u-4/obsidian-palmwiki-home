@@ -11,7 +11,7 @@ class Element {
     this.ownerDocument = doc; this.tagName = tag; this.children = []; this.dataset = {};
     this.listeners = new Map(); this.attributes = {}; this.textContent = ''; this.scrollTop = 0;
     this.scrollHeight = 2400; this.clientHeight = 600; this.isConnected = true; this.hidden = false;
-    this.rect = { top: 0, bottom: 200, left: 0, right: 200, width: 200, height: 200 };
+    this.rect = { top: 0, bottom: 200, left: 0, right: 200, width: 200, height: 200 }; this.style = {};
   }
   append(...children) { for (const child of children) this.insertBefore(child, null); }
   prepend(child) { this.insertBefore(child, this.firstElementChild); }
@@ -48,6 +48,7 @@ function environment() {
   win.requestAnimationFrame = fn => { const id = ++next; frames.set(id, fn); return id; };
   win.cancelAnimationFrame = id => frames.delete(id);
   doc.createElement = tag => new Element(doc, tag);
+  doc.body = new Element(doc, 'body'); win.innerWidth = 1400; win.innerHeight = 900;
   doc.createTextNode = text => { const e = new Element(doc, '#text'); e.textContent = text; return e; };
   doc.flush = () => { for (const [id, fn] of [...frames]) if (frames.delete(id)) fn(); };
   return { doc, clock };
@@ -79,7 +80,7 @@ function load() {
   const context = { module: { exports: {} }, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
-      Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false }, setIcon() {},
+      Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false, isModifier: ev => !!(ev.metaKey || ev.ctrlKey) }, setIcon() {},
       FuzzySuggestModal: class { constructor(app) { this.app = app; } setPlaceholder(text) { this.placeholder = text; } open() { modals.push(this); } },
       SuggestModal: class {
         // Mirrors instance fields of Obsidian's Modal that a subclass must not shadow (e.g. `selection`).
@@ -91,6 +92,7 @@ function load() {
       // Letters in order, like Obsidian's fuzzy search; a higher score for a tighter match.
       prepareFuzzySearch: query => text => { let i = 0, last = -1, gaps = 0; for (const ch of query.replace(/\s+/g, '')) { const at = text.indexOf(ch, last + 1); if (at < 0) return null; if (last >= 0) gaps += at - last - 1; last = at; i++; } return { score: -gaps }; },
       normalizePath: p => p.replace(/\/+/g, '/').replace(/^\//, ''),
+      Scope: class { constructor(parent) { this.parent = parent; this.keys = []; } register(modifiers, key, func) { this.keys.push({ modifiers, key, func }); } },
       Component, MarkdownRenderer: { async render(app, md, el) { rendered.push(md); el.textContent = md; } },
     }; },
     Event: class { constructor(type) { this.type = type; } },
@@ -117,6 +119,7 @@ function appDouble(doc, count = 0) {
       getFirstLinkpathDest: (link, source) => files.get(link) || files.get(path.posix.normalize(path.posix.join(path.posix.dirname(source), link))),
     },
     fileManager: { getNewFileParent: () => ({ path: '00_Inbox' }) },
+    keymap: { scopes: [], pushScope(scope) { this.scopes.push(scope); }, popScope(scope) { this.scopes = this.scopes.filter(s => s !== scope); } },
     workspace: { getMostRecentLeaf: () => leaf, getLeaf: () => leaf, setActiveLeaf() {}, async revealLeaf() {},
       getActiveFile: () => null, getLastOpenFiles: () => recentFiles,
       iterateAllLeaves: cb => cb(leaf), on: () => ({}), onLayoutReady: cb => cb(),
@@ -547,8 +550,8 @@ test('the 検索 button and Cmd+G follow the search mode setting, which persists
   f.stop();
 });
 
-test('cards join page preview / Hover Editor through the standard hover-link event, Cmd by default', async () => {
-  const f = await fixture(3); f.refresh();
+test('with the light popup off, cards join page preview / Hover Editor through the standard hover-link event, Cmd by default', async () => {
+  const f = await fixture(3); f.plugin.settings.cardPopover = false; f.refresh();
   assert.equal(f.plugin.hoverSources['palmwiki-home'].defaultMod, true);
   const card = f.view.grid.children[1];
   card.emit('mouseover', { metaKey: true });
@@ -556,6 +559,39 @@ test('cards join page preview / Hover Editor through the standard hover-link eve
   assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.source, 'palmwiki-home');
   assert.equal(hover.info.linktext, card.dataset.path); assert.equal(hover.info.targetEl, card); assert.equal(hover.info.hoverParent, f.view);
   assert.equal(f.calls.reads.length, 0); // announcing a hover reads nothing
+  f.stop();
+});
+test('Cmd+hover on a card shows the light popup beside it; a click inside hands over to Hover Editor', async () => {
+  const f = await fixture(3); f.refresh();
+  assert.equal(f.plugin.hoverSources['palmwiki-home-edit'].defaultMod, false);
+  const card = f.view.grid.children[1]; card.rect = { top: 100, bottom: 320, left: 300, right: 500, width: 200, height: 220 };
+  card.emit('mouseover', {}); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 0); // no Cmd, no popup
+  card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle(); await settle();
+  const popup = f.doc.body.children[0];
+  assert.equal(popup.className, 'palmwiki-card-popover markdown-rendered');
+  assert.deepEqual({ ...popup.style }, { left: '508px', top: '100px', width: '520px', height: '440px' });
+  assert.equal(popup.children[0].textContent, f.plugin.cardPopover.card.file.basename);
+  assert.equal(f.calls.triggers.length, 0); // Hover Editor is not asked while the light popup is used
+  popup.emit('click', { target: popup });
+  assert.equal(f.doc.body.children.length, 0);
+  const hover = f.calls.triggers.at(-1);
+  assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.source, 'palmwiki-home-edit');
+  assert.equal(hover.info.targetEl, card); assert.equal(hover.info.hoverParent, f.view);
+  f.stop();
+});
+test('the card popup closes after the pointer leaves, and goes with the view', async () => {
+  const f = await fixture(3); f.refresh();
+  const card = f.view.grid.children[1];
+  card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 1);
+  card.emit('mouseleave'); f.clock.tick(); assert.equal(f.doc.body.children.length, 0);
+  card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
+  const popover = f.plugin.cardPopover; assert.equal(f.app.keymap.scopes.at(-1), popover.scope);
+  assert.equal(popover.scope.keys.find(k => k.key === 'Escape').func(), false);
+  assert.equal(f.doc.body.children.length, 0); assert.equal(f.app.keymap.scopes.includes(popover.scope), false);
+  card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
+  f.view.dispose(); assert.equal(f.doc.body.children.length, 0);
   f.stop();
 });
 
@@ -577,7 +613,7 @@ test('search preview pane shows the selected note (no frontmatter), hints for ac
   assert.match(text(s.pane.el), /R7機器整備\|本文B/); assert.deepEqual([...f.rendered], ['本文B']);
   selected = a; s.pane.follow(); f.clock.tick(); await settle(); await settle();
   assert.match(text(s.pane.el), /機器整備_駒込2026\|# 計画\n本文A/); assert.equal(f.rendered.at(-1).startsWith('---'), false);
-  const component = s.pane.component; s.onClose(); assert.equal(component.loaded, false); assert.equal(s.pane, null);
+  const component = s.pane.preview.component; s.onClose(); assert.equal(component.loaded, false); assert.equal(s.pane, null);
   f.stop();
 });
 test('search preview can be turned off in settings', async () => {

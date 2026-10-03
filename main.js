@@ -1,9 +1,10 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
+const HOVER_EDIT_SOURCE = 'palmwiki-home-edit'; // from the light card popup to Hover Editor
 const INITIAL_CARDS = 24;
 const CARD_STEP = 24;
 const MAX_CARDS = 300;
@@ -19,6 +20,7 @@ const DEFAULTS = Object.freeze({
   searchExcludeFolders: ['99_System'],
   searchPreview: true,
   omnisearchPreview: true,
+  cardPopover: true,
 });
 const PREVIEW_CHARS = 20000;
 const MAX_NOTE_SUGGESTIONS = 30;
@@ -353,6 +355,7 @@ class PalmWikiHome extends Plugin {
     this.settings.searchMode = saved?.searchMode === 'unified' ? 'unified' : 'separate';
     this.settings.searchPreview = saved?.searchPreview !== false;
     this.settings.omnisearchPreview = saved?.omnisearchPreview !== false;
+    this.settings.cardPopover = saved?.cardPopover !== false;
     this.settings.searchExcludeFolders = Array.isArray(saved?.searchExcludeFolders)
       ? saved.searchExcludeFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')).slice(0, 50)
       : [...DEFAULTS.searchExcludeFolders];
@@ -381,7 +384,10 @@ class PalmWikiHome extends Plugin {
     // adjustable under Settings → Page preview.
     if (typeof this.registerHoverLinkSource === 'function') {
       this.registerHoverLinkSource(HOVER_SOURCE, { display: 'PalmWiki Home', defaultMod: true });
+      // Clicking the light card popup asks for the editable preview, so no Cmd is needed there.
+      this.registerHoverLinkSource(HOVER_EDIT_SOURCE, { display: 'PalmWiki Home（軽いプレビューから編集へ）', defaultMod: false });
     }
+    this.cardPopover = new CardPopover(this);
     // Command ids match PalmWiki Home 0.x so existing hotkeys keep working.
     this.addCommand({ id: 'open-home', name: 'Open home', callback: () => void this.openHome() });
     this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.openSearch() });
@@ -674,6 +680,7 @@ class PalmWikiHome extends Plugin {
     for (const view of [...(this.cardViews || [])]) view.dispose();
     this.cardViews?.clear();
     this.previews?.dispose();
+    this.cardPopover?.dispose();
   }
 }
 
@@ -727,6 +734,7 @@ class LiteCards extends BasesView {
       }
     }, { root: parent, rootMargin: '160px' }) : null;
     this.registerDomEvent(parent, 'scroll', () => {
+      this.plugin.cardPopover?.forget(this);
       const top = parent.scrollTop;
       const down = top > this.lastScrollTop;
       this.lastScrollTop = top;
@@ -1022,11 +1030,15 @@ class LiteCards extends BasesView {
       void target.openFile(current, { active: true }).catch(() => new Notice('ノートを開けませんでした。'));
     };
     el.addEventListener('click', open); el.addEventListener('auxclick', open);
-    // Only announces the hover; Obsidian decides whether to preview (e.g. Cmd held).
+    // Cmd+hover shows the light popup (CardPopover); with it off, only announces the hover and
+    // Obsidian decides whether to preview (e.g. Cmd held).
+    const hover = { el, file, view: this };
     el.addEventListener('mouseover', event => {
       if (this.disposed) return;
+      if (this.plugin.settings.cardPopover && this.plugin.cardPopover) { this.plugin.cardPopover.enter(hover, event); return; }
       this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: file.path, sourcePath: '' });
     });
+    el.addEventListener('mouseleave', () => this.plugin.cardPopover?.leave(hover));
     return { el, preview, media, file, path: file.path, key: snapshotKey(file),
       near: false, reading: false, textReady: cached !== undefined, imageKey: null, imagePath: null,
       img: null, finishImage: null, badImage: null };
@@ -1139,6 +1151,7 @@ class LiteCards extends BasesView {
     this.imageQueue.clear();
     for (const card of this.cards.values()) this.releaseImage(card);
     this.cards.clear(); this.files = [];
+    this.plugin.cardPopover?.forget(this);
     this.root.remove(); this.plugin.cardViews.delete(this);
   }
 }
@@ -1238,60 +1251,25 @@ function omnisearchTerms(query) {
     .filter(word => word && !word.startsWith('-') && !/^[a-z]+:/i.test(word));
 }
 
-// A pane beside a result list that renders the selected note with Obsidian's Markdown renderer.
-// Shared by the unified search and Omnisearch's screen. `select()` returns { file } for a note
-// row, { hint } for anything else; `terms()` gives words to mark and scroll to.
-class NotePreviewPane {
-  constructor(app, modalEl, resultEl, select, options = {}) {
+// Renders a note into `el` with Obsidian's Markdown renderer: the title, then the body without
+// frontmatter (up to PREVIEW_CHARS). Read-only and light: no editor, no view, so it switches fast.
+// Shared by the search panes and the Home card popover; the newest show() wins.
+// `select()`-style input: { file } shows a note, { hint } shows a short line instead.
+class NotePreview {
+  constructor(app, el, options = {}) {
     this.app = app;
-    this.modalEl = modalEl;
-    this.resultEl = resultEl;
-    this.select = select;
+    this.el = el;
     this.terms = options.terms || (() => []);
     this.onLink = options.onLink || null;
-    this.key = undefined;
-    this.timer = null;
-    this.waitTimer = null;
-    this.waits = 0;
     this.token = 0;
     this.component = null;
     this.file = null;
-    const doc = modalEl.ownerDocument;
-    modalEl.classList?.add('palmwiki-search-modal');
-    this.el = doc.createElement('div');
-    this.el.className = 'palmwiki-search-preview markdown-rendered';
-    this.el.addEventListener('click', event => {
+    el.addEventListener('click', event => {
       const link = event.target?.closest?.('a.internal-link');
       if (!link || !this.onLink) return;
       event.preventDefault();
       this.onLink(link.dataset.href || link.getAttribute('href') || '', this.file?.path || '', event);
     });
-    modalEl.append(this.el);
-    // Obsidian (and Omnisearch) handle the arrow keys themselves, so the selection is watched instead.
-    const Observer = doc.defaultView?.MutationObserver;
-    if (Observer && resultEl) {
-      this.observer = new Observer(() => this.follow());
-      this.observer.observe(resultEl, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
-    }
-  }
-
-  follow() {
-    if (this.el.offsetParent === null) {
-      // Not laid out yet (a screen that is still opening) or hidden on a narrow screen: look again shortly.
-      if (this.waits++ < 20) {
-        if (this.waitTimer !== null) clearTimeout(this.waitTimer);
-        this.waitTimer = setTimeout(() => { this.waitTimer = null; this.follow(); }, 50);
-      }
-      return;
-    }
-    this.waits = 0;
-    const selected = this.select() || {};
-    const key = selected.file ? 'file:' + selected.file.path : 'hint:' + (selected.hint || '');
-    if (key === this.key) return;
-    this.key = key;
-    if (this.timer !== null) clearTimeout(this.timer);
-    // A short pause lets fast moves settle on one row before reading a note.
-    this.timer = setTimeout(() => { this.timer = null; void this.show(selected); }, 60);
   }
 
   clear() {
@@ -1378,16 +1356,202 @@ class NotePreviewPane {
   }
 
   dispose() {
+    this.token++;
+    this.component?.unload();
+    this.component = null;
+    this.el.remove();
+  }
+}
+
+// A pane beside a result list that shows the selected row's note (a NotePreview).
+// Shared by the unified search and Omnisearch's screen. `select()` returns { file } for a note
+// row, { hint } for anything else; `terms()` gives words to mark and scroll to.
+class NotePreviewPane {
+  constructor(app, modalEl, resultEl, select, options = {}) {
+    this.app = app;
+    this.modalEl = modalEl;
+    this.resultEl = resultEl;
+    this.select = select;
+    this.key = undefined;
+    this.timer = null;
+    this.waitTimer = null;
+    this.waits = 0;
+    const doc = modalEl.ownerDocument;
+    modalEl.classList?.add('palmwiki-search-modal');
+    this.el = doc.createElement('div');
+    this.el.className = 'palmwiki-search-preview markdown-rendered';
+    this.preview = new NotePreview(app, this.el, options);
+    modalEl.append(this.el);
+    // Obsidian (and Omnisearch) handle the arrow keys themselves, so the selection is watched instead.
+    const Observer = doc.defaultView?.MutationObserver;
+    if (Observer && resultEl) {
+      this.observer = new Observer(() => this.follow());
+      this.observer.observe(resultEl, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
+  get file() { return this.preview.file; }
+
+  follow() {
+    if (this.el.offsetParent === null) {
+      // Not laid out yet (a screen that is still opening) or hidden on a narrow screen: look again shortly.
+      if (this.waits++ < 20) {
+        if (this.waitTimer !== null) clearTimeout(this.waitTimer);
+        this.waitTimer = setTimeout(() => { this.waitTimer = null; this.follow(); }, 50);
+      }
+      return;
+    }
+    this.waits = 0;
+    const selected = this.select() || {};
+    const key = selected.file ? 'file:' + selected.file.path : 'hint:' + (selected.hint || '');
+    if (key === this.key) return;
+    this.key = key;
+    if (this.timer !== null) clearTimeout(this.timer);
+    // A short pause lets fast moves settle on one row before reading a note.
+    this.timer = setTimeout(() => { this.timer = null; void this.preview.show(selected); }, 60);
+  }
+
+  dispose() {
     this.observer?.disconnect();
     if (this.timer !== null) clearTimeout(this.timer);
     if (this.waitTimer !== null) clearTimeout(this.waitTimer);
     this.timer = null;
     this.waitTimer = null;
-    this.token++;
-    this.component?.unload();
-    this.component = null;
-    this.el.remove();
+    this.preview.dispose();
     this.modalEl.classList?.remove('palmwiki-search-modal');
+  }
+}
+
+// A light popup for a Home card on Cmd+hover: the same NotePreview, 520×440, beside the card.
+// Clicking inside it (not on a link, not after selecting text) hands over to Obsidian's page
+// preview — Hover Editor when installed — through the standard hover-link event, for editing.
+class CardPopover {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.app = plugin.app;
+    this.el = null;
+    this.preview = null;
+    this.card = null; // { el, file, view } of the shown card
+    this.hovered = null; // the card under the pointer, shown when Mod is pressed
+    this.openTimer = null;
+    this.closeTimer = null;
+    this.onKey = event => {
+      if ((event.key === 'Meta' || event.key === 'Control') && this.hovered && !this.el) this.schedule(this.hovered);
+    };
+    // Obsidian takes Escape before page listeners, so the popup holds a key scope while open.
+    this.scope = typeof Scope === 'function' ? new Scope(this.app.scope) : null;
+    this.scope?.register([], 'Escape', () => { this.close(); return false; });
+  }
+
+  // Called by a card on mouseover / mouseout.
+  enter(card, event) {
+    this.hovered = card;
+    this.cancelClose();
+    if (this.card?.el === card.el && this.el) return;
+    if (Keymap.isModifier(event, 'Mod')) this.schedule(card);
+    else this.listen(card.el.ownerDocument);
+  }
+
+  leave(card) {
+    if (this.hovered === card) this.hovered = null;
+    if (this.openTimer !== null) { clearTimeout(this.openTimer); this.openTimer = null; }
+    if (this.card?.el === card.el) this.scheduleClose();
+  }
+
+  listen(doc) {
+    if (this.keyDoc === doc) return;
+    this.keyDoc?.removeEventListener('keydown', this.onKey, true);
+    this.keyDoc = doc;
+    doc.addEventListener('keydown', this.onKey, true);
+  }
+
+  schedule(card) {
+    if (this.openTimer !== null) clearTimeout(this.openTimer);
+    this.openTimer = setTimeout(() => { this.openTimer = null; this.open(card); }, 60);
+  }
+
+  open(card) {
+    if (this.plugin.disposed || card.view.disposed || !card.el.isConnected) return;
+    this.close();
+    const doc = card.el.ownerDocument;
+    this.listen(doc);
+    const el = doc.createElement('div');
+    el.className = 'palmwiki-card-popover markdown-rendered';
+    this.el = el;
+    this.card = card;
+    this.preview = new NotePreview(this.app, el, {
+      onLink: (link, source, event) => {
+        this.close();
+        void this.app.workspace.openLinkText(link, source, Keymap.isModEvent(event));
+      },
+    });
+    el.addEventListener('mouseenter', () => this.cancelClose());
+    el.addEventListener('mouseleave', () => this.scheduleClose());
+    el.addEventListener('click', event => {
+      if (event.defaultPrevented || event.target?.closest?.('a')) return;
+      if (doc.defaultView?.getSelection?.()?.toString()) return; // selecting text to copy
+      this.edit(event);
+    });
+    doc.body.append(el);
+    this.place(el, card.el);
+    if (this.scope) this.app.keymap?.pushScope(this.scope);
+    void this.preview.show({ file: card.file });
+  }
+
+  // Beside the card: right if it fits, else left, else over it; always inside the window.
+  place(el, target) {
+    const win = target.ownerDocument.defaultView;
+    const vw = win?.innerWidth || 1024;
+    const vh = win?.innerHeight || 768;
+    const width = Math.min(520, vw - 16);
+    const height = Math.min(440, vh - 16);
+    const r = target.getBoundingClientRect();
+    let left = r.right + 8;
+    if (left + width > vw - 8) left = r.left - 8 - width;
+    if (left < 8) left = Math.min(Math.max(8, r.left), vw - 8 - width);
+    const top = Math.min(Math.max(8, r.top), vh - 8 - height);
+    Object.assign(el.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+  }
+
+  edit(event) {
+    const card = this.card;
+    this.close();
+    if (!card || card.view.disposed) return;
+    this.app.workspace.trigger('hover-link', {
+      event, source: HOVER_EDIT_SOURCE, hoverParent: card.view, targetEl: card.el, linktext: card.file.path, sourcePath: '',
+    });
+  }
+
+  cancelClose() {
+    if (this.closeTimer !== null) { clearTimeout(this.closeTimer); this.closeTimer = null; }
+  }
+
+  scheduleClose() {
+    this.cancelClose();
+    this.closeTimer = setTimeout(() => { this.closeTimer = null; this.close(); }, 300);
+  }
+
+  close() {
+    this.cancelClose();
+    if (this.openTimer !== null) { clearTimeout(this.openTimer); this.openTimer = null; }
+    if (this.el && this.scope) this.app.keymap?.popScope(this.scope);
+    this.preview?.dispose();
+    this.preview = null;
+    this.el = null;
+    this.card = null;
+  }
+
+  // A view going away takes its popup with it.
+  forget(view) {
+    if (this.card?.view === view) this.close();
+    if (this.hovered?.view === view) this.hovered = null;
+  }
+
+  dispose() {
+    this.close();
+    this.hovered = null;
+    this.keyDoc?.removeEventListener('keydown', this.onKey, true);
+    this.keyDoc = null;
   }
 }
 
@@ -1571,6 +1735,13 @@ class LiteSettings extends PluginSettingTab {
       .setDesc('Omnisearch の検索画面の右側に、選んでいる結果のノートを表示し、検索語に印を付けます。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.omnisearchPreview).onChange(async value => {
         this.plugin.settings.omnisearchPreview = value;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
+    new Setting(containerEl).setName('ホームのカードは軽いプレビューで表示')
+      .setDesc('Cmd を押しながらカードにマウスを乗せると、読むだけの軽いプレビューを出します。中をクリックすると編集できるプレビュー（Hover Editor）に切り替わります。オフにすると、はじめから編集できるプレビューを出します。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.cardPopover).onChange(async value => {
+        this.plugin.settings.cardPopover = value;
+        if (!value) this.plugin.cardPopover?.close();
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
     new Setting(containerEl).setName('検索候補から外すフォルダ')

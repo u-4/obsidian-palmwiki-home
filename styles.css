@@ -95,3 +95,12 @@
   .palmwiki-search-preview { display: none; }
 }
 .palmwiki-search-preview mark.palmwiki-search-preview-match { background: var(--text-highlight-bg); color: inherit; border-radius: 2px; }
+
+/* Home card popup (Cmd+hover): the light read-only preview, same size as Hover Editor's. */
+.palmwiki-card-popover {
+  position: fixed; z-index: var(--layer-popover); box-sizing: border-box; overflow-y: auto; padding: 14px 18px;
+  background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px;
+  box-shadow: var(--shadow-l); font-size: var(--font-ui-small); cursor: pointer;
+  user-select: text; -webkit-user-select: text;
+}
+.palmwiki-card-popover .palmwiki-search-preview-body img { max-width: 100%; }
