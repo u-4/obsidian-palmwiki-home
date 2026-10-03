@@ -1571,8 +1571,12 @@ class CardPopover {
   edit(entry, event) {
     this.close();
     if (entry.view.disposed || !entry.anchor.isConnected) return;
+    // Sent as if Cmd were held: the click already asked for it, even when Settings → Page preview
+    // requires Cmd for this source.
+    const Ev = entry.anchor.ownerDocument.defaultView?.MouseEvent;
+    const hover = Ev ? new Ev('mouseover', { clientX: event.clientX, clientY: event.clientY, metaKey: true, ctrlKey: true }) : event;
     this.app.workspace.trigger('hover-link', {
-      event, source: HOVER_EDIT_SOURCE, hoverParent: entry.view, targetEl: entry.anchor, linktext: entry.file.path, sourcePath: '',
+      event: hover, source: HOVER_EDIT_SOURCE, hoverParent: entry.view, targetEl: entry.anchor, linktext: entry.file.path, sourcePath: '',
     });
   }
 

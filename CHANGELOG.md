@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.4 — 2026-10-04
+
+- Fix: clicking inside a Home card popup did not switch to Hover Editor when Settings → Page preview required Cmd for 「PalmWiki Home（軽いプレビューから編集へ）」. The handover is now sent as a Cmd hover, so it works either way.
+
 ## 1.7.3 — 2026-10-04
 
 - Home card popups overlap the card's corner by 20 px instead of leaving a gap, so the pointer goes straight from the card into the popup.

@@ -49,6 +49,7 @@ function environment() {
   win.cancelAnimationFrame = id => frames.delete(id);
   doc.createElement = tag => new Element(doc, tag);
   doc.body = new Element(doc, 'body'); win.innerWidth = 1400; win.innerHeight = 900;
+  win.MouseEvent = class { constructor(type, init) { Object.assign(this, { type }, init); } };
   doc.createTextNode = text => { const e = new Element(doc, '#text'); e.textContent = text; return e; };
   doc.flush = () => { for (const [id, fn] of [...frames]) if (frames.delete(id)) fn(); };
   return { doc, clock };
@@ -582,6 +583,7 @@ test('Cmd+hover on a card shows the light popup beside it; a click inside hands 
   const hover = f.calls.triggers.at(-1);
   assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.source, 'palmwiki-home-edit');
   assert.equal(hover.info.targetEl, card); assert.equal(hover.info.hoverParent, f.view);
+  assert.equal(hover.info.event.metaKey, true); // passes even when Page preview requires Cmd
   f.stop();
 });
 test('once a popup is open, pointing at another card switches it; Cmd on a link inside opens the next popup', async () => {

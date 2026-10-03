@@ -1,6 +1,6 @@
 {
   "name": "obsidian-palmwiki-home",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "private": true,
   "description": "PalmWiki Home for Obsidian (dependency-free CommonJS plugin)",
   "scripts": {
