@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1 — 2026-10-04
+
+- Cards read the shared `--cosense-card-*` CSS variables (bg, title, text, border, hover-bg, min-width, gap, height, height-narrow, padding, radius, media-height), which 2hop-links-plus cards also use, so the Cosense-style CSS can style both at once. Each falls back to the previous value, so the look does not change until a variable is defined.
+- `npm run deploy` also backs up `data.json`.
+
 ## 1.5.0 — 2026-09-28
 
 - Omnisearch's search screen gets the same preview pane (setting 「Omnisearch の画面にもプレビューを表示」, on by default): the selected result is rendered beside the list, the query words are marked, and the pane scrolls to the first match. Omnisearch itself is not changed; the pane reads the selected result's `data-result-id`, and simply does not appear if that markup changes. Its screen is re-checked briefly after opening because Omnisearch builds the list a moment later.

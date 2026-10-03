@@ -39,6 +39,7 @@ function safeHomePath(value) {
   return path.endsWith('.base') ? path : null;
 }
 
+// 2hop-links-plus copies this into src/cardPreview.ts; tell its session when it changes.
 function excerpt(body) {
   // Bounded plain-text extraction, not Markdown rendering; no embeds or network requests.
   let text = body.slice(0, 16384).replace(/^\uFEFF/, '');
@@ -224,6 +225,7 @@ function snapshotKey(file) {
   return JSON.stringify([file.path, file.stat.mtime, file.stat.size]);
 }
 
+// 2hop-links-plus copies this into src/cardPreview.ts; tell its session when it changes.
 function firstImage(app, file) {
   // MetadataCache already knows wiki/Markdown image embeds and their source order.
   // No HTML embeds, network URLs, SVG, animation-specific formats or image scans.
@@ -241,6 +243,7 @@ function firstImage(app, file) {
   return null;
 }
 
+// 2hop-links-plus copies this into src/cardPreview.ts; tell its session when it changes.
 class PreviewStore {
   constructor(app) {
     this.app = app;
