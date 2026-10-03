@@ -24,10 +24,11 @@
 ## Versions
 
 - For each version deployed to the vault, bump `manifest.json`, `package.json` and `versions.json`, add a `CHANGELOG.md` entry, and push a Git tag.
+- When you push the tag, also create a GitHub Release for the same version: `gh release create <version> main.js manifest.json styles.css --title "PalmWiki Home <version>"`, with that version's `CHANGELOG.md` entry as the notes.
 
 ## Vault Deployment
 
-- The owner's PalmWiki vault (`~/PalmWiki`, synced to iPhone and iPad by Obsidian Sync) is the standing target. `npm run deploy` backs up the installed files outside the vault, copies `main.js`, `manifest.json`, `styles.css`, and verifies checksums. It needs no approval each time.
+- The owner's PalmWiki vault (`~/PalmWiki`, synced to iPhone and iPad by Obsidian Sync) is the standing target. `npm run deploy` backs up the installed files and `data.json` outside the vault, copies `main.js`, `manifest.json`, `styles.css`, and verifies checksums. It needs no approval each time.
 - Ask before changing plugin settings (`data.json`), enablement, hotkeys, notes, or `.base` files, and before deploying to any other vault. Obsidian Sync carries plugin settings to every device.
 - `npm run deploy` then reloads the plugin through the Obsidian CLI (`obsidian vault=PalmWiki plugin:reload id=palmwiki-home`) when Obsidian is running; otherwise the owner reloads it.
 
@@ -39,4 +40,5 @@
 
 - PalmWiki Home, 2hop-links-plus and the Cosense-style CSS are each developed in a Claude Code session opened in its own folder. The ObsidianOps session is the hub for vault settings, diagnostics and the development status page.
 - When another repository needs a change (for example CSS for a new class name), do not edit it here: find that repository's session with `ListAgents` and ask it with `SendMessage`. If there is no such session, tell the owner.
+- 2hop-links-plus copies `excerpt()`, `firstImage()` and `PreviewStore` from `main.js` into its `src/cardPreview.ts`. When you change them, tell the 2hop-links-plus session.
 - After deploying to the vault, send the ObsidianOps session the version and a one-line summary so it can update the status page.
