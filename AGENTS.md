@@ -21,10 +21,14 @@
 
 - `npm test` (syntax check and the tests in `tests/`) after each change.
 
+## Versions
+
+- For each version deployed to the vault, bump `manifest.json`, `package.json` and `versions.json`, add a `CHANGELOG.md` entry, and push a Git tag.
+
 ## Vault Deployment
 
-- The owner's iCloud PalmWiki vault is the standing target. `npm run deploy` backs up the installed files outside the vault, copies `main.js`, `manifest.json`, `styles.css`, and verifies checksums. It needs no approval each time.
-- Ask before changing plugin settings (`data.json`), enablement, hotkeys, notes, or `.base` files, and before deploying to any other vault.
+- The owner's PalmWiki vault (`~/PalmWiki`, synced to iPhone and iPad by Obsidian Sync) is the standing target. `npm run deploy` backs up the installed files outside the vault, copies `main.js`, `manifest.json`, `styles.css`, and verifies checksums. It needs no approval each time.
+- Ask before changing plugin settings (`data.json`), enablement, hotkeys, notes, or `.base` files, and before deploying to any other vault. Obsidian Sync carries plugin settings to every device.
 - `npm run deploy` then reloads the plugin through the Obsidian CLI (`obsidian vault=PalmWiki plugin:reload id=palmwiki-home`) when Obsidian is running; otherwise the owner reloads it.
 
 ## Keep Out Of Git
