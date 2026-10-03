@@ -1422,40 +1422,49 @@ class NotePreviewPane {
   }
 }
 
-// A light popup for a Home card on Cmd+hover: the same NotePreview, 520×440, beside the card.
-// Clicking inside it (not on a link, not after selecting text) hands over to Obsidian's page
+// Light popups for Home cards: the same NotePreview, 520×440. Cmd+hover on a card opens one beside
+// it; while one is open, moving to another card switches to that card. Cmd+hover on a link inside a
+// popup opens the next popup for the linked note, and so on (a stack, closed together).
+// Clicking inside a popup (not on a link, not after selecting text) hands over to Obsidian's page
 // preview — Hover Editor when installed — through the standard hover-link event, for editing.
 class CardPopover {
   constructor(plugin) {
     this.plugin = plugin;
     this.app = plugin.app;
-    this.el = null;
-    this.preview = null;
-    this.card = null; // { el, file, view } of the shown card
-    this.hovered = null; // the card under the pointer, shown when Mod is pressed
+    this.stack = []; // [{ el, preview, file, anchor, view }], the card's popup first
+    this.hovered = null; // the card under the pointer: { el, file, view }
+    this.hoveredLink = null; // a link under the pointer inside a popup: { a, level }
     this.openTimer = null;
     this.closeTimer = null;
+    this.scoped = false;
     this.onKey = event => {
-      if ((event.key === 'Meta' || event.key === 'Control') && this.hovered && !this.el) this.schedule(this.hovered);
+      if (event.key !== 'Meta' && event.key !== 'Control') return;
+      if (this.hoveredLink) this.scheduleLink(this.hoveredLink.a, this.hoveredLink.level);
+      else if (this.hovered && !this.stack.length) this.schedule(() => this.openCard(this.hovered), 60);
     };
-    // Obsidian takes Escape before page listeners, so the popup holds a key scope while open.
+    // Obsidian takes Escape before page listeners, so the popups hold a key scope while open.
     this.scope = typeof Scope === 'function' ? new Scope(this.app.scope) : null;
     this.scope?.register([], 'Escape', () => { this.close(); return false; });
   }
 
-  // Called by a card on mouseover / mouseout.
+  get card() { return this.stack[0] || null; }
+
+  // Called by a card on mouseover / mouseleave.
   enter(card, event) {
     this.hovered = card;
     this.cancelClose();
-    if (this.card?.el === card.el && this.el) return;
-    if (Keymap.isModifier(event, 'Mod')) this.schedule(card);
-    else this.listen(card.el.ownerDocument);
+    this.listen(card.el.ownerDocument);
+    if (this.card?.anchor === card.el) return;
+    // Cmd opens; once a popup is open, pointing at another card is enough (a little slower,
+    // so that crossing a card on the way to the popup does not switch it).
+    if (Keymap.isModifier(event, 'Mod')) this.schedule(() => this.openCard(card), 60);
+    else if (this.stack.length) this.schedule(() => this.openCard(card), 150);
   }
 
   leave(card) {
     if (this.hovered === card) this.hovered = null;
-    if (this.openTimer !== null) { clearTimeout(this.openTimer); this.openTimer = null; }
-    if (this.card?.el === card.el) this.scheduleClose();
+    this.cancelOpen();
+    if (this.stack.length) this.scheduleClose();
   }
 
   listen(doc) {
@@ -1465,21 +1474,41 @@ class CardPopover {
     doc.addEventListener('keydown', this.onKey, true);
   }
 
-  schedule(card) {
-    if (this.openTimer !== null) clearTimeout(this.openTimer);
-    this.openTimer = setTimeout(() => { this.openTimer = null; this.open(card); }, 60);
+  schedule(fn, delay) {
+    this.cancelOpen();
+    this.openTimer = setTimeout(() => { this.openTimer = null; fn(); }, delay);
   }
 
-  open(card) {
+  cancelOpen() {
+    if (this.openTimer !== null) { clearTimeout(this.openTimer); this.openTimer = null; }
+  }
+
+  openCard(card) {
     if (this.plugin.disposed || card.view.disposed || !card.el.isConnected) return;
-    this.close();
-    const doc = card.el.ownerDocument;
+    this.open(0, card.el, card.file, card.view);
+  }
+
+  scheduleLink(a, level) {
+    const file = this.linkTarget(a, level);
+    if (!file || this.stack[level + 1]?.anchor === a) return;
+    this.schedule(() => { if (this.stack[level]) this.open(level + 1, a, file, this.stack[level].view); }, 60);
+  }
+
+  linkTarget(a, level) {
+    const href = a.dataset?.href || a.getAttribute?.('href') || '';
+    const path = href.split('#')[0].split('|')[0];
+    const file = path ? this.app.metadataCache.getFirstLinkpathDest(path, this.stack[level]?.file.path || '') : null;
+    return file instanceof TFile && file.extension === 'md' ? file : null;
+  }
+
+  open(level, anchor, file, view) {
+    this.closeFrom(level);
+    const doc = anchor.ownerDocument;
     this.listen(doc);
     const el = doc.createElement('div');
     el.className = 'palmwiki-card-popover markdown-rendered';
-    this.el = el;
-    this.card = card;
-    this.preview = new NotePreview(this.app, el, {
+    const entry = { el, file, anchor, view, preview: null };
+    entry.preview = new NotePreview(this.app, el, {
       onLink: (link, source, event) => {
         this.close();
         void this.app.workspace.openLinkText(link, source, Keymap.isModEvent(event));
@@ -1487,38 +1516,57 @@ class CardPopover {
     });
     el.addEventListener('mouseenter', () => this.cancelClose());
     el.addEventListener('mouseleave', () => this.scheduleClose());
+    // Captured and kept from the rendered links: otherwise Obsidian's own page preview (Hover Editor)
+    // also opens on Cmd over a link here. A link's next popup is this one's job.
+    el.addEventListener('mouseover', event => {
+      const a = event.target?.closest?.('a.internal-link');
+      if (!a) { if (this.hoveredLink?.level === level) this.hoveredLink = null; return; }
+      event.stopPropagation?.();
+      this.hoveredLink = { a, level };
+      if (Keymap.isModifier(event, 'Mod')) this.scheduleLink(a, level);
+    }, true);
     el.addEventListener('click', event => {
       if (event.defaultPrevented || event.target?.closest?.('a')) return;
       if (doc.defaultView?.getSelection?.()?.toString()) return; // selecting text to copy
-      this.edit(event);
+      this.edit(entry, event);
     });
+    if (!this.scoped && this.scope) { this.app.keymap?.pushScope(this.scope); this.scoped = true; }
+    this.stack.push(entry);
     doc.body.append(el);
-    this.place(el, card.el);
-    if (this.scope) this.app.keymap?.pushScope(this.scope);
-    void this.preview.show({ file: card.file });
+    this.place(el, anchor, level === 0);
+    void entry.preview.show({ file });
   }
 
-  // Beside the card: right if it fits, else left, else over it; always inside the window.
-  place(el, target) {
+  // A card's popup goes beside the card (right if it fits, else left, else over it); a link's
+  // popup goes just below the link. Always inside the window.
+  place(el, target, beside) {
     const win = target.ownerDocument.defaultView;
     const vw = win?.innerWidth || 1024;
     const vh = win?.innerHeight || 768;
     const width = Math.min(520, vw - 16);
     const height = Math.min(440, vh - 16);
     const r = target.getBoundingClientRect();
-    let left = r.right + 8;
-    if (left + width > vw - 8) left = r.left - 8 - width;
-    if (left < 8) left = Math.min(Math.max(8, r.left), vw - 8 - width);
-    const top = Math.min(Math.max(8, r.top), vh - 8 - height);
+    let left;
+    let top;
+    if (beside) {
+      left = r.right + 8;
+      if (left + width > vw - 8) left = r.left - 8 - width;
+      top = r.top;
+    } else {
+      left = r.left;
+      top = r.bottom + 4;
+      if (top + height > vh - 8) top = r.top - 4 - height;
+    }
+    left = Math.min(Math.max(8, left), vw - 8 - width);
+    top = Math.min(Math.max(8, top), vh - 8 - height);
     Object.assign(el.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
   }
 
-  edit(event) {
-    const card = this.card;
+  edit(entry, event) {
     this.close();
-    if (!card || card.view.disposed) return;
+    if (entry.view.disposed || !entry.anchor.isConnected) return;
     this.app.workspace.trigger('hover-link', {
-      event, source: HOVER_EDIT_SOURCE, hoverParent: card.view, targetEl: card.el, linktext: card.file.path, sourcePath: '',
+      event, source: HOVER_EDIT_SOURCE, hoverParent: entry.view, targetEl: entry.anchor, linktext: entry.file.path, sourcePath: '',
     });
   }
 
@@ -1531,17 +1579,19 @@ class CardPopover {
     this.closeTimer = setTimeout(() => { this.closeTimer = null; this.close(); }, 300);
   }
 
-  close() {
-    this.cancelClose();
-    if (this.openTimer !== null) { clearTimeout(this.openTimer); this.openTimer = null; }
-    if (this.el && this.scope) this.app.keymap?.popScope(this.scope);
-    this.preview?.dispose();
-    this.preview = null;
-    this.el = null;
-    this.card = null;
+  closeFrom(level) {
+    while (this.stack.length > level) this.stack.pop().preview.dispose();
+    if (this.hoveredLink && this.hoveredLink.level >= level) this.hoveredLink = null;
   }
 
-  // A view going away takes its popup with it.
+  close() {
+    this.cancelClose();
+    this.cancelOpen();
+    this.closeFrom(0);
+    if (this.scoped) { this.app.keymap?.popScope(this.scope); this.scoped = false; }
+  }
+
+  // A view going away takes its popups with it.
   forget(view) {
     if (this.card?.view === view) this.close();
     if (this.hovered?.view === view) this.hovered = null;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.1 — 2026-10-04
+
+- Home card popups: once one is open, pointing at another card switches to it (no Cmd needed; after 0.15 s so crossing a card on the way does not switch). Cmd+hover on a link inside a popup opens the next popup for the linked note below the link, and so on; they close together. Clicking any of them hands that note over to Hover Editor. Link hovers inside the popups are kept from Obsidian's own page preview, so Cmd over a link no longer opens Hover Editor as well.
+
 ## 1.7.0 — 2026-10-04
 
 - Home cards: Cmd+hover shows a light, read-only preview (520×440, beside the card) instead of Hover Editor. It uses the same renderer as the search preview pane, so it appears in about 0.06 s. Clicking inside it (not on a link, and not after selecting text) switches to the editable preview (Hover Editor) through Obsidian's standard hover-link event, with a new hover source 「PalmWiki Home（軽いプレビューから編集へ）」 that needs no Cmd. Links inside open the note; Esc (through a key scope, since Obsidian takes Escape first), leaving the card and popup, or scrolling the home closes it. Setting 「ホームのカードは軽いプレビューで表示」 (on by default) turns it off.

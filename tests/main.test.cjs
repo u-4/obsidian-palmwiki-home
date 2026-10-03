@@ -580,6 +580,27 @@ test('Cmd+hover on a card shows the light popup beside it; a click inside hands 
   assert.equal(hover.info.targetEl, card); assert.equal(hover.info.hoverParent, f.view);
   f.stop();
 });
+test('once a popup is open, pointing at another card switches it; Cmd on a link inside opens the next popup', async () => {
+  const f = await fixture(3); f.refresh();
+  const [, first, second] = f.view.grid.children;
+  first.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
+  const popover = f.plugin.cardPopover;
+  assert.equal(popover.card.anchor, first);
+  first.emit('mouseleave'); second.emit('mouseover', {}); f.clock.tick(200); await settle();
+  assert.equal(popover.card.anchor, second); assert.equal(f.doc.body.children.length, 1);
+  const target = [...f.files.values()].find(file => file.path !== popover.card.file.path && file.extension === 'md');
+  const link = f.doc.createElement('a'); link.dataset.href = target.path;
+  const popup = f.doc.body.children[0];
+  popup.emit('mouseover', { target: { closest: () => link } }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 1); // no Cmd, no popup for the link
+  popup.emit('mouseover', { target: { closest: () => link }, metaKey: true }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 2); assert.equal(popover.stack[1].file, target); assert.equal(popover.stack[1].anchor, link);
+  f.doc.body.children[1].emit('click', { target: f.doc.body.children[1] });
+  assert.equal(f.doc.body.children.length, 0);
+  assert.equal(f.calls.triggers.at(-1).info.linktext, target.path); assert.equal(f.calls.triggers.at(-1).info.targetEl, link);
+  assert.deepEqual(f.app.keymap.scopes, []);
+  f.stop();
+});
 test('the card popup closes after the pointer leaves, and goes with the view', async () => {
   const f = await fixture(3); f.refresh();
   const card = f.view.grid.children[1];
