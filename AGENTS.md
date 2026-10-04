@@ -40,5 +40,5 @@
 
 - PalmWiki Home, 2hop-links-plus and the Cosense-style CSS are each developed in a Claude Code session opened in its own folder. The ObsidianOps session is the hub for vault settings, diagnostics and the development status page.
 - When another repository needs a change (for example CSS for a new class name), do not edit it here: find that repository's session with `ListAgents` and ask it with `SendMessage`. If there is no such session, tell the owner.
-- 2hop-links-plus copies `excerpt()`, `firstImage()` and `PreviewStore` from `main.js` into its `src/cardPreview.ts`. When you change them, tell the 2hop-links-plus session.
+- 2hop-links-plus copies `excerpt()`, `firstImage()` and `PreviewStore` from `main.js` into its `src/cardPreview.ts`, and `NotePreview`, `previewMarkdown()` and `CardPopover` into its `src/notePreview.ts` and `src/relatedPopover.tsx`. When you change them, tell the 2hop-links-plus session.
 - After deploying to the vault, send the ObsidianOps session the version and a one-line summary so it can update the status page.

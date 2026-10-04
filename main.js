@@ -1235,6 +1235,7 @@ class ScopePicker extends (FuzzySuggestModal || class {}) {
   }
 }
 
+// 2hop-links-plus copies this into src/notePreview.ts / src/relatedPopover.tsx; tell its session when it changes.
 // The search preview shows the body without frontmatter, up to PREVIEW_CHARS characters.
 function previewMarkdown(body) {
   let text = String(body).replace(/^\uFEFF/, '');
@@ -1251,6 +1252,7 @@ function omnisearchTerms(query) {
     .filter(word => word && !word.startsWith('-') && !/^[a-z]+:/i.test(word));
 }
 
+// 2hop-links-plus copies this into src/notePreview.ts / src/relatedPopover.tsx; tell its session when it changes.
 // Renders a note into `el` with Obsidian's Markdown renderer: the title, then the body without
 // frontmatter (up to PREVIEW_CHARS). Read-only and light: no editor, no view, so it switches fast.
 // Shared by the search panes and the Home card popover; the newest show() wins.
@@ -1422,6 +1424,7 @@ class NotePreviewPane {
   }
 }
 
+// 2hop-links-plus copies this into src/notePreview.ts / src/relatedPopover.tsx; tell its session when it changes.
 // Light popups for Home cards: the same NotePreview, 520×440. Cmd+hover on a card opens one beside
 // it; while one is open, moving to another card switches to that card. Cmd+hover on a link inside a
 // popup opens the next popup for the linked note, and so on (a stack, closed together).
