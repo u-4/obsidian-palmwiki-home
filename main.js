@@ -1252,6 +1252,54 @@ function omnisearchTerms(query) {
     .filter(word => word && !word.startsWith('-') && !/^[a-z]+:/i.test(word));
 }
 
+function normalizeHeading(text) {
+  return String(text).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// The line holding a link: within its paragraph, list item or table cell, only the part between line
+// breaks (<br>, a newline in the text, a nested list or the list bullet), wrapped in a span.
+// Headings are taken whole. As in 2hop-links-plus (notePreview.ts lineAround()).
+function lineAround(link) {
+  const block = link.closest('li, td, th, h1, h2, h3, h4, h5, h6, p');
+  if (!block) return link;
+  if (/^H\d$/.test(block.tagName)) return block;
+  const isBoundary = node => node.nodeName === 'BR' || node.nodeName === 'UL' || node.nodeName === 'OL'
+    || !!node.classList?.contains('list-bullet') || !!node.classList?.contains('list-collapse-indicator');
+  let child = link;
+  while (child.parentNode && child.parentNode !== block) child = child.parentNode;
+  let first = child;
+  for (;;) {
+    const prev = first.previousSibling;
+    if (!prev || isBoundary(prev)) break;
+    if (prev.nodeType === 3 && prev.textContent.includes('\n')) {
+      const at = prev.textContent.lastIndexOf('\n') + 1;
+      first = at < prev.length ? prev.splitText(at) : prev.nextSibling || first;
+      break;
+    }
+    first = prev;
+  }
+  let last = child;
+  for (;;) {
+    const next = last.nextSibling;
+    if (!next || isBoundary(next)) break;
+    if (next.nodeType === 3 && next.textContent.includes('\n')) {
+      const at = next.textContent.indexOf('\n');
+      if (at > 0) { next.splitText(at); last = next; }
+      break;
+    }
+    last = next;
+  }
+  const line = block.ownerDocument.createElement('span');
+  block.insertBefore(line, first);
+  let node = first;
+  while (node) {
+    const following = node === last ? null : node.nextSibling;
+    line.appendChild(node);
+    node = following;
+  }
+  return line;
+}
+
 // 2hop-links-plus copies this into src/notePreview.ts / src/relatedPopover.tsx; tell its session when it changes.
 // Renders a note into `el` with Obsidian's Markdown renderer: the title, then the body without
 // frontmatter (up to PREVIEW_CHARS). Read-only and light: no editor, no view, so it switches fast.
@@ -1324,6 +1372,32 @@ class NotePreview {
       this.el.append(more);
     }
     this.markTerms(content);
+    if (selected.focus) this.reveal(content, selected.file, selected.focus);
+  }
+
+  // Scrolls to and highlights the linked heading, or else the first line with a link to one of the
+  // focus notes (`{ heading, linkTargets: [path] }`). Only the rendered links are examined.
+  // As in 2hop-links-plus (notePreview.ts reveal()).
+  reveal(content, file, focus) {
+    let target = null;
+    if (focus.heading) {
+      const wanted = normalizeHeading(focus.heading);
+      target = [...content.querySelectorAll('h1, h2, h3, h4, h5, h6')].find(h => normalizeHeading(h.textContent || '') === wanted) || null;
+    }
+    if (!target && focus.linkTargets?.length) {
+      const targets = new Set(focus.linkTargets);
+      for (const link of content.querySelectorAll('a.internal-link')) {
+        const href = (link.dataset.href || link.getAttribute('href') || '').split('#')[0].split('|')[0];
+        const dest = href ? this.app.metadataCache.getFirstLinkpathDest(href, file.path) : null;
+        if (dest && targets.has(dest.path)) { target = lineAround(link); break; }
+      }
+    }
+    if (!target) return;
+    target.classList.add('palmwiki-preview-focus');
+    // Keep the highlighted part about a third of the way down the preview.
+    const box = this.el.getBoundingClientRect();
+    const at = target.getBoundingClientRect();
+    this.el.scrollTop = Math.max(0, this.el.scrollTop + at.top - box.top - this.el.clientHeight / 3);
   }
 
   // Marks the query words in the rendered preview and scrolls to the first one.
@@ -1425,24 +1499,27 @@ class NotePreviewPane {
 }
 
 // 2hop-links-plus copies this into src/notePreview.ts / src/relatedPopover.tsx; tell its session when it changes.
-// Light popups for Home cards: the same NotePreview, 520×440. Cmd+hover on a card opens one beside
-// it; while one is open, moving to another card switches to that card. Cmd+hover on a link inside a
-// popup opens the next popup for the linked note, and so on (a stack, closed together).
-// Clicking inside a popup (not on a link, not after selecting text) hands over to Obsidian's page
+// Light popups for Home cards: a row of the note's linked cards above the same NotePreview, 520×440
+// in all. Cmd+hover on a card opens one off the card's corner; while one is open, moving to another
+// card switches to that card. Cmd+hover on a link or a row card inside a popup opens the next popup
+// for that note, and so on (a stack, closed together); it scrolls to the line linking back.
+// Clicking inside a preview (not on a link, not after selecting text) hands over to Obsidian's page
 // preview — Hover Editor when installed — through the standard hover-link event, for editing.
+// As in 2hop-links-plus (relatedPopover.tsx), whose cards are ordered by relevance; here the row is
+// just the note's links and backlinks, newest first (no ranking of our own).
 class CardPopover {
   constructor(plugin) {
     this.plugin = plugin;
     this.app = plugin.app;
-    this.stack = []; // [{ el, preview, file, anchor, view }], the card's popup first
-    this.hovered = null; // the card under the pointer: { el, file, view }
-    this.hoveredLink = null; // a link under the pointer inside a popup: { a, level }
+    this.stack = []; // [{ el, preview, previewEl, file, anchor, view }], the card's popup first
+    this.hovered = null; // the Home card under the pointer: { el, file, view }
+    this.hoveredTarget = null; // a link or row card under the pointer inside a popup: { el, level, file, heading }
     this.openTimer = null;
     this.closeTimer = null;
     this.scoped = false;
     this.onKey = event => {
       if (event.key !== 'Meta' && event.key !== 'Control') return;
-      if (this.hoveredLink) this.scheduleLink(this.hoveredLink.a, this.hoveredLink.level);
+      if (this.hoveredTarget) this.scheduleTarget(this.hoveredTarget);
       else if (this.hovered && !this.stack.length) this.schedule(() => this.openCard(this.hovered), 60);
     };
     // Obsidian takes Escape before page listeners, so the popups hold a key scope while open.
@@ -1452,7 +1529,7 @@ class CardPopover {
 
   get card() { return this.stack[0] || null; }
 
-  // Called by a card on mouseover / mouseleave.
+  // Called by a Home card on mouseover / mouseleave.
   enter(card, event) {
     this.hovered = card;
     this.cancelClose();
@@ -1488,30 +1565,56 @@ class CardPopover {
 
   openCard(card) {
     if (this.plugin.disposed || card.view.disposed || !card.el.isConnected) return;
-    this.open(0, card.el, card.file, card.view);
+    this.open(0, card.el, card.file, card.view, true, null);
   }
 
-  scheduleLink(a, level) {
-    const file = this.linkTarget(a, level);
-    if (!file || this.stack[level + 1]?.anchor === a) return;
-    this.schedule(() => { if (this.stack[level]) this.open(level + 1, a, file, this.stack[level].view); }, 60);
+  // The next popup, for a link or row card in the popup at `level`: it scrolls to the line that
+  // links back to that popup's note (or the link's heading).
+  scheduleTarget(target) {
+    const { el, level, file, heading } = target;
+    if (!file || this.stack[level + 1]?.anchor === el) return;
+    this.schedule(() => {
+      const from = this.stack[level];
+      if (!from || !el.isConnected) return;
+      const beside = el.classList?.contains('palmwiki-popover-card');
+      this.open(level + 1, el, file, from.view, beside, { heading, linkTargets: [from.file.path] });
+    }, 60);
   }
 
   linkTarget(a, level) {
     const href = a.dataset?.href || a.getAttribute?.('href') || '';
     const path = href.split('#')[0].split('|')[0];
     const file = path ? this.app.metadataCache.getFirstLinkpathDest(path, this.stack[level]?.file.path || '') : null;
-    return file instanceof TFile && file.extension === 'md' ? file : null;
+    if (!(file instanceof TFile) || file.extension !== 'md') return null;
+    // The innermost heading of "Note#A#B"; block links ("#^id") have none.
+    const heading = (href.split('|')[0].split('#').slice(1).pop() || '').replace(/^\^.*/, '');
+    return { file, heading: heading || undefined };
   }
 
-  open(level, anchor, file, view) {
+  // The note's links and backlinks (Markdown notes only), newest first.
+  related(file, limit = 10) {
+    const resolved = this.app.metadataCache.resolvedLinks || {};
+    const paths = new Set(Object.keys(resolved[file.path] || {}));
+    for (const [source, targets] of Object.entries(resolved)) if (targets && targets[file.path]) paths.add(source);
+    paths.delete(file.path);
+    return [...paths].map(path => this.app.vault.getAbstractFileByPath(path))
+      .filter(f => f instanceof TFile && f.extension === 'md')
+      .sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, limit);
+  }
+
+  open(level, anchor, file, view, beside, focus) {
     this.closeFrom(level);
     const doc = anchor.ownerDocument;
     this.listen(doc);
     const el = doc.createElement('div');
-    el.className = 'palmwiki-card-popover markdown-rendered';
-    const entry = { el, file, anchor, view, preview: null };
-    entry.preview = new NotePreview(this.app, el, {
+    el.className = 'palmwiki-card-popover';
+    const cardsEl = doc.createElement('div');
+    cardsEl.className = 'palmwiki-popover-cards';
+    const previewEl = doc.createElement('div');
+    previewEl.className = 'palmwiki-card-popover-preview markdown-rendered';
+    el.append(cardsEl, previewEl);
+    const entry = { el, previewEl, file, anchor, view, preview: null };
+    entry.preview = new NotePreview(this.app, previewEl, {
       onLink: (link, source, event) => {
         this.close();
         void this.app.workspace.openLinkText(link, source, Keymap.isModEvent(event));
@@ -1520,15 +1623,17 @@ class CardPopover {
     el.addEventListener('mouseenter', () => this.cancelClose());
     el.addEventListener('mouseleave', () => this.scheduleClose());
     // Captured and kept from the rendered links: otherwise Obsidian's own page preview (Hover Editor)
-    // also opens on Cmd over a link here. A link's next popup is this one's job.
+    // also opens on Cmd over a link here. A link's or row card's next popup is this one's job.
     el.addEventListener('mouseover', event => {
       const a = event.target?.closest?.('a.internal-link');
-      if (!a) { if (this.hoveredLink?.level === level) this.hoveredLink = null; return; }
-      event.stopPropagation?.();
-      this.hoveredLink = { a, level };
-      if (Keymap.isModifier(event, 'Mod')) this.scheduleLink(a, level);
+      const card = a ? null : event.target?.closest?.('.palmwiki-popover-card');
+      if (!a && !card) { if (this.hoveredTarget?.level === level) this.hoveredTarget = null; return; }
+      if (a) event.stopPropagation?.();
+      const found = a ? this.linkTarget(a, level) : { file: card.palmwikiFile };
+      this.hoveredTarget = { el: a || card, level, file: found?.file || null, heading: found?.heading };
+      if (Keymap.isModifier(event, 'Mod')) this.scheduleTarget(this.hoveredTarget);
     }, true);
-    el.addEventListener('click', event => {
+    previewEl.addEventListener('click', event => {
       if (event.defaultPrevented || event.target?.closest?.('a')) return;
       if (doc.defaultView?.getSelection?.()?.toString()) return; // selecting text to copy
       this.edit(entry, event);
@@ -1536,13 +1641,48 @@ class CardPopover {
     if (!this.scoped && this.scope) { this.app.keymap?.pushScope(this.scope); this.scoped = true; }
     this.stack.push(entry);
     doc.body.append(el);
-    this.place(el, anchor, level === 0);
-    void entry.preview.show({ file });
+    const above = this.place(el, anchor, beside);
+    // The cards sit on the side of the preview nearest the anchor.
+    el.classList?.toggle('is-above', above);
+    this.renderCards(entry, cardsEl);
+    void entry.preview.show({ file, focus: focus || undefined });
+  }
+
+  renderCards(entry, cardsEl) {
+    const files = this.related(entry.file);
+    if (!files.length) { cardsEl.hidden = true; return; }
+    const doc = cardsEl.ownerDocument;
+    for (const file of files) {
+      const card = doc.createElement('div');
+      card.className = 'palmwiki-popover-card';
+      card.palmwikiFile = file;
+      card.title = file.path;
+      const title = doc.createElement('div');
+      title.className = 'palmwiki-popover-card-title';
+      title.textContent = file.basename;
+      const text = doc.createElement('div');
+      text.className = 'palmwiki-popover-card-text';
+      const cached = this.plugin.previews.get(file);
+      text.textContent = cached === undefined ? '…' : cached || '';
+      if (cached === undefined) {
+        void this.plugin.previews.read(file, () => card.isConnected).then(value => {
+          if (card.isConnected) text.textContent = value || '';
+        });
+      }
+      card.append(title, text);
+      card.addEventListener('click', event => {
+        event.preventDefault();
+        this.close();
+        void this.app.workspace.openLinkText(file.path, '', Keymap.isModEvent(event)).catch(() => new Notice('ノートを開けませんでした。'));
+      });
+      cardsEl.append(card);
+    }
   }
 
   // A card's popup goes off a corner of the card, overlapping that corner a little (below-right,
   // above-right, below-left, above-left: the first that fits, else the one with the most room), so
-  // the cards beside and below it stay free to point at next. A link's popup goes just below the link. Always inside the window.
+  // the cards beside and below it stay free to point at next. A link's popup goes just below the
+  // link, or above it. Always inside the window. Returns whether it opened above the anchor.
   place(el, target, beside) {
     const win = target.ownerDocument.defaultView;
     const vw = win?.innerWidth || 1024;
@@ -1552,28 +1692,31 @@ class CardPopover {
     const r = target.getBoundingClientRect();
     let left;
     let top;
+    let above;
     if (beside) {
       const o = 20; // overlap with the card's corner
       const corners = [
-        [r.right - o, r.bottom - o], [r.right - o, r.top + o - height],
-        [r.left + o - width, r.bottom - o], [r.left + o - width, r.top + o - height],
+        [r.right - o, r.bottom - o, false], [r.right - o, r.top + o - height, true],
+        [r.left + o - width, r.bottom - o, false], [r.left + o - width, r.top + o - height, true],
       ];
       const room = ([x, y]) => Math.max(0, Math.min(x + width, vw - 8) - Math.max(x, 8)) * Math.max(0, Math.min(y + height, vh - 8) - Math.max(y, 8));
       const best = corners.find(corner => room(corner) === width * height) || corners.reduce((a, b) => (room(b) > room(a) ? b : a));
-      [left, top] = best;
+      [left, top, above] = best;
     } else {
       left = r.left;
       top = r.bottom + 4;
-      if (top + height > vh - 8) top = r.top - 4 - height;
+      above = top + height > vh - 8;
+      if (above) top = r.top - 4 - height;
     }
     left = Math.min(Math.max(8, left), vw - 8 - width);
     top = Math.min(Math.max(8, top), vh - 8 - height);
     Object.assign(el.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+    return above;
   }
 
   edit(entry, event) {
-    // Taken before closing: a deeper popup's anchor is a link inside a popup that is about to go,
-    // so the card anchors the handover.
+    // Taken before closing: a deeper popup's anchor is a link or card inside a popup that is about
+    // to go, so the Home card anchors the handover.
     const card = this.stack[0];
     const box = entry.el.getBoundingClientRect?.();
     this.close();
@@ -1600,8 +1743,12 @@ class CardPopover {
   }
 
   closeFrom(level) {
-    while (this.stack.length > level) this.stack.pop().preview.dispose();
-    if (this.hoveredLink && this.hoveredLink.level >= level) this.hoveredLink = null;
+    while (this.stack.length > level) {
+      const entry = this.stack.pop();
+      entry.preview.dispose();
+      entry.el.remove();
+    }
+    if (this.hoveredTarget && this.hoveredTarget.level >= level) this.hoveredTarget = null;
   }
 
   close() {

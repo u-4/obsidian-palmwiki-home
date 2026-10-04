@@ -33,6 +33,7 @@ class Element {
   getBoundingClientRect() { return this.rect; }
   getClientRects() { return this.hidden ? [] : [this.rect]; }
   closest() { return null; }
+  querySelectorAll() { return []; }
 }
 function environment() {
   let next = 0; const timers = new Map(), frames = new Map();
@@ -570,15 +571,17 @@ test('Cmd+hover on a card shows the light popup beside it; a click inside hands 
   assert.equal(f.doc.body.children.length, 0); // no Cmd, no popup
   card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle(); await settle();
   const popup = f.doc.body.children[0];
-  assert.equal(popup.className, 'palmwiki-card-popover markdown-rendered');
+  assert.equal(popup.className, 'palmwiki-card-popover');
+  const [row, previewEl] = popup.children;
+  assert.equal(row.className, 'palmwiki-popover-cards'); assert.equal(row.hidden, true); // no links in this fixture
   assert.deepEqual({ ...popup.style }, { left: '480px', top: '300px', width: '520px', height: '440px' }); // below-right, over the corner
   // Near the bottom right of the window: above-left, clear of the card's row.
   const place = rect => { const el = f.doc.createElement('div'); const t = f.doc.createElement('div'); t.rect = rect; f.plugin.cardPopover.place(el, t, true); return [el.style.left, el.style.top]; };
   assert.deepEqual(place({ top: 600, bottom: 820, left: 1100, right: 1300 }), ['600px', '180px']);
   assert.deepEqual(place({ top: 500, bottom: 720, left: 300, right: 500 }), ['480px', '80px']); // above-right
-  assert.equal(popup.children[0].textContent, f.plugin.cardPopover.card.file.basename);
+  assert.equal(previewEl.children[0].textContent, f.plugin.cardPopover.card.file.basename);
   assert.equal(f.calls.triggers.length, 0); // Hover Editor is not asked while the light popup is used
-  popup.emit('click', { target: popup });
+  previewEl.emit('click', { target: previewEl });
   assert.equal(f.doc.body.children.length, 0);
   const hover = f.calls.triggers.at(-1);
   assert.equal(hover.name, 'hover-link'); assert.equal(hover.info.source, 'palmwiki-home-edit');
@@ -602,10 +605,28 @@ test('once a popup is open, pointing at another card switches it; Cmd on a link 
   assert.equal(f.doc.body.children.length, 1); // no Cmd, no popup for the link
   popup.emit('mouseover', { target: { closest: () => link }, metaKey: true }); f.clock.tick(); await settle();
   assert.equal(f.doc.body.children.length, 2); assert.equal(popover.stack[1].file, target); assert.equal(popover.stack[1].anchor, link);
-  f.doc.body.children[1].emit('click', { target: f.doc.body.children[1] });
+  const deeper = f.doc.body.children[1].children[1]; deeper.emit('click', { target: deeper });
   assert.equal(f.doc.body.children.length, 0);
   assert.equal(f.calls.triggers.at(-1).info.linktext, target.path); assert.equal(f.calls.triggers.at(-1).info.targetEl, second); // the card anchors it
   assert.deepEqual(f.app.keymap.scopes, []);
+  f.stop();
+});
+test('a popup shows the note\'s links and backlinks as a row, newest first; Cmd on a row card opens the next popup focused on the way back', async () => {
+  const f = await fixture(0); const v = scopeVault(f); f.refresh();
+  const popover = f.plugin.cardPopover;
+  // 機器整備 links to 手順 (mtime 7) and is linked from 2026-09-27 (mtime 9).
+  assert.deepEqual([...popover.related(v.project).map(file => file.basename)], ['2026-09-27', '手順']);
+  const home = f.view.grid.children.find(card => card.dataset.path === v.project.path);
+  home.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
+  const [row] = f.doc.body.children[0].children;
+  assert.equal(row.hidden, false);
+  assert.deepEqual(row.children.map(card => card.children[0].textContent), ['2026-09-27', '手順']);
+  const daily = row.children[0];
+  f.doc.body.children[0].emit('mouseover', { target: { closest: sel => (sel === '.palmwiki-popover-card' ? daily : null) }, metaKey: true });
+  f.clock.tick(); await settle();
+  assert.equal(popover.stack.length, 2); assert.equal(popover.stack[1].file, v.daily); assert.equal(popover.stack[1].anchor, daily);
+  daily.emit('click', { preventDefault() {} }); await settle();
+  assert.equal(f.doc.body.children.length, 0); // a row card opens its note
   f.stop();
 });
 test('the card popup closes after the pointer leaves, and goes with the view', async () => {

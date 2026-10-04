@@ -96,11 +96,37 @@
 }
 .palmwiki-search-preview mark.palmwiki-search-preview-match { background: var(--text-highlight-bg); color: inherit; border-radius: 2px; }
 
-/* Home card popup (Cmd+hover): the light read-only preview, same size as Hover Editor's. */
+/* Home card popups (Cmd+hover): a row of linked cards above the light read-only preview, 520×440 in
+   all, as in 2hop-links-plus. The row has no background; pointer events pass between its cards. */
 .palmwiki-card-popover {
-  position: fixed; z-index: var(--layer-popover); box-sizing: border-box; overflow-y: auto; padding: 14px 18px;
+  position: fixed; z-index: var(--layer-popover); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+}
+.palmwiki-card-popover.is-above { flex-direction: column-reverse; }
+.palmwiki-popover-cards {
+  display: grid; flex: 0 0 auto; grid-auto-flow: column; grid-auto-columns: 132px; justify-content: start;
+  gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.palmwiki-popover-cards::-webkit-scrollbar { display: none; }
+.palmwiki-popover-cards[hidden] { display: none; }
+.palmwiki-popover-card {
+  display: flex; flex-direction: column; box-sizing: border-box; height: var(--cosense-popover-card-height, 150px);
+  padding: 8px; overflow: hidden; pointer-events: auto; cursor: pointer;
+  background: var(--cosense-card-bg, var(--background-primary)); color: var(--text-normal);
+  border: 1px solid var(--cosense-card-border, var(--background-modifier-border)); border-radius: var(--cosense-card-radius, 8px);
+  box-shadow: var(--shadow-s);
+}
+.palmwiki-popover-card:hover { background: var(--cosense-card-hover-bg, var(--background-secondary)); }
+.palmwiki-popover-card-title {
+  flex-shrink: 0; margin-bottom: 6px; font-weight: 600; font-size: var(--font-ui-small); overflow-wrap: anywhere;
+  color: var(--cosense-card-title, inherit); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.palmwiki-popover-card-text { font-size: var(--font-ui-smaller); line-height: 1.5; color: var(--cosense-card-text, var(--text-muted)); overflow: hidden; overflow-wrap: anywhere; }
+.palmwiki-card-popover-preview {
+  flex: 1 1 auto; min-height: 0; box-sizing: border-box; overflow-y: auto; padding: 14px 18px; pointer-events: auto;
   background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px;
   box-shadow: var(--shadow-l); font-size: var(--font-ui-small); cursor: pointer;
   user-select: text; -webkit-user-select: text;
 }
-.palmwiki-card-popover .palmwiki-search-preview-body img { max-width: 100%; }
+.palmwiki-card-popover-preview .palmwiki-search-preview-body img { max-width: 100%; }
+.palmwiki-preview-focus { border-radius: 4px; background: var(--text-highlight-bg); box-shadow: 0 0 0 3px var(--text-highlight-bg); }

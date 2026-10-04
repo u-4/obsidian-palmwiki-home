@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0 — 2026-10-04
+
+- Home card popups, following 2hop-links-plus 0.46–0.47: a row of up to 10 linked cards above the preview — the note's links and backlinks from Obsidian's resolved links, newest first (no ranking; that stays with 2hop-links-plus). The row has no background and lets the pointer through between cards; it sits on the side nearest the anchor (below the preview when the popup opens upward). Clicking a row card opens its note; Cmd+hover on one opens the next popup.
+- A popup opened from a link or row card scrolls to the line linking back to the popup it came from (or the link's #heading) and highlights it (`reveal()` / `lineAround()`, as in 2hop-links-plus).
+- Includes the code comments noting the parts 2hop-links-plus copies.
+
 ## 1.7.5 — 2026-10-04
 
 - Hover Editor now opens exactly where the clicked light popup was (it opens 20 px below the pointer it is given, so the popup's corner is handed over).
