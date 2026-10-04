@@ -17,6 +17,12 @@ Obsidian 用の軽いホーム画面プラグインです。Bases のカード�
 - Filters (1.2): include or hide daily notes; within a Project/Area, add unlinked mentions of its name and search the bodies of just those notes. Bases' toolbar search and filters narrow the cards as usual.
 - No own search index, no persistent body cache, no network access.
 
+## A short pause between Home and a note
+
+Going from Home to a note, or back, can feel a little heavy: there is a pause of about 0.1 s. This is how Obsidian works when one tab switches between a Bases view (Home) and a normal note. The tab's view is rebuilt each time, and Obsidian builds the note's editor (tens of ms, even for a short note). Going from note to note does not have this pause. Since 1.11.1 the header and the tab show the name of the note being opened during the pause, instead of 「ファイルがありません」. Keeping Home in its own tab would avoid the pause, but it would change how Home works (notes would open in another tab), so PalmWiki Home does not do that.
+
+Home とノートを行き来するとき、0.1秒ほどの間があり、「少し重い」「ちょっと引っかかる」と感じることがあります。これは、1つのタブで Bases の画面（Home）と通常のノートを切り替えるときの Obsidian の仕様です。切り替えのたびにタブの中の画面が作り直され、ノートの編集画面を作る時間（短いノートでも数十ミリ秒）がかかります。ノートからノートへの移動では、この間はありません。1.11.1 からは、この間もタイトルバーとタブに「ファイルがありません」ではなく、開こうとしているノートの名前を出します。Home を専用のタブに分ければこの間はなくなりますが、カードを押すとノートが別のタブに開くようになるなど使い方が変わるため、そうしていません。
+
 ## Install
 
 Copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/palmwiki-home/` and enable **PalmWiki Home**. Requires Obsidian 1.10 or later (Bases custom views).
