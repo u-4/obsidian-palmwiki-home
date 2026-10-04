@@ -652,6 +652,24 @@ test('hover only: a card opens once the pointer rests on it, not on a mouseover 
   assert.equal(f.doc.body.children.length, 0);
   f.stop();
 });
+test('going back onto a lower popup, away from the link that opened the next one, closes the next one after 0.25 s', async () => {
+  const f = await fixture(3); f.refresh();
+  const popover = f.plugin.cardPopover;
+  const card = f.view.grid.children[1];
+  card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
+  const target = [...f.files.values()].find(file => file.path !== popover.card.file.path && file.extension === 'md');
+  const link = f.doc.createElement('a'); link.dataset.href = target.path;
+  const parent = f.doc.body.children[0]; parent.children[1].append(link);
+  parent.emit('mouseover', { target: { closest: () => link }, metaKey: true }); f.clock.tick(); await settle();
+  assert.equal(popover.stack.length, 2);
+  f.doc.emit('mousemove', { target: link }); f.clock.tick(); assert.equal(popover.stack.length, 2); // still on the link
+  f.doc.emit('mousemove', { target: parent.children[1] }); // elsewhere on the lower popup
+  f.doc.emit('mousemove', { target: f.doc.body.children[1].children[1] }); f.clock.tick(); // into the next popup: cancelled
+  assert.equal(popover.stack.length, 2);
+  f.doc.emit('mousemove', { target: parent.children[1] }); f.clock.tick(300);
+  assert.equal(popover.stack.length, 1); assert.equal(f.doc.body.children.length, 1);
+  f.stop();
+});
 test('the card popup closes after the pointer leaves, and goes with the view', async () => {
   const f = await fixture(3); f.refresh();
   const card = f.view.grid.children[1];

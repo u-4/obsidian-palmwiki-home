@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.1 — 2026-10-04
+
+- Following 2hop-links-plus 0.48.1: after a link or row card in a popup opens the next popup, moving back onto the lower popup away from that link or card closes the popups above after 0.25 s. Going back to the link or card, or into the next popup, cancels it; a popup opened meanwhile from another link is not closed. Works in both opening modes.
+
 ## 1.9.0 — 2026-10-04
 
 Following 2hop-links-plus 0.48.0, with the same values and defaults:

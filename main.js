@@ -1547,6 +1547,7 @@ class CardPopover {
     this.openTimer = null;
     this.closeTimer = null;
     this.scoped = false;
+    this.childClose = null; // { entry, timer }: closing the popups above a popup the pointer went back to
     this.lastTypedAt = 0;
     this.lastButtons = 0;
     this.onKey = event => {
@@ -1562,6 +1563,7 @@ class CardPopover {
     // or a card appearing under it, opens nothing.
     this.onMove = event => {
       this.lastButtons = event.buttons || 0;
+      this.trackReturnToParent(event.target);
       if (this.trigger !== 'hover') return;
       const node = event.target;
       const inside = this.hoveredTarget;
@@ -1591,6 +1593,31 @@ class CardPopover {
   }
 
   get card() { return this.stack[0] || null; }
+
+  // Back on a lower popup, away from the link or card that opened the popup above it: close the
+  // popups above after a short pause, so crossing the lower popup on the way up does not close them.
+  // Only the popup seen at scheduling is closed, not a new one opened meanwhile from another link.
+  // As in 2hop-links-plus (relatedPopover.tsx trackReturnToParent()).
+  trackReturnToParent(node) {
+    if (this.stack.length < 2 || !node) { this.cancelChildClose(); return; }
+    let level = -1;
+    for (let i = this.stack.length - 1; i >= 0; i--) {
+      if (this.stack[i].el.contains?.(node)) { level = i; break; }
+    }
+    const child = this.stack[level + 1];
+    if (level < 0 || !child || child.anchor.contains?.(node)) { this.cancelChildClose(); return; }
+    if (this.childClose?.entry === child) return;
+    this.cancelChildClose();
+    const timer = setTimeout(() => {
+      this.childClose = null;
+      if (this.stack[level + 1] === child) this.closeFrom(level + 1);
+    }, 250);
+    this.childClose = { entry: child, timer };
+  }
+
+  cancelChildClose() {
+    if (this.childClose) { clearTimeout(this.childClose.timer); this.childClose = null; }
+  }
 
   get trigger() { return this.plugin.settings.popupTrigger === 'hover' ? 'hover' : 'mod'; }
 
@@ -1672,6 +1699,7 @@ class CardPopover {
   }
 
   open(level, anchor, file, view, beside, focus) {
+    this.cancelChildClose();
     this.closeFrom(level);
     const doc = anchor.ownerDocument;
     this.listen(doc);
@@ -1822,6 +1850,7 @@ class CardPopover {
   close() {
     this.cancelClose();
     this.cancelOpen();
+    this.cancelChildClose();
     this.closeFrom(0);
     if (this.scoped) { this.app.keymap?.popScope(this.scope); this.scoped = false; }
   }
