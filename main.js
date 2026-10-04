@@ -1550,6 +1550,8 @@ class CardPopover {
     this.childClose = null; // { entry, timer }: closing the popups above a popup the pointer went back to
     this.lastTypedAt = 0;
     this.lastButtons = 0;
+    this.lastScreenX = null;
+    this.lastScreenY = null;
     this.onKey = event => {
       if (event.key !== 'Meta' && event.key !== 'Control') {
         // Typing (not a modifier alone) holds hover-only popups back for a moment.
@@ -1560,8 +1562,14 @@ class CardPopover {
       else if (this.hovered && this.card?.anchor !== this.hovered.el) this.schedule(() => this.openCard(this.hovered), 60);
     };
     // Hover-only: only real pointer movement counts, so content scrolling under a still pointer,
-    // or a card appearing under it, opens nothing.
+    // or a card appearing under it, opens nothing. Chromium also sends mousemove without any
+    // movement when the content under the pointer scrolls or moves (a popup scrolling to its
+    // highlighted line); those are skipped by the unchanged screen position, for opening and for
+    // closing popups above alike. As in 2hop-links-plus (relatedPopover.tsx onPointerMove()).
     this.onMove = event => {
+      if (event.screenX === this.lastScreenX && event.screenY === this.lastScreenY) return;
+      this.lastScreenX = event.screenX;
+      this.lastScreenY = event.screenY;
       this.lastButtons = event.buttons || 0;
       this.trackReturnToParent(event.target);
       if (this.trigger !== 'hover') return;

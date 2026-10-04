@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.2 — 2026-10-04
+
+Following 2hop-links-plus 0.48.2:
+
+- Mousemoves without pointer movement are ignored (same screen position as the last one). Chromium sends them when the content under a still pointer scrolls or moves, e.g. a popup scrolling to its highlighted line, which could open or close popups in hover-only mode.
+- Popup previews and card rows have `overscroll-behavior: contain`, so scrolling past their end no longer scrolls the home behind.
+
 ## 1.9.1 — 2026-10-04
 
 - Following 2hop-links-plus 0.48.1: after a link or row card in a popup opens the next popup, moving back onto the lower popup away from that link or card closes the popups above after 0.25 s. Going back to the link or card, or into the next popup, cancels it; a popup opened meanwhile from another link is not closed. Works in both opening modes.

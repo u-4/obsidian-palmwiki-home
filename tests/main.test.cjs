@@ -642,13 +642,13 @@ test('hover only: a card opens once the pointer rests on it, not on a mouseover 
   const card = f.view.grid.children[1];
   card.emit('mouseover', {}); f.clock.tick(); await settle();
   assert.equal(f.doc.body.children.length, 0); // a card scrolled under the pointer opens nothing
-  f.doc.emit('mousemove', { target: card, buttons: 1 }); f.clock.tick(); await settle();
+  f.doc.emit('mousemove', { screenX: 1, target: card, buttons: 1 }); f.clock.tick(); await settle();
   assert.equal(f.doc.body.children.length, 0); // dragging or selecting
-  f.doc.emit('mousemove', { target: card, buttons: 0 }); f.clock.tick(); await settle();
+  f.doc.emit('mousemove', { screenX: 2, target: card, buttons: 0 }); f.clock.tick(); await settle();
   assert.equal(f.doc.body.children.length, 1); assert.equal(f.plugin.cardPopover.card.anchor, card);
   // Typing holds it back.
   f.plugin.cardPopover.close(); f.doc.emit('keydown', { key: 'a' });
-  f.doc.emit('mousemove', { target: card, buttons: 0 }); f.clock.tick(); await settle();
+  f.doc.emit('mousemove', { screenX: 3, target: card, buttons: 0 }); f.clock.tick(); await settle();
   assert.equal(f.doc.body.children.length, 0);
   f.stop();
 });
@@ -662,12 +662,23 @@ test('going back onto a lower popup, away from the link that opened the next one
   const parent = f.doc.body.children[0]; parent.children[1].append(link);
   parent.emit('mouseover', { target: { closest: () => link }, metaKey: true }); f.clock.tick(); await settle();
   assert.equal(popover.stack.length, 2);
-  f.doc.emit('mousemove', { target: link }); f.clock.tick(); assert.equal(popover.stack.length, 2); // still on the link
-  f.doc.emit('mousemove', { target: parent.children[1] }); // elsewhere on the lower popup
-  f.doc.emit('mousemove', { target: f.doc.body.children[1].children[1] }); f.clock.tick(); // into the next popup: cancelled
+  f.doc.emit('mousemove', { screenX: 4, target: link }); f.clock.tick(); assert.equal(popover.stack.length, 2); // still on the link
+  f.doc.emit('mousemove', { screenX: 5, target: parent.children[1] }); // elsewhere on the lower popup
+  f.doc.emit('mousemove', { screenX: 6, target: f.doc.body.children[1].children[1] }); f.clock.tick(); // into the next popup: cancelled
   assert.equal(popover.stack.length, 2);
-  f.doc.emit('mousemove', { target: parent.children[1] }); f.clock.tick(300);
+  f.doc.emit('mousemove', { screenX: 7, target: parent.children[1] }); f.clock.tick(300);
   assert.equal(popover.stack.length, 1); assert.equal(f.doc.body.children.length, 1);
+  f.stop();
+});
+test('a mousemove without pointer movement (content scrolling under it) is ignored', async () => {
+  const f = await fixture(3); f.plugin.settings.popupTrigger = 'hover'; f.refresh();
+  const card = f.view.grid.children[1];
+  card.emit('mouseover', {});
+  f.doc.emit('mousemove', { screenX: 500, screenY: 300, target: f.doc.body, buttons: 0 });
+  f.doc.emit('mousemove', { screenX: 500, screenY: 300, target: card, buttons: 0 }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 0); // the card only came under a still pointer
+  f.doc.emit('mousemove', { screenX: 501, screenY: 300, target: card, buttons: 0 }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 1);
   f.stop();
 });
 test('the card popup closes after the pointer leaves, and goes with the view', async () => {
