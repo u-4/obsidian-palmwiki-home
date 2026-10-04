@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.0 — 2026-10-04
+
+- Projects and Areas also take in notes tagged with their name or an alias — `#サブスク`, or a part of a nested tag such as `#PKM/サブスク` — compared after NFKC and lower case, ignoring spaces, `_` and `-`. Tags come from Obsidian's metadata cache (body and frontmatter); no note is read. Checkbox 「同じ名前のタグが付いたノートも」, on by default. The heading reads 「…」とつながるノート.
+
 ## 1.11.2 — 2026-10-04
 
 - Clicking a Home card closes its popups. Opening a note in the same tab already did (the home view goes away); Cmd+click opens a new tab and left them over it.

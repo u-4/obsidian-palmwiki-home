@@ -410,9 +410,24 @@ test('choosing in the picker scopes the home; すべて clears it; scope bar sho
   picker.onChooseItem(picker.getItems().find(item => item.path === v.project.path)); f.doc.flush();
   assert.equal(f.plugin.scope, v.project.path);
   const text = el => [el.textContent, ...el.children.map(text)].join('');
-  assert.match(text(f.view.scopeBar), /機器整備」とリンクでつながるノート/);
+  assert.match(text(f.view.scopeBar), /機器整備」とつながるノート/);
   picker.onChooseItem(picker.getItems()[0]); f.doc.flush();
   assert.equal(f.plugin.scope, null); assert.equal(f.view.total, 404);
+  f.stop();
+});
+test('notes tagged with the Project name (or a part of a nested tag) are in it by default; the checkbox drops them', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  const tagged = new TFile('00_Inbox/タグのメモ.md', 100, 6); f.files.set(tagged.path, tagged);
+  f.metadata.set(tagged.path, { tags: [{ tag: '#PKM/機器_整備' }] });
+  const other = new TFile('00_Inbox/別のタグ.md', 100, 6); f.files.set(other.path, other);
+  f.metadata.set(other.path, { frontmatter: { tags: ['機器'] } });
+  f.view.data.groupedData[0].entries.unshift({ file: tagged }, { file: other });
+  f.refresh(); f.plugin.setScope(v.project.path); f.doc.flush();
+  const paths = () => f.view.files.map(file => file.path);
+  assert.ok(paths().includes(tagged.path)); assert.equal(paths().includes(other.path), false);
+  assert.equal(paths()[0], v.project.path);
+  f.view.includeTagged = false; f.view.refreshWindow(); f.doc.flush();
+  assert.equal(paths().includes(tagged.path), false);
   f.stop();
 });
 test('favorites toggle, persist, follow renames and drop deleted notes', async () => {

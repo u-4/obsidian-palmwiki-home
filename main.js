@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
@@ -230,6 +230,28 @@ function scopeMembers(app, scopePath) {
     if (targets && Object.prototype.hasOwnProperty.call(targets, scopePath)) members.add(source);
   }
   return members;
+}
+
+// Notes with a tag named like a Project/Area (its note name or an alias): `#サブスク`, or a part of a
+// nested tag such as `#PKM/サブスク` or `#サブスク/請求`. Compared after NFKC and lower case, ignoring
+// spaces, `_` and `-` (tags cannot hold spaces). Tags come from Obsidian's metadata cache (body and
+// frontmatter); no note is read.
+function tagKey(text) {
+  return String(text).normalize('NFKC').toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+function scopeTagged(app, scopePath, aliases) {
+  const names = new Set([noteTitle(scopePath), ...aliases].map(tagKey).filter(Boolean));
+  const tagged = new Set();
+  for (const file of app.vault.getMarkdownFiles()) {
+    const cache = app.metadataCache.getFileCache(file);
+    if (!cache) continue;
+    const tags = typeof getAllTags === 'function' ? getAllTags(cache) || []
+      : [...(cache.tags || []).map(t => t.tag), ...[cache.frontmatter?.tags, cache.frontmatter?.tag].flat().filter(t => typeof t === 'string')];
+    if (tags.some(tag => String(tag).replace(/^#/, '').split('/').some(part => names.has(tagKey(part))))) tagged.add(file.path);
+  }
+  tagged.delete(scopePath);
+  return tagged;
 }
 
 function snapshotKey(file) {
@@ -648,7 +670,8 @@ class PalmWikiHome extends Plugin {
   currentScope() {
     if (!this.scope) return null;
     if (this.scopeCache?.path !== this.scope) {
-      this.scopeCache = { path: this.scope, members: scopeMembers(this.app, this.scope) };
+      this.scopeCache = { path: this.scope, members: scopeMembers(this.app, this.scope),
+        tagged: scopeTagged(this.app, this.scope, this.aliasesOf(this.scope)) };
     }
     return this.scopeCache;
   }
@@ -801,6 +824,7 @@ class LiteCards extends BasesView {
     this.scopeSig = null;
     this.includeDaily = true;
     this.includeMentions = false;
+    this.includeTagged = true;
     this.bodyQuery = '';
     this.queryTimer = null;
     this.scans = { mentions: null, body: null };
@@ -877,9 +901,14 @@ class LiteCards extends BasesView {
     return {
       head: scope?.path || null,
       accept: file => (!daily || file.path === scope?.path || !file.path.startsWith(daily)) &&
-        (!scope || scope.members.has(file.path) || !!mentions?.has(file.path)) &&
+        (!scope || this.inScope(scope, file.path) || !!mentions?.has(file.path)) &&
         (!body || body.has(file.path)),
     };
+  }
+
+  // A Project/Area's own notes: linked to or from it, and (by default) tagged with its name.
+  inScope(scope, path) {
+    return scope.members.has(path) || (this.includeTagged && scope.tagged.has(path));
   }
 
   // Bodies are read only for these opt-in filters, only while the Home is scoped,
@@ -888,18 +917,18 @@ class LiteCards extends BasesView {
     const scope = this.plugin.currentScope();
     if (scope && this.includeMentions) {
       const terms = mentionTerms(noteTitle(scope.path), this.plugin.aliasesOf(scope.path));
-      const key = JSON.stringify([scope.path, terms]);
+      const key = JSON.stringify([scope.path, terms, this.includeTagged]);
       if (this.scans.mentions?.key !== key) {
-        const files = markdownFiles(this.data).filter(file => !scope.members.has(file.path));
+        const files = markdownFiles(this.data).filter(file => !this.inScope(scope, file.path));
         this.startScan('mentions', key, files, text => terms.some(term => text.includes(term)));
       }
     } else this.scans.mentions = null;
     if (scope && this.bodyQuery) {
       const terms = queryTerms(this.bodyQuery);
       const mentions = this.includeMentions ? this.scans.mentions : null;
-      const key = JSON.stringify([scope.path, terms, !!mentions, !!mentions?.done]);
+      const key = JSON.stringify([scope.path, terms, !!mentions, !!mentions?.done, this.includeTagged]);
       if (this.scans.body?.key !== key) {
-        const files = markdownFiles(this.data).filter(file => scope.members.has(file.path) || !!mentions?.hits.has(file.path));
+        const files = markdownFiles(this.data).filter(file => this.inScope(scope, file.path) || !!mentions?.hits.has(file.path));
         this.startScan('body', key, files, text => terms.every(term => text.includes(term)));
       }
     } else this.scans.body = null;
@@ -947,7 +976,7 @@ class LiteCards extends BasesView {
     const plugin = this.plugin;
     const scope = plugin.scope;
     const favorites = plugin.settings.favoriteScopes;
-    const sig = JSON.stringify([scope, favorites, this.includeDaily, this.includeMentions]);
+    const sig = JSON.stringify([scope, favorites, this.includeDaily, this.includeMentions, this.includeTagged]);
     if (sig === this.scopeSig) return;
     this.scopeSig = sig;
     const doc = this.root.ownerDocument;
@@ -976,6 +1005,7 @@ class LiteCards extends BasesView {
     const toggle = (key, value) => { this[key] = value; this.limit = INITIAL_CARDS; this.refreshWindow(); };
     if (dailyFolder(this.app)) options.append(checkbox(doc, '日誌を含む', this.includeDaily, value => toggle('includeDaily', value)));
     if (scope) {
+      options.append(checkbox(doc, '同じ名前のタグが付いたノートも', this.includeTagged, value => toggle('includeTagged', value)));
       options.append(checkbox(doc, 'リンクなしで名前を含むノートも', this.includeMentions, value => toggle('includeMentions', value)));
       const search = doc.createElement('input');
       search.type = 'search';
@@ -993,7 +1023,7 @@ class LiteCards extends BasesView {
     head.className = 'palmwiki-scope-head';
     const name = doc.createElement('span');
     name.className = 'palmwiki-scope-name';
-    name.textContent = `「${noteTitle(scope)}」とリンクでつながるノート`;
+    name.textContent = `「${noteTitle(scope)}」とつながるノート`;
     const favorite = favorites.includes(scope);
     const star = button(doc, favorite ? '★ お気に入り' : '☆ お気に入りに追加', () => plugin.toggleFavorite(scope), 'palmwiki-scope-star');
     star.setAttribute('aria-pressed', String(favorite));
@@ -1053,6 +1083,9 @@ class LiteCards extends BasesView {
       this.lastScrollTop = this.parent.scrollTop;
     }
     const notes = [];
+    const scope = this.plugin.scope ? this.plugin.currentScope() : null;
+    const taggedOnly = scope && this.includeTagged ? [...scope.tagged].filter(path => !scope.members.has(path)).length : 0;
+    if (taggedOnly) notes.push('同じ名前のタグが付いたノートを含む');
     const mentions = this.plugin.scope && this.includeMentions ? this.scans.mentions : null;
     if (mentions) notes.push(mentions.done ? `名前を含むノート${mentions.hits.size}件を含む` : `名前を含むノートを検索中 ${mentions.checked} / ${mentions.total}`);
     const body = this.plugin.scope && this.bodyQuery ? this.scans.body : null;
