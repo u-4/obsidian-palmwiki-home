@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.0 — 2026-10-04
+
+- The header shows the Vault's name with an icon (opens Home) and a search icon; the 移動 button is gone (the unified search covers switching; `Open page switcher` stays as a command). New settings 「Home ボタンの表示名」 (empty = the Vault's name) and 「Home ボタンのアイコン」 (11 Lucide icons).
+- The page title stays centred over the whole header: the header's two sides get equal room. When the left side would not fit in its half beside the title, the Home button shows its icon only (the title comes first), measured live instead of the fixed 760 px.
+- The unified search is the regular search now: the default for 「検索ボタンの動き」 (「統合検索」 / 「外部の検索コマンド」), and the command is `Open unified search`.
+
 ## 1.10.0 — 2026-10-04
 
 - Home / 検索 / 移動 move into the note's header, right after Obsidian's back/forward buttons, as header buttons (`clickable-icon`, so the theme styles them like the native ones) instead of a white strip above it. Below a header width of 760 px they show icons only (tooltips keep the names). Where the header has no back/forward buttons shown (e.g. a phone layout), the strip above the view stays as before.

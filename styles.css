@@ -15,9 +15,15 @@
   border-bottom: 0; background: none;
 }
 .palmwiki-lite-nav.is-in-header .palmwiki-lite-nav-button {
-  width: auto; min-height: 0; gap: 4px; padding: 4px 6px; font-size: var(--font-ui-small); color: inherit;
+  width: auto; min-height: 0; gap: 5px; padding: 4px 6px; font-size: var(--font-ui-small); color: inherit;
 }
+.palmwiki-lite-nav .palmwiki-lite-nav-home .palmwiki-lite-nav-label { font-weight: 600; white-space: nowrap; }
 .palmwiki-lite-nav.is-in-header.is-compact .palmwiki-lite-nav-label { display: none; }
+/* Keep the page title centred over the whole header: both sides get equal room. */
+.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-header-left,
+.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-actions { flex: 1 1 0; }
+.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-actions { justify-content: flex-end; }
+.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-header-title-container { flex: 0 1 auto; min-width: 0; }
 .palmwiki-lite-nav-button > span[aria-hidden] { display: inline-flex; }
 .palmwiki-lite-home { padding: 12px; min-width: 0; }
 .palmwiki-lite-paging {

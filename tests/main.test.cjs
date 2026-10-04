@@ -178,7 +178,7 @@ test('toolbar deduplicates, survives view replacement and skips deferred tabs', 
   assert.equal(old.children.filter(c => c.className === 'palmwiki-lite-nav').length, 0);
   f.leaf.isDeferred = true; f.plugin.syncBars(); assert.equal(f.plugin.bars.size, 0); f.stop();
 });
-test('with back/forward buttons in the header, Home/検索/移動 go right after them as header buttons', async () => {
+test('with back/forward buttons in the header, the Vault name (Home) and a search icon go right after them as header buttons', async () => {
   const f = await fixture(0);
   const root = f.doc.createElement('div'); const header = f.doc.createElement('div'); const left = f.doc.createElement('div');
   const nav = f.doc.createElement('div'); const title = f.doc.createElement('div');
@@ -187,8 +187,11 @@ test('with back/forward buttons in the header, Home/検索/移動 go right after
   f.leaf.view = { containerEl: root }; f.plugin.syncBars();
   const bar = nav.nextElementSibling;
   assert.equal(bar.className, 'palmwiki-lite-nav is-in-header'); assert.equal(left.children[2], title);
-  assert.deepEqual(bar.children.map(b => [b.className, b.title]), [['clickable-icon palmwiki-lite-nav-button', 'Home'], ['clickable-icon palmwiki-lite-nav-button', '検索'], ['clickable-icon palmwiki-lite-nav-button', '移動']]);
+  assert.deepEqual(bar.children.map(b => [b.className, b.title]), [['clickable-icon palmwiki-lite-nav-button palmwiki-lite-nav-home', 'Home（PalmWiki）'], ['clickable-icon palmwiki-lite-nav-button palmwiki-lite-nav-search', '検索']]);
+  assert.equal(bar.children[0].children[1].textContent, 'PalmWiki'); assert.equal(bar.children[1].children.length, 1); // search: icon only
   f.plugin.syncBars(); assert.equal(left.children.length, 3); // kept, not duplicated
+  f.plugin.settings.homeLabel = '手のひらWiki'; f.plugin.refreshBars();
+  assert.equal(nav.nextElementSibling.children[0].children[1].textContent, '手のひらWiki'); assert.equal(left.children.length, 3);
   f.stop();
 });
 test('simultaneous Home clicks create one .base, subsequent clicks do not overwrite it', async () => {
@@ -557,12 +560,12 @@ test('Various Complements words complete the last word and keep the screen open;
   assert.deepEqual(titles(s.getSuggestions('委員')).filter(t => t.startsWith('word:')), []);
   f.stop();
 });
-test('the 検索 button and Cmd+G follow the search mode setting, which persists', async () => {
+test('the 検索 button and Cmd+G open the unified search by default; the external command stays a setting, which persists', async () => {
   const f = await fixture(0);
-  f.plugin.openSearch(); assert.deepEqual(f.calls.commands.slice(-1), ['omnisearch:show-modal']); assert.equal(f.modals.length, 0);
-  f.plugin.settings.searchMode = 'unified'; await f.plugin.saveSettings();
   f.plugin.openSearch(); assert.equal(f.modals.length, 1); assert.ok(f.modals[0] instanceof f.UnifiedSearch);
-  const again = new f.Main(f.app); await again.onload(); assert.equal(again.settings.searchMode, 'unified');
+  f.plugin.settings.searchMode = 'separate'; await f.plugin.saveSettings();
+  f.plugin.openSearch(); assert.deepEqual(f.calls.commands.slice(-1), ['omnisearch:show-modal']); assert.equal(f.modals.length, 1);
+  const again = new f.Main(f.app); await again.onload(); assert.equal(again.settings.searchMode, 'separate');
   assert.deepEqual([...again.settings.searchExcludeFolders], ['99_System']); again.onunload();
   f.stop();
 });

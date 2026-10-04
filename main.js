@@ -11,13 +11,19 @@ const MAX_CARDS = 300;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const MAX_PREVIEW_BYTES = 512 * 1024;
-const NAV_COMPACT_WIDTH = 760; // header width (px) below which Home/検索/移動 show icons only
+// Icons offered for the Home button (Lucide names in Obsidian).
+const HOME_ICONS = Object.freeze({
+  'home': '家', 'book-open': '開いた本', 'library': '本棚', 'notebook': 'ノート', 'notebook-pen': 'ノートとペン',
+  'tree-palm': 'ヤシの木', 'leaf': '葉', 'sprout': '芽', 'sparkles': 'きらめき', 'compass': '方位磁針', 'layout-grid': 'カード',
+});
 const DEFAULTS = Object.freeze({
   homePath: 'PalmWiki Home.base',
   searchCommand: 'omnisearch:show-modal',
   switchCommand: '',
   showImages: true,
-  searchMode: 'separate', // 'separate': the two buttons; 'unified': PalmWiki's own search screen (trial)
+  searchMode: 'unified', // 'unified': PalmWiki's own search screen; 'separate': the external search command
+  homeLabel: '', // the Home button's text; empty shows the Vault's name
+  homeIcon: 'home', // the Home button's icon (a Lucide name from HOME_ICONS)
   searchExcludeFolders: ['99_System'],
   searchPreview: true,
   omnisearchPreview: true,
@@ -355,7 +361,9 @@ class PalmWikiHome extends Plugin {
       }
     }
     this.settings.showImages = saved?.showImages !== false;
-    this.settings.searchMode = saved?.searchMode === 'unified' ? 'unified' : 'separate';
+    this.settings.searchMode = saved?.searchMode === 'separate' ? 'separate' : 'unified';
+    this.settings.homeLabel = typeof saved?.homeLabel === 'string' ? saved.homeLabel.slice(0, 80) : '';
+    this.settings.homeIcon = HOME_ICONS[saved?.homeIcon] ? saved.homeIcon : 'home';
     this.settings.searchPreview = saved?.searchPreview !== false;
     this.settings.omnisearchPreview = saved?.omnisearchPreview !== false;
     this.settings.cardPopover = saved?.cardPopover !== false;
@@ -396,7 +404,7 @@ class PalmWikiHome extends Plugin {
     // Command ids match PalmWiki Home 0.x so existing hotkeys keep working.
     this.addCommand({ id: 'open-home', name: 'Open home', callback: () => void this.openHome() });
     this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.openSearch() });
-    this.addCommand({ id: 'open-unified-search', name: 'Open unified search (trial)', callback: () => this.openUnifiedSearch() });
+    this.addCommand({ id: 'open-unified-search', name: 'Open unified search', callback: () => this.openUnifiedSearch() });
     this.addCommand({ id: 'open-switcher', name: 'Open page switcher', callback: () => this.runExternal('switchCommand') });
     this.addCommand({ id: 'open-scope', name: 'Open project or area', callback: () => this.openScopePicker(null, true) });
     this.addRibbonIcon('home', 'PalmWiki Home', () => void this.openHome());
@@ -464,6 +472,13 @@ class PalmWikiHome extends Plugin {
     });
   }
 
+  // Rebuilds every bar, e.g. after the Home button's text or icon changed.
+  refreshBars() {
+    for (const record of this.bars.values()) { record.observer?.disconnect(); record.resize?.disconnect(); record.bar.remove(); }
+    this.bars.clear();
+    this.syncBars();
+  }
+
   scheduleBars() {
     if (this.disposed || this.syncTimer !== null) return;
     this.syncTimer = setTimeout(() => { this.syncTimer = null; this.syncBars(); }, 50);
@@ -486,7 +501,7 @@ class PalmWikiHome extends Plugin {
       const slot = nav && win?.getComputedStyle?.(nav).display !== 'none' ? nav : null;
       const previous = this.bars.get(leaf);
       if (previous?.root === root && previous.view === leaf.view && previous.slot === slot
-        && (slot ? previous.bar.previousElementSibling === slot : previous.bar.parentElement === root)) return;
+        && (slot ? previous.bar.previousElementSibling === slot : previous.bar.parentElement === root)) { previous.update?.(); return; }
       previous?.observer?.disconnect();
       previous?.resize?.disconnect();
       previous?.bar.remove();
@@ -495,23 +510,28 @@ class PalmWikiHome extends Plugin {
       bar.className = slot ? 'palmwiki-lite-nav is-in-header' : 'palmwiki-lite-nav';
       bar.setAttribute('role', 'toolbar');
       bar.setAttribute('aria-label', 'PalmWiki navigation');
+      // The Vault's name (or the set text) with an icon opens Home; search is an icon. In the header,
+      // the same class as the native buttons, so the theme styles them alike.
+      const homeLabel = this.settings.homeLabel.trim() || this.app.vault.getName();
       const actions = [
-        ['home', 'Home', () => void this.openHome(leaf)],
-        ['search', '検索', () => this.openSearch(leaf)],
-        ['arrow-right-left', '移動', () => this.runExternal('switchCommand', leaf)],
+        [this.settings.homeIcon, homeLabel, 'Home', 'palmwiki-lite-nav-home', () => void this.openHome(leaf)],
+        ['search', '', '検索', 'palmwiki-lite-nav-search', () => this.openSearch(leaf)],
       ];
-      for (const [icon, label, action] of actions) {
-        // In the header, the same class as the native buttons, so the theme styles them alike.
-        const el = button(doc, '', action, slot ? 'clickable-icon palmwiki-lite-nav-button' : 'palmwiki-lite-nav-button');
-        el.setAttribute('aria-label', label);
-        el.title = label;
+      for (const [icon, label, name, kind, action] of actions) {
+        const el = button(doc, '', action, `${slot ? 'clickable-icon ' : ''}palmwiki-lite-nav-button ${kind}`);
+        el.setAttribute('aria-label', name === 'Home' ? `Home（${homeLabel}）` : name);
+        el.title = name === 'Home' ? `Home（${homeLabel}）` : name;
         const iconEl = doc.createElement('span');
         iconEl.setAttribute('aria-hidden', 'true');
         setIcon(iconEl, icon);
-        const text = doc.createElement('span');
-        text.className = 'palmwiki-lite-nav-label';
-        text.textContent = label;
-        el.append(iconEl, text);
+        if (!iconEl.firstChild && icon !== 'home') setIcon(iconEl, 'home'); // an icon this Obsidian lacks
+        el.append(iconEl);
+        if (label) {
+          const text = doc.createElement('span');
+          text.className = 'palmwiki-lite-nav-label';
+          text.textContent = label;
+          el.append(text);
+        }
         bar.append(el);
       }
       // Own buttons only, rather than patching another plugin's title/search DOM.
@@ -523,14 +543,23 @@ class PalmWikiHome extends Plugin {
       }) : null;
       observer?.observe(watched, { childList: true }); // No subtree/global DOM observer.
       if (slot) observer?.observe(root, { childList: true }); // a rebuilt header
-      // Icons only when the header is narrow.
+      // The page title stays centred over the whole header (CSS gives both sides equal room); when
+      // the left side would not fit in its half beside the title, the Home button drops its text.
       const header = slot?.closest('.view-header');
+      const left = slot?.parentElement;
+      const title = header?.querySelector(':scope > .view-header-title-container');
+      let fullLeft = 0;
+      const update = () => {
+        if (!header || !left || !bar.isConnected) return;
+        if (!bar.classList.contains('is-compact')) fullLeft = left.scrollWidth;
+        const side = (header.getBoundingClientRect().width - (title?.scrollWidth || 0)) / 2;
+        bar.classList.toggle('is-compact', fullLeft > side);
+      };
       const Resize = doc.defaultView?.ResizeObserver;
-      const resize = header && Resize ? new Resize(() => {
-        bar.classList.toggle('is-compact', header.getBoundingClientRect().width < NAV_COMPACT_WIDTH);
-      }) : null;
+      const resize = header && Resize ? new Resize(update) : null;
       resize?.observe(header);
-      this.bars.set(leaf, { root, view: leaf.view, bar, observer, resize, slot });
+      if (title) resize?.observe(title); // a new note's title
+      this.bars.set(leaf, { root, view: leaf.view, bar, observer, resize, slot, update });
     });
     for (const [leaf, record] of this.bars) {
       if (!live.has(leaf)) {
@@ -2059,14 +2088,30 @@ class LiteSettings extends PluginSettingTab {
         try { await this.plugin.saveSettings(); new Notice('Homeのパスを保存しました。'); }
         catch { new Notice('設定を保存できませんでした。'); }
       }));
+    new Setting(containerEl).setName('Home ボタンの表示名')
+      .setDesc(`タイトルバーの左に出す文字です。空にすると Vault 名（${this.app.vault.getName()}）を出します。幅が狭いときはアイコンだけになります。`)
+      .addText(text => text.setPlaceholder(this.app.vault.getName()).setValue(this.plugin.settings.homeLabel).onChange(async value => {
+        this.plugin.settings.homeLabel = value.slice(0, 80);
+        this.plugin.refreshBars();
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
+    new Setting(containerEl).setName('Home ボタンのアイコン')
+      .addDropdown(dropdown => {
+        for (const [icon, name] of Object.entries(HOME_ICONS)) dropdown.addOption(icon, name);
+        dropdown.setValue(this.plugin.settings.homeIcon).onChange(async value => {
+          this.plugin.settings.homeIcon = HOME_ICONS[value] ? value : 'home';
+          this.plugin.refreshBars();
+          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+        });
+      });
     new Setting(containerEl).setName('検索ボタンの動き')
-      .setDesc('「まとめる」は試験中の検索画面です（最近のノート・題名と別名・本文検索・新規作成）。Cmd+G も同じになります。')
+      .setDesc('「統合検索」は最近のノート・題名と別名・本文検索（Omnisearch）・新規作成をまとめた検索画面です。Cmd+G も同じになります。「外部の検索コマンド」は、下で選んだコマンドを直接開きます。')
       .addDropdown(dropdown => dropdown
-        .addOption('separate', '別々（検索と移動の2ボタン）')
-        .addOption('unified', 'まとめる（試験）')
+        .addOption('unified', '統合検索')
+        .addOption('separate', '外部の検索コマンド')
         .setValue(this.plugin.settings.searchMode)
         .onChange(async value => {
-          this.plugin.settings.searchMode = value === 'unified' ? 'unified' : 'separate';
+          this.plugin.settings.searchMode = value === 'separate' ? 'separate' : 'unified';
           try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
         }));
     new Setting(containerEl).setName('検索画面にプレビューを表示')
