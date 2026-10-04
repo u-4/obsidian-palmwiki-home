@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0 — 2026-10-04
+
+Following 2hop-links-plus 0.48.0, with the same values and defaults:
+
+- The note's name stays at the top of a Home card popup while scrolling (15 px, weight 600, one line, cut with … and shown whole on hover), so a scrolled, highlighted popup still says which note it is.
+- Setting 「小窓の開き方」: 「Cmd/Ctrl + ホバー」 (default) or 「ホバーのみ」. Hover only opens once the pointer rests about 0.3 s on a card or link (each move restarts the wait; only real pointer movement counts, so cards scrolled under a still pointer open nothing), never while a mouse button is down or within 1 s of typing. Cmd/Ctrl still opens at once in both. Hover only switches between cards with the same wait instead of the 0.15 s switch.
+- Setting 「小窓の関連カードの列の位置」: 「プレビューの上」 (default), 「プレビューの下」 or 「自動」 (preview near the pointer, row on the far side). The row no longer moves below the preview when the popup opens upward unless chosen.
+
 ## 1.8.0 — 2026-10-04
 
 - Home card popups, following 2hop-links-plus 0.46–0.47: a row of up to 10 linked cards above the preview — the note's links and backlinks from Obsidian's resolved links, newest first (no ranking; that stays with 2hop-links-plus). The row has no background and lets the pointer through between cards; it sits on the side nearest the anchor (below the preview when the popup opens upward). Clicking a row card opens its note; Cmd+hover on one opens the next popup.

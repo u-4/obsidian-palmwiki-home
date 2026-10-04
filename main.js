@@ -21,6 +21,8 @@ const DEFAULTS = Object.freeze({
   searchPreview: true,
   omnisearchPreview: true,
   cardPopover: true,
+  popupTrigger: 'mod', // 'mod': Cmd/Ctrl + hover; 'hover': hover only (as in 2hop-links-plus)
+  popupCardsPosition: 'above', // 'above' | 'below' | 'auto'
 });
 const PREVIEW_CHARS = 20000;
 const MAX_NOTE_SUGGESTIONS = 30;
@@ -356,6 +358,8 @@ class PalmWikiHome extends Plugin {
     this.settings.searchPreview = saved?.searchPreview !== false;
     this.settings.omnisearchPreview = saved?.omnisearchPreview !== false;
     this.settings.cardPopover = saved?.cardPopover !== false;
+    this.settings.popupTrigger = saved?.popupTrigger === 'hover' ? 'hover' : 'mod';
+    this.settings.popupCardsPosition = ['below', 'auto'].includes(saved?.popupCardsPosition) ? saved.popupCardsPosition : 'above';
     this.settings.searchExcludeFolders = Array.isArray(saved?.searchExcludeFolders)
       ? saved.searchExcludeFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')).slice(0, 50)
       : [...DEFAULTS.searchExcludeFolders];
@@ -1350,6 +1354,7 @@ class NotePreview {
     const title = doc.createElement('div');
     title.className = 'palmwiki-search-preview-title';
     title.textContent = selected.file.basename;
+    title.title = selected.file.basename;
     const content = doc.createElement('div');
     content.className = 'palmwiki-search-preview-body';
     this.el.append(title, content);
@@ -1498,6 +1503,30 @@ class NotePreviewPane {
   }
 }
 
+// Hover-only popups open after the pointer rests this long on a card or link, and not right after typing.
+const HOVER_REST_MS = 300;
+const TYPING_PAUSE_MS = 1000;
+
+// How long to wait before opening a popup for the pointed-at card or link, or null to not open.
+// Cmd/Ctrl opens quickly in both modes. Hover-only opens when the pointer rests (each move restarts
+// the wait), never while a mouse button is down (dragging, selecting) or just after typing.
+// As in 2hop-links-plus (relatedPopover.tsx hoverOpenDelay()).
+function hoverOpenDelay({ trigger, isMod, buttons, msSinceTyping }) {
+  if (isMod) return 60;
+  if (trigger !== 'hover') return null;
+  if (buttons !== 0) return null;
+  if (msSinceTyping < TYPING_PAUSE_MS) return null;
+  return HOVER_REST_MS;
+}
+
+// Whether the linked cards go below the preview. Auto keeps the preview next to the pointer and the
+// cards on the far side. As in 2hop-links-plus (cardsBelowPreview()).
+function cardsBelowPreview(position, above) {
+  if (position === 'below') return true;
+  if (position === 'auto') return !above;
+  return false;
+}
+
 // 2hop-links-plus copies this into src/notePreview.ts / src/relatedPopover.tsx; tell its session when it changes.
 // Light popups for Home cards: a row of the note's linked cards above the same NotePreview, 520×440
 // in all. Cmd+hover on a card opens one off the card's corner; while one is open, moving to another
@@ -1506,7 +1535,8 @@ class NotePreviewPane {
 // Clicking inside a preview (not on a link, not after selecting text) hands over to Obsidian's page
 // preview — Hover Editor when installed — through the standard hover-link event, for editing.
 // As in 2hop-links-plus (relatedPopover.tsx), whose cards are ordered by relevance; here the row is
-// just the note's links and backlinks, newest first (no ranking of our own).
+// just the note's links and backlinks, newest first (no ranking of our own). Settings: how popups open
+// (Cmd/Ctrl + hover, or hover only) and where the row sits (above, below, auto), as in 2hop-links-plus.
 class CardPopover {
   constructor(plugin) {
     this.plugin = plugin;
@@ -1517,10 +1547,43 @@ class CardPopover {
     this.openTimer = null;
     this.closeTimer = null;
     this.scoped = false;
+    this.lastTypedAt = 0;
+    this.lastButtons = 0;
     this.onKey = event => {
-      if (event.key !== 'Meta' && event.key !== 'Control') return;
+      if (event.key !== 'Meta' && event.key !== 'Control') {
+        // Typing (not a modifier alone) holds hover-only popups back for a moment.
+        if (!['Shift', 'Alt'].includes(event.key)) { this.lastTypedAt = Date.now(); this.cancelOpen(); }
+        return;
+      }
       if (this.hoveredTarget) this.scheduleTarget(this.hoveredTarget);
-      else if (this.hovered && !this.stack.length) this.schedule(() => this.openCard(this.hovered), 60);
+      else if (this.hovered && this.card?.anchor !== this.hovered.el) this.schedule(() => this.openCard(this.hovered), 60);
+    };
+    // Hover-only: only real pointer movement counts, so content scrolling under a still pointer,
+    // or a card appearing under it, opens nothing.
+    this.onMove = event => {
+      this.lastButtons = event.buttons || 0;
+      if (this.trigger !== 'hover') return;
+      const node = event.target;
+      const inside = this.hoveredTarget;
+      let open;
+      let still;
+      if (inside && inside.el.contains?.(node)) {
+        if (!inside.file || this.stack[inside.level + 1]?.anchor === inside.el) return;
+        open = () => this.openTarget(inside);
+        still = () => this.hoveredTarget === inside;
+      } else if (this.hovered && this.hovered.el.contains?.(node)) {
+        const card = this.hovered;
+        if (this.card?.anchor === card.el) return;
+        open = () => this.openCard(card);
+        still = () => this.hovered === card;
+      } else {
+        return;
+      }
+      const delay = hoverOpenDelay({ trigger: this.trigger, isMod: Keymap.isModifier(event, 'Mod'), buttons: this.lastButtons, msSinceTyping: Date.now() - this.lastTypedAt });
+      if (delay === null) { this.cancelOpen(); return; }
+      this.schedule(() => {
+        if (still() && this.lastButtons === 0 && Date.now() - this.lastTypedAt >= TYPING_PAUSE_MS) open();
+      }, delay);
     };
     // Obsidian takes Escape before page listeners, so the popups hold a key scope while open.
     this.scope = typeof Scope === 'function' ? new Scope(this.app.scope) : null;
@@ -1528,6 +1591,8 @@ class CardPopover {
   }
 
   get card() { return this.stack[0] || null; }
+
+  get trigger() { return this.plugin.settings.popupTrigger === 'hover' ? 'hover' : 'mod'; }
 
   // Called by a Home card on mouseover / mouseleave.
   enter(card, event) {
@@ -1537,8 +1602,9 @@ class CardPopover {
     if (this.card?.anchor === card.el) return;
     // Cmd opens; once a popup is open, pointing at another card is enough (a little slower,
     // so that crossing a card on the way to the popup does not switch it).
+    // Hover-only waits for the pointer to rest instead (onMove).
     if (Keymap.isModifier(event, 'Mod')) this.schedule(() => this.openCard(card), 60);
-    else if (this.stack.length) this.schedule(() => this.openCard(card), 150);
+    else if (this.trigger === 'mod' && this.stack.length) this.schedule(() => this.openCard(card), 150);
   }
 
   leave(card) {
@@ -1550,8 +1616,10 @@ class CardPopover {
   listen(doc) {
     if (this.keyDoc === doc) return;
     this.keyDoc?.removeEventListener('keydown', this.onKey, true);
+    this.keyDoc?.removeEventListener('mousemove', this.onMove, true);
     this.keyDoc = doc;
     doc.addEventListener('keydown', this.onKey, true);
+    doc.addEventListener('mousemove', this.onMove, { capture: true, passive: true });
   }
 
   schedule(fn, delay) {
@@ -1571,14 +1639,15 @@ class CardPopover {
   // The next popup, for a link or row card in the popup at `level`: it scrolls to the line that
   // links back to that popup's note (or the link's heading).
   scheduleTarget(target) {
-    const { el, level, file, heading } = target;
-    if (!file || this.stack[level + 1]?.anchor === el) return;
-    this.schedule(() => {
-      const from = this.stack[level];
-      if (!from || !el.isConnected) return;
-      const beside = el.classList?.contains('palmwiki-popover-card');
-      this.open(level + 1, el, file, from.view, beside, { heading, linkTargets: [from.file.path] });
-    }, 60);
+    if (!target.file || this.stack[target.level + 1]?.anchor === target.el) return;
+    this.schedule(() => this.openTarget(target), 60);
+  }
+
+  openTarget({ el, level, file, heading }) {
+    const from = this.stack[level];
+    if (!from || !file || !el.isConnected) return;
+    const beside = el.classList?.contains('palmwiki-popover-card');
+    this.open(level + 1, el, file, from.view, beside, { heading, linkTargets: [from.file.path] });
   }
 
   linkTarget(a, level) {
@@ -1642,8 +1711,7 @@ class CardPopover {
     this.stack.push(entry);
     doc.body.append(el);
     const above = this.place(el, anchor, beside);
-    // The cards sit on the side of the preview nearest the anchor.
-    el.classList?.toggle('is-above', above);
+    el.classList?.toggle('is-cards-below', cardsBelowPreview(this.plugin.settings.popupCardsPosition, above));
     this.renderCards(entry, cardsEl);
     void entry.preview.show({ file, focus: focus || undefined });
   }
@@ -1768,6 +1836,7 @@ class CardPopover {
     this.close();
     this.hovered = null;
     this.keyDoc?.removeEventListener('keydown', this.onKey, true);
+    this.keyDoc?.removeEventListener('mousemove', this.onMove, true);
     this.keyDoc = null;
   }
 }
@@ -1961,6 +2030,27 @@ class LiteSettings extends PluginSettingTab {
         if (!value) this.plugin.cardPopover?.close();
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
+    new Setting(containerEl).setName('小窓の開き方')
+      .setDesc('「ホバーのみ」では、カードやリンクの上でマウスを約0.3秒止めると開きます（ボタンを押している間と、文字を打った直後は開きません）。どちらでも Cmd/Ctrl を押せばすぐ開きます。2hop-links-plus と同じです。')
+      .addDropdown(dropdown => dropdown
+        .addOption('mod', 'Cmd/Ctrl + ホバー')
+        .addOption('hover', 'ホバーのみ')
+        .setValue(this.plugin.settings.popupTrigger)
+        .onChange(async value => {
+          this.plugin.settings.popupTrigger = value === 'hover' ? 'hover' : 'mod';
+          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+        }));
+    new Setting(containerEl).setName('小窓の関連カードの列の位置')
+      .setDesc('「自動」は、プレビューをマウスの近くに置き、列を遠い側に置きます。')
+      .addDropdown(dropdown => dropdown
+        .addOption('above', 'プレビューの上')
+        .addOption('below', 'プレビューの下')
+        .addOption('auto', '自動')
+        .setValue(this.plugin.settings.popupCardsPosition)
+        .onChange(async value => {
+          this.plugin.settings.popupCardsPosition = ['below', 'auto'].includes(value) ? value : 'above';
+          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+        }));
     new Setting(containerEl).setName('検索候補から外すフォルダ')
       .setDesc('まとめた検索の候補に出さないフォルダ（カンマ区切り）。')
       .addText(text => text.setValue(this.plugin.settings.searchExcludeFolders.join(', ')).onChange(async value => {

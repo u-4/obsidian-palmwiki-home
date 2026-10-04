@@ -101,7 +101,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered };
 }
@@ -627,6 +627,29 @@ test('a popup shows the note\'s links and backlinks as a row, newest first; Cmd 
   assert.equal(popover.stack.length, 2); assert.equal(popover.stack[1].file, v.daily); assert.equal(popover.stack[1].anchor, daily);
   daily.emit('click', { preventDefault() {} }); await settle();
   assert.equal(f.doc.body.children.length, 0); // a row card opens its note
+  f.stop();
+});
+test('popup timing and row side match 2hop-links-plus', () => {
+  const { hoverOpenDelay, cardsBelowPreview } = load();
+  const at = (trigger, isMod, buttons = 0, msSinceTyping = 5000) => hoverOpenDelay({ trigger, isMod, buttons, msSinceTyping });
+  assert.equal(at('mod', true), 60); assert.equal(at('hover', true), 60); // Cmd opens quickly either way
+  assert.equal(at('mod', false), null); assert.equal(at('hover', false), 300);
+  assert.equal(at('hover', false, 1), null); assert.equal(at('hover', false, 0, 500), null); // dragging; just typed
+  assert.deepEqual([cardsBelowPreview('above', true), cardsBelowPreview('below', false), cardsBelowPreview('auto', false), cardsBelowPreview('auto', true)], [false, true, true, false]);
+});
+test('hover only: a card opens once the pointer rests on it, not on a mouseover alone, and not while a button is down', async () => {
+  const f = await fixture(3); f.plugin.settings.popupTrigger = 'hover'; f.refresh();
+  const card = f.view.grid.children[1];
+  card.emit('mouseover', {}); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 0); // a card scrolled under the pointer opens nothing
+  f.doc.emit('mousemove', { target: card, buttons: 1 }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 0); // dragging or selecting
+  f.doc.emit('mousemove', { target: card, buttons: 0 }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 1); assert.equal(f.plugin.cardPopover.card.anchor, card);
+  // Typing holds it back.
+  f.plugin.cardPopover.close(); f.doc.emit('keydown', { key: 'a' });
+  f.doc.emit('mousemove', { target: card, buttons: 0 }); f.clock.tick(); await settle();
+  assert.equal(f.doc.body.children.length, 0);
   f.stop();
 });
 test('the card popup closes after the pointer leaves, and goes with the view', async () => {

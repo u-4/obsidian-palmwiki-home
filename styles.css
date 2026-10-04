@@ -102,7 +102,7 @@
   position: fixed; z-index: var(--layer-popover); box-sizing: border-box;
   display: flex; flex-direction: column; gap: 10px; pointer-events: none;
 }
-.palmwiki-card-popover.is-above { flex-direction: column-reverse; }
+.palmwiki-card-popover.is-cards-below { flex-direction: column-reverse; }
 .palmwiki-popover-cards {
   display: grid; flex: 0 0 auto; grid-auto-flow: column; grid-auto-columns: 132px; justify-content: start;
   gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
@@ -129,4 +129,11 @@
   user-select: text; -webkit-user-select: text;
 }
 .palmwiki-card-popover-preview .palmwiki-search-preview-body img { max-width: 100%; }
+/* The note's name stays at the top while scrolling (values for the 14px 18px padding above). */
+.palmwiki-card-popover-preview .palmwiki-search-preview-title {
+  position: sticky; top: -14px; z-index: 1; margin: -14px -18px 8px; padding: 8px 18px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  background: var(--background-primary); border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-medium); font-weight: 600;
+}
 .palmwiki-preview-focus { border-radius: 4px; background: var(--text-highlight-bg); box-shadow: 0 0 0 3px var(--text-highlight-bg); }
