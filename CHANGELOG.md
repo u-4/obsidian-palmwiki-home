@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.2 — 2026-10-04
+
+- Clicking a Home card closes its popups. Opening a note in the same tab already did (the home view goes away); Cmd+click opens a new tab and left them over it.
+- README: the short pause between Home and a note is how Obsidian switches a tab between a Bases view and a note.
+
 ## 1.11.1 — 2026-10-04
 
 - Going between Home and a note no longer flashes 「ファイルがありません」 in the header and the tab. Switching between a Bases view and a note makes a new view, which shows no file while it loads (tens of ms); the name of the file being opened is shown meanwhile. `WorkspaceLeaf.prototype.setViewState` and `FileView.prototype.getDisplayText` are wrapped while the plugin is loaded (unwrapped on unload, or switched off if another plugin wrapped them later). Back/forward goes through the same path. The wait itself is Obsidian building the editor; keeping Home in its own tab would avoid it but changes how Home works, so it is left as an option.

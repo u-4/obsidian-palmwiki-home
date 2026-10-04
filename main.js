@@ -1107,6 +1107,8 @@ class LiteCards extends BasesView {
       if (event.type === 'auxclick' && event.button !== 1) return;
       event.preventDefault();
       if (this.disposed) return;
+      // Opening a note (even in another tab, where this view stays) puts the card popups away.
+      this.plugin.cardPopover?.close();
       const current = this.app.vault.getAbstractFileByPath(file.path);
       if (!(current instanceof TFile)) { new Notice('このノートは移動または削除されました。'); return; }
       const mode = Keymap.isModEvent(event);

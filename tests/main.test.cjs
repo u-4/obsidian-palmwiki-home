@@ -727,6 +727,8 @@ test('the card popup closes after the pointer leaves, and goes with the view', a
   assert.equal(popover.scope.keys.find(k => k.key === 'Escape').func(), false);
   assert.equal(f.doc.body.children.length, 0); assert.equal(f.app.keymap.scopes.includes(popover.scope), false);
   card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
+  card.emit('click', { metaKey: true }); assert.equal(f.doc.body.children.length, 0); // Cmd+click opens a new tab; the popup goes
+  card.emit('mouseover', { metaKey: true }); f.clock.tick(); await settle();
   f.view.dispose(); assert.equal(f.doc.body.children.length, 0);
   f.stop();
 });
