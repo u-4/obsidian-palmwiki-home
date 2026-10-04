@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
@@ -401,6 +401,7 @@ class PalmWikiHome extends Plugin {
       this.registerHoverLinkSource(HOVER_EDIT_SOURCE, { display: 'PalmWiki Home（軽いプレビューから編集へ）', defaultMod: false });
     }
     this.cardPopover = new CardPopover(this);
+    this.patchPendingTitles();
     // Command ids match PalmWiki Home 0.x so existing hotkeys keep working.
     this.addCommand({ id: 'open-home', name: 'Open home', callback: () => void this.openHome() });
     this.addCommand({ id: 'focus-search', name: 'Open search', callback: () => this.openSearch() });
@@ -469,6 +470,41 @@ class PalmWikiHome extends Plugin {
       observer.disconnect();
       for (const pane of this.omnisearchPanes.values()) pane.dispose();
       this.omnisearchPanes.clear();
+    });
+  }
+
+  // Switching a tab between Home (a Bases view) and a note makes a new view, and while it loads its
+  // file (tens of ms) Obsidian shows 「ファイルがありません」 in the header and the tab. Until the
+  // file is set, the name of the file being opened is shown instead. Prototype methods of public API
+  // classes, wrapped and unwrapped as monkey-around does: if another plugin wrapped them after us,
+  // our wrapper is only switched off.
+  patchPendingTitles() {
+    const pending = new WeakMap(); // leaf → name of the file it is opening
+    const nameOf = path => (typeof path === 'string' ? path.split('/').pop().replace(/\.(md|base|canvas)$/i, '') : '');
+    this.wrapMethod(WorkspaceLeaf?.prototype, 'setViewState', original => function (viewState, ...rest) {
+      const name = nameOf(viewState?.state?.file);
+      if (name) pending.set(this, name);
+      const done = () => { if (pending.get(this) === name) pending.delete(this); };
+      const result = original.call(this, viewState, ...rest);
+      Promise.resolve(result).then(done, done);
+      return result;
+    });
+    this.wrapMethod(FileView?.prototype, 'getDisplayText', original => function (...args) {
+      if (!this.file && this.leaf && pending.has(this.leaf)) return pending.get(this.leaf);
+      return original.apply(this, args);
+    });
+  }
+
+  wrapMethod(target, name, make) {
+    const original = target?.[name];
+    if (typeof original !== 'function') return;
+    let active = true;
+    const inner = make(original);
+    const wrapper = function (...args) { return active ? inner.apply(this, args) : original.apply(this, args); };
+    target[name] = wrapper;
+    this.register(() => {
+      active = false;
+      if (target[name] === wrapper) target[name] = original;
     });
   }
 

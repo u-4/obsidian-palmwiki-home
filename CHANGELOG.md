@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.1 — 2026-10-04
+
+- Going between Home and a note no longer flashes 「ファイルがありません」 in the header and the tab. Switching between a Bases view and a note makes a new view, which shows no file while it loads (tens of ms); the name of the file being opened is shown meanwhile. `WorkspaceLeaf.prototype.setViewState` and `FileView.prototype.getDisplayText` are wrapped while the plugin is loaded (unwrapped on unload, or switched off if another plugin wrapped them later). Back/forward goes through the same path. The wait itself is Obsidian building the editor; keeping Home in its own tab would avoid it but changes how Home works, so it is left as an option.
+
 ## 1.11.0 — 2026-10-04
 
 - The header shows the Vault's name with an icon (opens Home) and a search icon; the 移動 button is gone (the unified search covers switching; `Open page switcher` stays as a command). New settings 「Home ボタンの表示名」 (empty = the Vault's name) and 「Home ボタンのアイコン」 (11 Lucide icons).

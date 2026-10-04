@@ -96,6 +96,8 @@ function load() {
       // Letters in order, like Obsidian's fuzzy search; a higher score for a tighter match.
       prepareFuzzySearch: query => text => { let i = 0, last = -1, gaps = 0; for (const ch of query.replace(/\s+/g, '')) { const at = text.indexOf(ch, last + 1); if (at < 0) return null; if (last >= 0) gaps += at - last - 1; last = at; i++; } return { score: -gaps }; },
       normalizePath: p => p.replace(/\/+/g, '/').replace(/^\//, ''),
+      FileView: class { getDisplayText() { return this.file ? this.file.basename : 'ファイルがありません'; } },
+      WorkspaceLeaf: class { async setViewState(viewState) { this.calls = (this.calls || 0) + 1; await this.loading; return viewState; } },
       Scope: class { constructor(parent) { this.parent = parent; this.keys = []; } register(modifiers, key, func) { this.keys.push({ modifiers, key, func }); } },
       Component, MarkdownRenderer: { async render(app, md, el) { rendered.push(md); el.textContent = md; } },
     }; },
@@ -103,7 +105,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered };
 }
@@ -645,6 +647,21 @@ test('a popup shows the note\'s links and backlinks as a row, newest first; Cmd 
   assert.equal(popover.stack.length, 2); assert.equal(popover.stack[1].file, v.daily); assert.equal(popover.stack[1].anchor, daily);
   daily.emit('click', { preventDefault() {} }); await settle();
   assert.equal(f.doc.body.children.length, 0); // a row card opens its note
+  f.stop();
+});
+test('while a tab loads a new note or Home, the header shows its name instead of 「ファイルがありません」; unloading unwraps', async () => {
+  const f = await fixture(0);
+  const { FileView, WorkspaceLeaf } = f;
+  const leaf = new WorkspaceLeaf(); let finish; leaf.loading = new Promise(r => { finish = r; });
+  const view = new FileView(); view.leaf = leaf; view.file = null;
+  const opening = leaf.setViewState({ type: 'markdown', state: { file: '10_Notes/Projects/サブスク.md' } });
+  assert.equal(view.getDisplayText(), 'サブスク');
+  finish(); await opening; await settle();
+  assert.equal(view.getDisplayText(), 'ファイルがありません'); // a file that failed to load says so again
+  view.file = { basename: 'サブスク' }; assert.equal(view.getDisplayText(), 'サブスク');
+  const wrapped = WorkspaceLeaf.prototype.setViewState;
+  f.plugin.unload?.(); f.plugin.onunload(); for (const fn of f.plugin.disposers) fn();
+  assert.notEqual(WorkspaceLeaf.prototype.setViewState, wrapped);
   f.stop();
 });
 test('popup timing and row side match 2hop-links-plus', () => {
