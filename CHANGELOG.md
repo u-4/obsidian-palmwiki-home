@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.0 — 2026-10-04
+
+- Home / 検索 / 移動 move into the note's header, right after Obsidian's back/forward buttons, as header buttons (`clickable-icon`, so the theme styles them like the native ones) instead of a white strip above it. Below a header width of 760 px they show icons only (tooltips keep the names). Where the header has no back/forward buttons shown (e.g. a phone layout), the strip above the view stays as before.
+
 ## 1.9.2 — 2026-10-04
 
 Following 2hop-links-plus 0.48.2:

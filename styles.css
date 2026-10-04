@@ -9,6 +9,16 @@
   white-space: nowrap; padding: 4px 10px; box-shadow: none;
 }
 .palmwiki-lite-nav-button svg { width: 16px; height: 16px; }
+/* In the note's header, beside back/forward: no strip of its own; the theme's header styles apply. */
+.palmwiki-lite-nav.is-in-header {
+  min-height: 0; padding: 0; gap: 2px; margin-left: 4px; overflow: visible;
+  border-bottom: 0; background: none;
+}
+.palmwiki-lite-nav.is-in-header .palmwiki-lite-nav-button {
+  width: auto; min-height: 0; gap: 4px; padding: 4px 6px; font-size: var(--font-ui-small); color: inherit;
+}
+.palmwiki-lite-nav.is-in-header.is-compact .palmwiki-lite-nav-label { display: none; }
+.palmwiki-lite-nav-button > span[aria-hidden] { display: inline-flex; }
 .palmwiki-lite-home { padding: 12px; min-width: 0; }
 .palmwiki-lite-paging {
   display: flex; align-items: center; justify-content: space-between;

@@ -11,6 +11,7 @@ const MAX_CARDS = 300;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const MAX_PREVIEW_BYTES = 512 * 1024;
+const NAV_COMPACT_WIDTH = 760; // header width (px) below which Home/検索/移動 show icons only
 const DEFAULTS = Object.freeze({
   homePath: 'PalmWiki Home.base',
   searchCommand: 'omnisearch:show-modal',
@@ -478,13 +479,20 @@ class PalmWikiHome extends Plugin {
       const split = typeof leaf.getRoot === 'function' ? leaf.getRoot() : null;
       if (split && (split === this.app.workspace.leftSplit || split === this.app.workspace.rightSplit)) return;
       live.add(leaf);
+      // Beside Obsidian's back/forward buttons in the note's header when they are shown; otherwise
+      // (a layout without them, e.g. a phone) one small strip above the view, as before.
+      const nav = root.querySelector?.(':scope > .view-header .view-header-nav-buttons');
+      const win = root.ownerDocument.defaultView;
+      const slot = nav && win?.getComputedStyle?.(nav).display !== 'none' ? nav : null;
       const previous = this.bars.get(leaf);
-      if (previous?.root === root && previous.bar.parentElement === root && previous.view === leaf.view) return;
+      if (previous?.root === root && previous.view === leaf.view && previous.slot === slot
+        && (slot ? previous.bar.previousElementSibling === slot : previous.bar.parentElement === root)) return;
       previous?.observer?.disconnect();
+      previous?.resize?.disconnect();
       previous?.bar.remove();
       const doc = root.ownerDocument;
       const bar = doc.createElement('div');
-      bar.className = 'palmwiki-lite-nav';
+      bar.className = slot ? 'palmwiki-lite-nav is-in-header' : 'palmwiki-lite-nav';
       bar.setAttribute('role', 'toolbar');
       bar.setAttribute('aria-label', 'PalmWiki navigation');
       const actions = [
@@ -493,27 +501,40 @@ class PalmWikiHome extends Plugin {
         ['arrow-right-left', '移動', () => this.runExternal('switchCommand', leaf)],
       ];
       for (const [icon, label, action] of actions) {
-        const el = button(doc, '', action, 'palmwiki-lite-nav-button');
+        // In the header, the same class as the native buttons, so the theme styles them alike.
+        const el = button(doc, '', action, slot ? 'clickable-icon palmwiki-lite-nav-button' : 'palmwiki-lite-nav-button');
         el.setAttribute('aria-label', label);
         el.title = label;
         const iconEl = doc.createElement('span');
         iconEl.setAttribute('aria-hidden', 'true');
         setIcon(iconEl, icon);
-        el.append(iconEl, doc.createTextNode(label));
+        const text = doc.createElement('span');
+        text.className = 'palmwiki-lite-nav-label';
+        text.textContent = label;
+        el.append(iconEl, text);
         bar.append(el);
       }
-      // Own one small strip, rather than patching another plugin's title/search DOM.
-      root.prepend(bar);
+      // Own buttons only, rather than patching another plugin's title/search DOM.
+      if (slot) slot.after(bar); else root.prepend(bar);
       const Observer = doc.defaultView?.MutationObserver;
+      const watched = slot ? slot.parentElement : root;
       const observer = Observer ? new Observer(() => {
-        if (bar.parentElement !== root) this.scheduleBars();
+        if (!bar.isConnected || bar.parentElement !== watched) this.scheduleBars();
       }) : null;
-      observer?.observe(root, { childList: true }); // No subtree/global DOM observer.
-      this.bars.set(leaf, { root, view: leaf.view, bar, observer });
+      observer?.observe(watched, { childList: true }); // No subtree/global DOM observer.
+      if (slot) observer?.observe(root, { childList: true }); // a rebuilt header
+      // Icons only when the header is narrow.
+      const header = slot?.closest('.view-header');
+      const Resize = doc.defaultView?.ResizeObserver;
+      const resize = header && Resize ? new Resize(() => {
+        bar.classList.toggle('is-compact', header.getBoundingClientRect().width < NAV_COMPACT_WIDTH);
+      }) : null;
+      resize?.observe(header);
+      this.bars.set(leaf, { root, view: leaf.view, bar, observer, resize, slot });
     });
     for (const [leaf, record] of this.bars) {
       if (!live.has(leaf)) {
-        record.observer?.disconnect(); record.bar.remove(); this.bars.delete(leaf);
+        record.observer?.disconnect(); record.resize?.disconnect(); record.bar.remove(); this.bars.delete(leaf);
       }
     }
   }
@@ -679,7 +700,7 @@ class PalmWikiHome extends Plugin {
   onunload() {
     this.disposed = true;
     if (this.syncTimer !== null) clearTimeout(this.syncTimer);
-    for (const record of this.bars?.values() || []) { record.observer?.disconnect(); record.bar.remove(); }
+    for (const record of this.bars?.values() || []) { record.observer?.disconnect(); record.resize?.disconnect(); record.bar.remove(); }
     this.bars?.clear();
     for (const view of [...(this.cardViews || [])]) view.dispose();
     this.cardViews?.clear();

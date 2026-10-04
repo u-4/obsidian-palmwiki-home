@@ -24,6 +24,8 @@ class Element {
   remove() { if (this.parentElement) { this.parentElement.children = this.parentElement.children.filter(c => c !== this); this.parentElement = null; } }
   contains(node) { return this === node || this.children.some(c => c.contains(node)); }
   get firstElementChild() { return this.children[0] || null; }
+  get previousElementSibling() { const p = this.parentElement; return p?.children[p.children.indexOf(this) - 1] || null; }
+  after(node) { this.parentElement.insertBefore(node, this.nextElementSibling); }
   get nextElementSibling() { const p = this.parentElement; return p?.children[p.children.indexOf(this) + 1] || null; }
   addEventListener(name, fn) { if (!this.listeners.has(name)) this.listeners.set(name, new Set()); this.listeners.get(name).add(fn); }
   removeEventListener(name, fn) { this.listeners.get(name)?.delete(fn); }
@@ -175,6 +177,19 @@ test('toolbar deduplicates, survives view replacement and skips deferred tabs', 
   f.leaf.view = { containerEl: f.doc.createElement('div') }; f.plugin.syncBars(); assert.equal(f.leaf.view.containerEl.children.length, 1);
   assert.equal(old.children.filter(c => c.className === 'palmwiki-lite-nav').length, 0);
   f.leaf.isDeferred = true; f.plugin.syncBars(); assert.equal(f.plugin.bars.size, 0); f.stop();
+});
+test('with back/forward buttons in the header, Home/検索/移動 go right after them as header buttons', async () => {
+  const f = await fixture(0);
+  const root = f.doc.createElement('div'); const header = f.doc.createElement('div'); const left = f.doc.createElement('div');
+  const nav = f.doc.createElement('div'); const title = f.doc.createElement('div');
+  left.append(nav, title); header.append(left); root.append(header);
+  root.querySelector = sel => (sel.includes('view-header-nav-buttons') ? nav : null);
+  f.leaf.view = { containerEl: root }; f.plugin.syncBars();
+  const bar = nav.nextElementSibling;
+  assert.equal(bar.className, 'palmwiki-lite-nav is-in-header'); assert.equal(left.children[2], title);
+  assert.deepEqual(bar.children.map(b => [b.className, b.title]), [['clickable-icon palmwiki-lite-nav-button', 'Home'], ['clickable-icon palmwiki-lite-nav-button', '検索'], ['clickable-icon palmwiki-lite-nav-button', '移動']]);
+  f.plugin.syncBars(); assert.equal(left.children.length, 3); // kept, not duplicated
+  f.stop();
 });
 test('simultaneous Home clicks create one .base, subsequent clicks do not overwrite it', async () => {
   const f = await fixture(); await Promise.all([f.plugin.openHome(), f.plugin.openHome()]); await f.plugin.openHome(); assert.equal(f.calls.creates, 1); f.stop();
