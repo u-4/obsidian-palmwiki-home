@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.8 — 2026-10-13
+
+- New setting right under the search-button mode: "Don't use Omnisearch on phones and tablets" (on by default). On mobile, body search and an Omnisearch search command open Obsidian's own search, even where Omnisearch is enabled, because Omnisearch rebuilds its whole index in memory at every start on iOS.
+
 ## 1.12.7 — 2026-10-13
 
 - When the search or page-switcher command chosen in settings belongs to a plugin that is turned off on this device, open Obsidian's own search or quick switcher instead of asking to choose a command. The body-search hand-off also falls back to the core search command when its API is not available.

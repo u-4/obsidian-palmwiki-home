@@ -81,9 +81,9 @@ class Plugin extends Component {
   addCommand(command) { this.commands.push(command); }
 }
 function load() {
-  const { doc, clock } = environment(); const notices = []; const modals = []; const urls = []; const rendered = [];
+  const { doc, clock } = environment(); const notices = []; const modals = []; const urls = []; const rendered = []; const platform = { isMobile: false };
   const context = { module: { exports: {} }, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
-    require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile,
+    require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile, Platform: platform,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
       Keymap: { isModEvent: ev => {
         // Obsidian inspects the real event via instanceOf(), even for an unmodified click.
@@ -118,7 +118,7 @@ function load() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
-  return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered };
+  return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
 function appDouble(doc, count = 0) {
   const files = new Map(), metadata = new Map(), bodies = new Map(), recentFiles = []; const calls = { reads: [], creates: 0, commands: [], images: [], opens: [], enumerations: 0, triggers: [] };
@@ -853,6 +853,18 @@ test('when the chosen search or switcher plugin is off on this device, Obsidian\
   f.app.internalPlugins = { getPluginById: () => null };
   f.plugin.runExternal('searchCommand'); f.plugin.runExternal('switchCommand'); f.plugin.searchBodies('機器');
   assert.deepEqual(run, ['global-search:open', 'switcher:open', 'global-search:open']); assert.deepEqual([...f.urls], []);
+  f.stop();
+});
+test('on phones and tablets the body search uses Obsidian\'s own search even with Omnisearch on (setting, default on)', async () => {
+  const f = await fixture(0); searchVault(f); const searched = [];
+  f.app.internalPlugins = { getPluginById: id => id === 'global-search' ? { enabled: true, instance: { openGlobalSearch: q => searched.push(q) } } : null };
+  f.platform.isMobile = true;
+  const s = new f.UnifiedSearch(f.app, f.plugin); const rows = s.getSuggestions('機器 整備');
+  s.selectSuggestion(rows[0], { key: 'Enter' });
+  assert.deepEqual(searched, ['機器 整備']); assert.deepEqual([...f.urls], []);
+  f.plugin.settings.mobileCoreSearch = false;
+  const t = new f.UnifiedSearch(f.app, f.plugin); t.selectSuggestion(t.getSuggestions('機器')[0], { key: 'Enter' });
+  assert.equal(f.urls.length, 1); assert.equal(searched.length, 1);
   f.stop();
 });
 test('search preview can be turned off in settings', async () => {

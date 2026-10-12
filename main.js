@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, Modal, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, Modal, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags, Platform } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
@@ -27,6 +27,7 @@ const DEFAULTS = Object.freeze({
   searchExcludeFolders: ['99_System'],
   searchPreview: true,
   omnisearchPreview: true,
+  mobileCoreSearch: true, // phones and tablets search note text with Obsidian's own search, not Omnisearch
   cardPopover: true,
   popupTrigger: 'mod', // 'mod': Cmd/Ctrl + hover; 'hover': hover only (as in 2hop-links-plus)
   popupCardsPosition: 'above', // 'above' | 'below' | 'auto'
@@ -394,6 +395,7 @@ class PalmWikiHome extends Plugin {
     this.settings.homeIcon = HOME_ICONS[saved?.homeIcon] ? saved.homeIcon : 'home';
     this.settings.searchPreview = saved?.searchPreview !== false;
     this.settings.omnisearchPreview = saved?.omnisearchPreview !== false;
+    this.settings.mobileCoreSearch = saved?.mobileCoreSearch !== false;
     this.settings.cardPopover = saved?.cardPopover !== false;
     this.settings.popupTrigger = saved?.popupTrigger === 'hover' ? 'hover' : 'mod';
     this.settings.popupCardsPosition = ['below', 'auto'].includes(saved?.popupCardsPosition) ? saved.popupCardsPosition : 'above';
@@ -749,9 +751,18 @@ class PalmWikiHome extends Plugin {
     return !!commandBridge(this.app)?.listCommands().some(c => c.id === 'omnisearch:show-modal');
   }
 
+  // Omnisearch rebuilds its whole index in memory on every start on iOS, which can crash the app there.
+  skipsOmnisearchHere() {
+    return this.settings.mobileCoreSearch && !!Platform?.isMobile;
+  }
+
+  usesOmnisearch() {
+    return !this.skipsOmnisearchHere() && this.hasOmnisearch();
+  }
+
   searchBodies(query) {
     const text = query.trim();
-    if (this.hasOmnisearch()) {
+    if (this.usesOmnisearch()) {
       // Omnisearch's documented URL scheme opens its own screen with the query filled in.
       const url = `obsidian://omnisearch?vault=${encodeURIComponent(this.app.vault.getName())}&query=${encodeURIComponent(text)}`;
       (globalThis.activeWindow || globalThis.window || globalThis).open?.(url);
@@ -790,6 +801,7 @@ class PalmWikiHome extends Plugin {
       if (leaf) this.app.workspace.setActiveLeaf(leaf, { focus: true });
       const registry = commandBridge(this.app);
       const id = this.settings[key];
+      if (key === 'searchCommand' && id === 'omnisearch:show-modal' && this.skipsOmnisearchHere() && this.openCoreSearch('')) return;
       if (!registry || !id || id.startsWith(`${this.manifest.id}:`) || !registry.listCommands().some(c => c.id === id)) {
         // The chosen plugin may be turned off on this device (Omnisearch on the iPhone): use Obsidian's own.
         if (key === 'searchCommand' && this.openCoreSearch('')) return;
@@ -2150,7 +2162,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
     const row = el ? this.rows.get(el) : null;
     if (row?.kind === 'note') return { file: row.file };
-    return { hint: row?.kind === 'body' ? `Enter で${this.plugin.hasOmnisearch() ? ' Omnisearch の' : '標準の検索で'}本文検索を開きます`
+    return { hint: row?.kind === 'body' ? `Enter で${this.plugin.usesOmnisearch() ? ' Omnisearch の' : '標準の検索で'}本文検索を開きます`
       : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
       : row?.kind === 'word' ? '選ぶと入力に反映します' : '' };
   }
@@ -2192,7 +2204,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       meta.textContent = [row.recent ? '最近開いた' : '', alias ? `別名: ${alias}` : '', folder].filter(Boolean).join(' · ');
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
-      meta.textContent = this.plugin.hasOmnisearch() ? 'Omnisearch で開く' : '標準の検索で開く';
+      meta.textContent = this.plugin.usesOmnisearch() ? 'Omnisearch で開く' : '標準の検索で開く';
     } else if (row.kind === 'word') {
       title.textContent = `語句の候補：${row.text}`;
       meta.textContent = 'Various Complements（選ぶと入力に反映）';
@@ -2270,6 +2282,12 @@ class LiteSettings extends PluginSettingTab {
           this.plugin.settings.searchMode = value === 'separate' ? 'separate' : 'unified';
           try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
         }));
+    new Setting(containerEl).setName('スマホ・タブレットでは Omnisearch を使わない')
+      .setDesc('オンにすると、iPhone・iPad では本文検索を Obsidian 標準の検索で開きます。Omnisearch はモバイルでは起動のたびに索引をメモリに作り直すため、ノートが多いとアプリが落ちることがあります。パソコンでは今までどおり Omnisearch を使います。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.mobileCoreSearch).onChange(async value => {
+        this.plugin.settings.mobileCoreSearch = value;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
     new Setting(containerEl).setName('検索画面にプレビューを表示')
       .setDesc('選んでいる候補のノートを、検索画面の右側に表示します（幅の狭い画面では表示しません）。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.searchPreview).onChange(async value => {
