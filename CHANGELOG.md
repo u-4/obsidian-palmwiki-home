@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.5 — 2026-10-12
+
+- Fix Open note in the touch preview: pass its actual click event to Obsidian instead of a plain object, so the preview opens the note instead of only closing. The regression test now checks the event method required by Obsidian.
+
 ## 1.12.4 — 2026-10-12
 
 - On touch devices, hold a Home card for half a second to read its preview in a native modal, with explicit Open note and Close buttons. Short taps still open notes; movement, scrolling and interrupted touches cancel the hold. Mouse previews keep their existing settings.

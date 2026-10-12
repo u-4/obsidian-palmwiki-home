@@ -1169,9 +1169,9 @@ class LiteCards extends BasesView {
         suppressClick = true;
         this.plugin.cardPopover?.close();
         this.touchPreview?.close();
-        this.touchPreview = new TouchCardPreview(this.app, file, () => {
+        this.touchPreview = new TouchCardPreview(this.app, file, event => {
           suppressClick = false;
-          open({ type: 'click', preventDefault() {} });
+          open(event);
         });
         this.touchPreview.open();
       }, 500);
@@ -1609,7 +1609,7 @@ class TouchCardPreview extends Modal {
     const actions = doc.createElement('div'); actions.className = 'palmwiki-touch-preview-actions';
     const open = doc.createElement('button'); open.textContent = 'ノートを開く';
     const close = doc.createElement('button'); close.textContent = '閉じる';
-    open.addEventListener('click', () => { this.close(); this.openNote(); });
+    open.addEventListener('click', event => { this.close(); this.openNote(event); });
     close.addEventListener('click', () => this.close());
     actions.append(open, close);
     const body = doc.createElement('div'); body.className = 'palmwiki-touch-preview-body';

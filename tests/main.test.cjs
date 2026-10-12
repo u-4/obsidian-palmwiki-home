@@ -29,7 +29,7 @@ class Element {
   get nextElementSibling() { const p = this.parentElement; return p?.children[p.children.indexOf(this) + 1] || null; }
   addEventListener(name, fn) { if (!this.listeners.has(name)) this.listeners.set(name, new Set()); this.listeners.get(name).add(fn); }
   removeEventListener(name, fn) { this.listeners.get(name)?.delete(fn); }
-  emit(name, event = {}) { for (const fn of [...(this.listeners.get(name) || [])]) fn({ type: name, preventDefault() {}, ...event }); }
+  emit(name, event = {}) { for (const fn of [...(this.listeners.get(name) || [])]) fn({ type: name, preventDefault() {}, instanceOf() { return false; }, ...event }); }
   setAttribute(key, value) { this.attributes[key] = value; }
   removeAttribute(key) { delete this.attributes[key]; if (key === 'src') this.src = ''; }
   getBoundingClientRect() { return this.rect; }
@@ -85,7 +85,11 @@ function load() {
   const context = { module: { exports: {} }, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
-      Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false, isModifier: ev => !!(ev.metaKey || ev.ctrlKey) }, setIcon() {},
+      Keymap: { isModEvent: ev => {
+        // Obsidian inspects the real event via instanceOf(), even for an unmodified click.
+        if (ev?.type === 'click') assert.equal(typeof ev.instanceOf, 'function');
+        return ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false;
+      }, isModifier: ev => !!(ev.metaKey || ev.ctrlKey) }, setIcon() {},
       Modal: class {
         constructor(app) { this.app = app; this.modalEl = doc.createElement('div'); this.modalEl.classList = { add() {} }; this.contentEl = doc.createElement('div'); }
         setTitle(title) { this.title = title; }
