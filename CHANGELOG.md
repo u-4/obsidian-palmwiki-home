@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.2 — 2026-10-12
+
+- Apply the two-pane search layout only on wide screens. Narrow screens retain Obsidian's native prompt height and result scrolling, keeping the bottom search input reachable when many results are shown.
+
 ## 1.12.1 — 2026-10-12
 
 - Keep Home and search inside the standard header on phones, even when Obsidian hides its back/forward buttons. The separate toolbar no longer sits above the header in the status-bar/notch area.
