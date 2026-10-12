@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.4 — 2026-10-12
+
+- On touch devices, hold a Home card for half a second to read its preview in a native modal, with explicit Open note and Close buttons. Short taps still open notes; movement, scrolling and interrupted touches cancel the hold. Mouse previews keep their existing settings.
+
 ## 1.12.3 — 2026-10-12
 
 - Start card hover previews only on devices reporting hover and a fine pointer, matching 2hop-links-plus. Touch-generated mouse events no longer open desktop previews when tapping a Home card.

@@ -164,3 +164,13 @@ body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is
   font-size: var(--font-ui-medium); font-weight: 600;
 }
 .palmwiki-preview-focus { border-radius: 4px; background: var(--text-highlight-bg); box-shadow: 0 0 0 3px var(--text-highlight-bg); }
+
+/* Touch keeps the native modal's placement; only its contents get a scroll area. */
+.palmwiki-touch-preview-modal .modal-content { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.palmwiki-touch-preview-actions { display: flex; gap: 12px; padding-bottom: 12px; flex-shrink: 0; }
+.palmwiki-touch-preview-actions button { min-height: 44px; }
+.palmwiki-touch-preview-body { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.palmwiki-touch-preview-body img { max-width: 100%; }
+@media (hover: none), (pointer: coarse) {
+  .palmwiki-lite-card { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+}

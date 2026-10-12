@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, Modal, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
@@ -1135,9 +1135,14 @@ class LiteCards extends BasesView {
     const cached = this.plugin.previews.get(file);
     preview.textContent = cached === undefined ? '…' : cached || '本文プレビューなし';
     el.append(title, media, preview);
+    let press = null, pressTimer = null, suppressClick = false;
+    const cancelPress = () => { clearTimeout(pressTimer); pressTimer = null; press = null; };
+    const touchInput = event => event.pointerType === 'touch' || event.pointerType === 'pen' ||
+      !doc.defaultView?.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches;
     const open = event => {
       if (event.type === 'auxclick' && event.button !== 1) return;
       event.preventDefault();
+      if (suppressClick) { event.stopPropagation?.(); return; }
       if (this.disposed) return;
       // Opening a note (even in another tab, where this view stays) puts the card popups away.
       this.plugin.cardPopover?.close();
@@ -1154,6 +1159,30 @@ class LiteCards extends BasesView {
       void target.openFile(current, { active: true }).catch(() => new Notice('ノートを開けませんでした。'));
     };
     el.addEventListener('click', open); el.addEventListener('auxclick', open);
+    el.addEventListener('pointerdown', event => {
+      cancelPress(); suppressClick = false;
+      if (this.disposed || !touchInput(event) || event.isPrimary === false || event.button > 0) return;
+      press = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      pressTimer = setTimeout(() => {
+        cancelPress();
+        if (this.disposed || !el.isConnected) return;
+        suppressClick = true;
+        this.plugin.cardPopover?.close();
+        this.touchPreview?.close();
+        this.touchPreview = new TouchCardPreview(this.app, file, () => {
+          suppressClick = false;
+          open({ type: 'click', preventDefault() {} });
+        });
+        this.touchPreview.open();
+      }, 500);
+    });
+    el.addEventListener('pointermove', event => {
+      if (press && (event.pointerId !== press.id || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10)) cancelPress();
+    });
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(type, cancelPress);
+    el.addEventListener('contextmenu', event => { if (touchInput(event)) event.preventDefault(); });
+    this.parent.addEventListener('scroll', cancelPress, { passive: true });
+    const disposePress = () => { cancelPress(); this.parent.removeEventListener('scroll', cancelPress); };
     // Cmd+hover shows the light popup (CardPopover); with it off, only announces the hover and
     // Obsidian decides whether to preview (e.g. Cmd held).
     const hover = { el, file, view: this };
@@ -1166,7 +1195,7 @@ class LiteCards extends BasesView {
       this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: file.path, sourcePath: '' });
     });
     el.addEventListener('mouseleave', () => this.plugin.cardPopover?.leave(hover));
-    return { el, preview, media, file, path: file.path, key: snapshotKey(file),
+    return { el, preview, media, file, disposePress, path: file.path, key: snapshotKey(file),
       near: false, reading: false, textReady: cached !== undefined, imageKey: null, imagePath: null,
       img: null, finishImage: null, badImage: null };
   }
@@ -1261,6 +1290,7 @@ class LiteCards extends BasesView {
   }
 
   removeCard(card) {
+    card.disposePress?.();
     this.observer?.unobserve(card.el);
     this.imageQueue.delete(card.path); this.releaseImage(card);
     card.el.remove(); this.cards.delete(card.path);
@@ -1276,7 +1306,8 @@ class LiteCards extends BasesView {
     this.scans = { mentions: null, body: null };
     this.observer?.disconnect();
     this.imageQueue.clear();
-    for (const card of this.cards.values()) this.releaseImage(card);
+    for (const card of this.cards.values()) { card.disposePress?.(); this.releaseImage(card); }
+    this.touchPreview?.close();
     this.cards.clear(); this.files = [];
     this.plugin.cardPopover?.forget(this);
     this.root.remove(); this.plugin.cardViews.delete(this);
@@ -1565,6 +1596,32 @@ class NotePreview {
     this.component = null;
     this.el.remove();
   }
+}
+
+// Touch previews use Obsidian's modal for focus, dismissal and mobile safe-area placement.
+class TouchCardPreview extends Modal {
+  constructor(app, file, openNote) { super(app); this.file = file; this.openNote = openNote; }
+
+  onOpen() {
+    this.modalEl.classList.add('palmwiki-touch-preview-modal');
+    this.setTitle('ノートのプレビュー');
+    const doc = this.contentEl.ownerDocument;
+    const actions = doc.createElement('div'); actions.className = 'palmwiki-touch-preview-actions';
+    const open = doc.createElement('button'); open.textContent = 'ノートを開く';
+    const close = doc.createElement('button'); close.textContent = '閉じる';
+    open.addEventListener('click', () => { this.close(); this.openNote(); });
+    close.addEventListener('click', () => this.close());
+    actions.append(open, close);
+    const body = doc.createElement('div'); body.className = 'palmwiki-touch-preview-body';
+    this.contentEl.append(actions, body);
+    this.preview = new NotePreview(this.app, body, { onLink: (link, source, event) => {
+      this.close();
+      void this.app.workspace.openLinkText(link, source, Keymap.isModEvent(event)).catch(() => new Notice('ノートを開けませんでした。'));
+    } });
+    void this.preview.show({ file: this.file });
+  }
+
+  onClose() { this.preview?.dispose(); this.preview = null; }
 }
 
 // A pane beside a result list that shows the selected row's note (a NotePreview).
@@ -2206,8 +2263,8 @@ class LiteSettings extends PluginSettingTab {
         if (!value) this.plugin.cardPopover?.close();
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
-    new Setting(containerEl).setName('小窓の開き方')
-      .setDesc('「ホバーのみ」では、カードやリンクの上でマウスを約0.3秒止めると開きます（ボタンを押している間と、文字を打った直後は開きません）。どちらでも Cmd/Ctrl を押せばすぐ開きます。2hop-links-plus と同じです。')
+    new Setting(containerEl).setName('マウスでの小窓の開き方')
+      .setDesc('「ホバーのみ」では、カードやリンクの上でマウスを約0.3秒止めると開きます（ボタンを押している間と、文字を打った直後は開きません）。どちらでも Cmd/Ctrl を押せばすぐ開きます。2hop-links-plus と同じです。タッチ操作では、この設定によらずカードを約0.5秒長押しすると読むためのプレビューを開きます。')
       .addDropdown(dropdown => dropdown
         .addOption('mod', 'Cmd/Ctrl + ホバー')
         .addOption('hover', 'ホバーのみ')

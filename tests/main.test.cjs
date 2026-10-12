@@ -86,6 +86,12 @@ function load() {
     require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
       Keymap: { isModEvent: ev => ev.ctrlKey || ev.metaKey || ev.button === 1 ? 'tab' : false, isModifier: ev => !!(ev.metaKey || ev.ctrlKey) }, setIcon() {},
+      Modal: class {
+        constructor(app) { this.app = app; this.modalEl = doc.createElement('div'); this.modalEl.classList = { add() {} }; this.contentEl = doc.createElement('div'); }
+        setTitle(title) { this.title = title; }
+        open() { modals.push(this); this.onOpen(); }
+        close() { this.closed = true; this.onClose(); }
+      },
       FuzzySuggestModal: class { constructor(app) { this.app = app; } setPlaceholder(text) { this.placeholder = text; } open() { modals.push(this); } },
       SuggestModal: class {
         // Mirrors instance fields of Obsidian's Modal that a subclass must not shadow (e.g. `selection`).
@@ -834,4 +840,44 @@ test('Omnisearch selection maps the selected result id to a note, anything else 
   assert.equal(f.omnisearchSelection(f.app, modal('missing.md')).file, undefined);
   assert.equal(f.omnisearchSelection(f.app, modal(null)).file, undefined);
   f.stop();
+});
+
+test('touch hold opens a readable modal, consumes the release click, and opens only via the explicit button', async () => {
+  const f = await fixture(1); f.refresh();
+  const card = f.view.cards.get('0.md').el;
+  const down = { pointerType: 'touch', pointerId: 1, clientX: 20, clientY: 20, isPrimary: true, button: 0 };
+  card.emit('pointerdown', down); f.clock.tick(500); await settle();
+  const modal = f.modals.at(-1);
+  assert.ok(modal); assert.equal(modal.preview.file.path, '0.md');
+  card.emit('pointerup', down); card.emit('click');
+  assert.deepEqual(f.calls.opens, []);
+  modal.contentEl.children[0].children[0].emit('click');
+  assert.ok(modal.closed); assert.equal(modal.preview, null);
+  assert.deepEqual(f.calls.opens, ['0.md']);
+  f.stop();
+});
+test('touch hold cancels on release, movement, scroll, pointer cancellation, card removal, and unload', async () => {
+  for (const reason of ['release', 'move', 'scroll', 'cancel', 'remove', 'unload', 'mouse']) {
+    const f = await fixture(1); f.refresh(); const record = f.view.cards.get('0.md'); const card = record.el;
+    card.emit('pointerdown', { pointerType: reason === 'mouse' ? 'mouse' : 'touch', pointerId: 1, clientX: 20, clientY: 20, button: 0 });
+    if (reason === 'release') card.emit('pointerup');
+    if (reason === 'move') card.emit('pointermove', { pointerId: 1, clientX: 20, clientY: 40 });
+    if (reason === 'scroll') f.parent.emit('scroll');
+    if (reason === 'cancel') card.emit('pointercancel');
+    if (reason === 'remove') f.view.removeCard(record);
+    if (reason === 'unload') f.stop();
+    f.clock.tick(500); await settle();
+    assert.equal(f.modals.length, 0, reason);
+    if (reason === 'release') { card.emit('click'); assert.deepEqual(f.calls.opens, ['0.md']); }
+    if (reason !== 'unload') f.stop();
+  }
+});
+test('closing the touch modal keeps Home and the next short tap opens normally', async () => {
+  const f = await fixture(1); f.refresh(); const card = f.view.cards.get('0.md').el;
+  const down = { pointerType: 'touch', pointerId: 1, clientX: 20, clientY: 20 };
+  card.emit('pointerdown', down); f.clock.tick(500); await settle();
+  const modal = f.modals.at(-1); modal.contentEl.children[0].children[1].emit('click');
+  assert.ok(modal.closed); assert.equal(f.calls.opens.length, 0);
+  card.emit('pointerdown', down); card.emit('pointerup'); card.emit('click');
+  assert.deepEqual(f.calls.opens, ['0.md']); f.stop();
 });

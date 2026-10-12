@@ -34,7 +34,9 @@ npm test            # syntax check + tests (Node 22+, no npm install needed)
 npm run deploy      # owner's vault; backs up the installed files and data.json first
 ```
 
-Known limitations: on iPhone the buttons can end up where they cannot be tapped; list position is not restored after the view is recreated.
+On touch devices, tap a Home card to open its note, or hold it for 0.5 seconds to read a preview. Moving your finger cancels the hold. The preview has Open note and Close buttons. Mouse hover previews retain their existing settings.
+
+Known limitations: list position is not restored after the view is recreated.
 
 ## License
 
