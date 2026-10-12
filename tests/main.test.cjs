@@ -846,6 +846,15 @@ test('without Omnisearch the body row hands the words to Obsidian\'s own search'
   assert.deepEqual(searched, ['機器 整備']); assert.deepEqual([...f.urls], []);
   f.stop();
 });
+test('when the chosen search or switcher plugin is off on this device, Obsidian\'s own opens instead of a notice', async () => {
+  const f = await fixture(0); const run = [];
+  f.app.commands.listCommands = () => [{ id: 'global-search:open' }, { id: 'switcher:open' }];
+  f.app.commands.executeCommandById = id => { run.push(id); return true; };
+  f.app.internalPlugins = { getPluginById: () => null };
+  f.plugin.runExternal('searchCommand'); f.plugin.runExternal('switchCommand'); f.plugin.searchBodies('機器');
+  assert.deepEqual(run, ['global-search:open', 'switcher:open', 'global-search:open']); assert.deepEqual([...f.urls], []);
+  f.stop();
+});
 test('search preview can be turned off in settings', async () => {
   const f = await fixture(0); f.plugin.settings.searchPreview = false; const s = new f.UnifiedSearch(f.app, f.plugin);
   s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null);

@@ -758,11 +758,7 @@ class PalmWikiHome extends Plugin {
       return;
     }
     // Where Omnisearch is turned off (the iPhone, to save memory), Obsidian's own search takes the words.
-    const coreSearch = this.app.internalPlugins?.getPluginById?.('global-search');
-    if (coreSearch?.enabled && typeof coreSearch.instance?.openGlobalSearch === 'function') {
-      coreSearch.instance.openGlobalSearch(text);
-      return;
-    }
+    if (this.openCoreSearch(text)) return;
     this.runExternal('searchCommand');
   }
 
@@ -777,6 +773,17 @@ class PalmWikiHome extends Plugin {
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file, { active: true });
   }
 
+  // Obsidian's own search, with the words filled in when that is possible. False when it is not available.
+  openCoreSearch(text) {
+    const coreSearch = this.app.internalPlugins?.getPluginById?.('global-search');
+    if (coreSearch?.enabled && typeof coreSearch.instance?.openGlobalSearch === 'function') {
+      coreSearch.instance.openGlobalSearch(text);
+      return true;
+    }
+    const registry = commandBridge(this.app);
+    return !!registry?.listCommands().some(c => c.id === 'global-search:open') && registry.executeCommandById('global-search:open') !== false;
+  }
+
   runExternal(key, leaf) {
     if (this.disposed) return;
     try {
@@ -784,6 +791,9 @@ class PalmWikiHome extends Plugin {
       const registry = commandBridge(this.app);
       const id = this.settings[key];
       if (!registry || !id || id.startsWith(`${this.manifest.id}:`) || !registry.listCommands().some(c => c.id === id)) {
+        // The chosen plugin may be turned off on this device (Omnisearch on the iPhone): use Obsidian's own.
+        if (key === 'searchCommand' && this.openCoreSearch('')) return;
+        if (key === 'switchCommand' && registry?.listCommands().some(c => c.id === 'switcher:open') && registry.executeCommandById('switcher:open') !== false) return;
         new Notice('PalmWiki Homeの設定で、インストール済みの外部プラグインのコマンドを選んでください。');
         return;
       }

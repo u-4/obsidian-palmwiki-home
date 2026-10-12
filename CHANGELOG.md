@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.7 — 2026-10-13
+
+- When the search or page-switcher command chosen in settings belongs to a plugin that is turned off on this device, open Obsidian's own search or quick switcher instead of asking to choose a command. The body-search hand-off also falls back to the core search command when its API is not available.
+
 ## 1.12.6 — 2026-10-13
 
 - When Omnisearch is turned off on a device (the iPhone, to save memory), the body-search row hands the words to Obsidian's own search instead, and says so.
