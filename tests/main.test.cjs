@@ -827,6 +827,25 @@ test('search preview pane shows the selected note (no frontmatter), hints for ac
   const component = s.pane.preview.component; s.onClose(); assert.equal(component.loaded, false); assert.equal(s.pane, null);
   f.stop();
 });
+test('narrow screens (phones) build no search preview pane', async () => {
+  const f = await fixture(0); const s = new f.UnifiedSearch(f.app, f.plugin);
+  f.doc.defaultView.matchMedia = query => ({ matches: query !== '(min-width: 761px)' });
+  s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null);
+  f.stop();
+});
+test('without Omnisearch the body row hands the words to Obsidian\'s own search', async () => {
+  const f = await fixture(0); searchVault(f); const searched = [];
+  f.app.commands.listCommands = () => [{ id: 'aqs:recent', name: 'Recent' }];
+  f.app.internalPlugins = { getPluginById: id => id === 'global-search' ? { enabled: true, instance: { openGlobalSearch: q => searched.push(q) } } : null };
+  const s = new f.UnifiedSearch(f.app, f.plugin);
+  const rows = s.getSuggestions('機器 整備');
+  const el = f.doc.createElement('div'); s.renderSuggestion(rows[0], el);
+  const text = e => [e.textContent, ...e.children.map(text)].join('|');
+  assert.match(text(el), /標準の検索で開く/);
+  s.selectSuggestion(rows[0], { key: 'Enter' });
+  assert.deepEqual(searched, ['機器 整備']); assert.deepEqual([...f.urls], []);
+  f.stop();
+});
 test('search preview can be turned off in settings', async () => {
   const f = await fixture(0); f.plugin.settings.searchPreview = false; const s = new f.UnifiedSearch(f.app, f.plugin);
   s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null);

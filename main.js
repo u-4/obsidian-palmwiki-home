@@ -189,6 +189,12 @@ function complementWords(app, term) {
   }
 }
 
+// Search previews need the side-by-side layout of wide screens (styles.css hides them at 760px and
+// below). On a phone the pane is not built at all, so no note is read or rendered for it.
+function wideEnoughForPreview(win) {
+  return !!win?.matchMedia?.('(min-width: 761px)')?.matches;
+}
+
 function omnisearchSelection(app, modal) {
   const path = modal.querySelector('.omnisearch-result.is-selected')?.dataset?.resultId;
   const file = path ? app.vault.getAbstractFileByPath(path) : null;
@@ -470,7 +476,7 @@ class PalmWikiHome extends Plugin {
     const attach = (container, tries) => {
       if (this.disposed || !container.isConnected || this.omnisearchPanes.has(container)) return;
       const modal = container.querySelector('.omnisearch-modal');
-      if (!modal) return;
+      if (!modal || !wideEnoughForPreview(doc.defaultView)) return;
       const results = modal.querySelector('.prompt-results');
       if (!results) { if (tries < 40) setTimeout(() => attach(container, tries + 1), 50); return; }
       const input = modal.querySelector('input');
@@ -739,13 +745,22 @@ class PalmWikiHome extends Plugin {
     new UnifiedSearch(this.app, this).open();
   }
 
+  hasOmnisearch() {
+    return !!commandBridge(this.app)?.listCommands().some(c => c.id === 'omnisearch:show-modal');
+  }
+
   searchBodies(query) {
     const text = query.trim();
-    const registry = commandBridge(this.app);
-    if (registry?.listCommands().some(c => c.id === 'omnisearch:show-modal')) {
+    if (this.hasOmnisearch()) {
       // Omnisearch's documented URL scheme opens its own screen with the query filled in.
       const url = `obsidian://omnisearch?vault=${encodeURIComponent(this.app.vault.getName())}&query=${encodeURIComponent(text)}`;
       (globalThis.activeWindow || globalThis.window || globalThis).open?.(url);
+      return;
+    }
+    // Where Omnisearch is turned off (the iPhone, to save memory), Obsidian's own search takes the words.
+    const coreSearch = this.app.internalPlugins?.getPluginById?.('global-search');
+    if (coreSearch?.enabled && typeof coreSearch.instance?.openGlobalSearch === 'function') {
+      coreSearch.instance.openGlobalSearch(text);
       return;
     }
     this.runExternal('searchCommand');
@@ -2103,6 +2118,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     super.onOpen?.();
     this.plugin.openSearchScreen = this;
     if (!this.plugin.settings.searchPreview || !this.modalEl) return;
+    if (!wideEnoughForPreview(this.modalEl.ownerDocument?.defaultView || globalThis.activeWindow)) return;
     this.pane = new NotePreviewPane(this.app, this.modalEl, this.resultContainerEl, () => this.paneSelection(), {
       onLink: (link, source, event) => {
         this.close();
@@ -2124,7 +2140,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
     const row = el ? this.rows.get(el) : null;
     if (row?.kind === 'note') return { file: row.file };
-    return { hint: row?.kind === 'body' ? 'Enter で Omnisearch の本文検索を開きます'
+    return { hint: row?.kind === 'body' ? `Enter で${this.plugin.hasOmnisearch() ? ' Omnisearch の' : '標準の検索で'}本文検索を開きます`
       : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
       : row?.kind === 'word' ? '選ぶと入力に反映します' : '' };
   }
@@ -2166,7 +2182,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       meta.textContent = [row.recent ? '最近開いた' : '', alias ? `別名: ${alias}` : '', folder].filter(Boolean).join(' · ');
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
-      meta.textContent = 'Omnisearch で開く';
+      meta.textContent = this.plugin.hasOmnisearch() ? 'Omnisearch で開く' : '標準の検索で開く';
     } else if (row.kind === 'word') {
       title.textContent = `語句の候補：${row.text}`;
       meta.textContent = 'Various Complements（選ぶと入力に反映）';

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.6 — 2026-10-13
+
+- When Omnisearch is turned off on a device (the iPhone, to save memory), the body-search row hands the words to Obsidian's own search instead, and says so.
+- Narrow screens (760px and below) no longer build the search preview pane at all, in the unified search or on Omnisearch's screen, so no note is read or rendered for a pane that is hidden there.
+
 ## 1.12.5 — 2026-10-12
 
 - Fix Open note in the touch preview: pass its actual click event to Obsidian instead of a plain object, so the preview opens the note instead of only closing. The regression test now checks the event method required by Obsidian.
