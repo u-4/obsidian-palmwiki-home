@@ -199,6 +199,33 @@ test('with back/forward buttons in the header, the Vault name (Home) and a searc
 test('simultaneous Home clicks create one .base, subsequent clicks do not overwrite it', async () => {
   const f = await fixture(); await Promise.all([f.plugin.openHome(), f.plugin.openHome()]); await f.plugin.openHome(); assert.equal(f.calls.creates, 1); f.stop();
 });
+test('phone navigation stays inside the header when native back/forward is hidden', async () => {
+  const f = await fixture(0);
+  const root = f.doc.createElement('div'), header = f.doc.createElement('div');
+  const left = f.doc.createElement('div'), nav = f.doc.createElement('div');
+  const content = f.doc.createElement('div');
+  left.append(nav); header.append(left); root.append(header, content);
+  root.querySelector = sel => sel.includes('view-header-nav-buttons') ? nav : null;
+  f.doc.defaultView.getComputedStyle = el => ({ display: el === nav ? 'none' : 'flex' });
+  f.leaf.view = { containerEl: root };
+  f.plugin.syncBars();
+  const bar = nav.nextElementSibling;
+  assert.ok(bar, 'the hidden native navigation still anchors the toolbar inside the header');
+  assert.equal(bar.parentElement, left);
+  assert.deepEqual(root.children, [header, content]);
+  bar.children[1].emit('click');
+  assert.equal(f.modals.length, 1, 'the search action is still connected');
+  f.plugin.syncBars();
+  assert.equal(left.children.length, 2, 'layout updates do not duplicate the toolbar');
+  const replacement = f.doc.createElement('div'), newLeft = f.doc.createElement('div'), newNav = f.doc.createElement('div');
+  newLeft.append(newNav); replacement.append(newLeft); header.remove(); root.prepend(replacement);
+  root.querySelector = sel => sel.includes('view-header-nav-buttons') ? newNav : null;
+  f.plugin.syncBars();
+  assert.equal(bar.parentElement, null);
+  assert.equal(newNav.nextElementSibling.parentElement, newLeft);
+  assert.deepEqual(root.children, [replacement, content]);
+  f.stop();
+});
 test('invalid or missing-parent Home paths fail without writes', async () => {
   const f = await fixture(); f.plugin.settings.homePath = 'Missing/Home.base'; await f.plugin.openHome();
   f.plugin.settings.homePath = '.obsidian/Home.base'; await f.plugin.openHome(); assert.equal(f.calls.creates, 0); assert.ok(f.notices.length); f.stop();

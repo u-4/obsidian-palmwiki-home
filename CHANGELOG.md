@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.1 — 2026-10-12
+
+- Keep Home and search inside the standard header on phones, even when Obsidian hides its back/forward buttons. The separate toolbar no longer sits above the header in the status-bar/notch area.
+- On phones, use icon-only buttons with the standard touch target size, and retain the native header group widths so the sidebar and note actions keep their space. Desktop header placement is unchanged.
+
 ## 1.12.0 — 2026-10-04
 
 - Projects and Areas also take in notes tagged with their name or an alias — `#サブスク`, or a part of a nested tag such as `#PKM/サブスク` — compared after NFKC and lower case, ignoring spaces, `_` and `-`. Tags come from Obsidian's metadata cache (body and frontmatter); no note is read. Checkbox 「同じ名前のタグが付いたノートも」, on by default. The heading reads 「…」とつながるノート.

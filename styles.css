@@ -20,10 +20,19 @@
 .palmwiki-lite-nav .palmwiki-lite-nav-home .palmwiki-lite-nav-label { font-weight: 600; white-space: nowrap; }
 .palmwiki-lite-nav.is-in-header.is-compact .palmwiki-lite-nav-label { display: none; }
 /* Keep the page title centred over the whole header: both sides get equal room. */
-.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-header-left,
-.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-actions { flex: 1 1 0; }
-.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-actions { justify-content: flex-end; }
-.view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-header-title-container { flex: 0 1 auto; min-width: 0; }
+body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-header-left,
+body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-actions { flex: 1 1 0; }
+body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-actions { justify-content: flex-end; }
+body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is-in-header) > .view-header-title-container { flex: 0 1 auto; min-width: 0; }
+/* Phone headers already handle the notch and floating navigation. Use their existing row,
+   with touch-sized icons, and leave the sidebar/action groups at their natural widths. */
+.is-phone .palmwiki-lite-nav.is-in-header { flex: 0 0 auto; gap: 0; }
+.is-phone .palmwiki-lite-nav.is-in-header .palmwiki-lite-nav-label { display: none; }
+.is-phone .palmwiki-lite-nav.is-in-header .palmwiki-lite-nav-button {
+  flex: 0 0 var(--touch-size-m, 44px); width: var(--touch-size-m, 44px);
+  min-height: var(--touch-size-m, 44px); padding: 8px; position: relative; z-index: 1;
+}
+.is-phone .palmwiki-lite-nav-button svg { width: 20px; height: 20px; }
 .palmwiki-lite-nav-button > span[aria-hidden] { display: inline-flex; }
 .palmwiki-lite-home { padding: 12px; min-width: 0; }
 .palmwiki-lite-paging {

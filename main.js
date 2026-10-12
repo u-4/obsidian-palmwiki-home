@@ -552,11 +552,10 @@ class PalmWikiHome extends Plugin {
       const split = typeof leaf.getRoot === 'function' ? leaf.getRoot() : null;
       if (split && (split === this.app.workspace.leftSplit || split === this.app.workspace.rightSplit)) return;
       live.add(leaf);
-      // Beside Obsidian's back/forward buttons in the note's header when they are shown; otherwise
-      // (a layout without them, e.g. a phone) one small strip above the view, as before.
+      // Keep our buttons inside the standard header's safe area even when the phone hides
+      // back/forward. A hidden navigation group still supplies the insertion point.
       const nav = root.querySelector?.(':scope > .view-header .view-header-nav-buttons');
-      const win = root.ownerDocument.defaultView;
-      const slot = nav && win?.getComputedStyle?.(nav).display !== 'none' ? nav : null;
+      const slot = nav || null;
       const previous = this.bars.get(leaf);
       if (previous?.root === root && previous.view === leaf.view && previous.slot === slot
         && (slot ? previous.bar.previousElementSibling === slot : previous.bar.parentElement === root)) { previous.update?.(); return; }
