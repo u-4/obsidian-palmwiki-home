@@ -1159,6 +1159,9 @@ class LiteCards extends BasesView {
     const hover = { el, file, view: this };
     el.addEventListener('mouseover', event => {
       if (this.disposed) return;
+      // Touch screens synthesize mouseover on tap. As in 2hop-links-plus, keep mouse-only
+      // previews out of that path so tapping a card can open its note directly.
+      if (!doc.defaultView?.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches) return;
       if (this.plugin.settings.cardPopover && this.plugin.cardPopover) { this.plugin.cardPopover.enter(hover, event); return; }
       this.app.workspace.trigger('hover-link', { event, source: HOVER_SOURCE, hoverParent: this, targetEl: el, linktext: file.path, sourcePath: '' });
     });

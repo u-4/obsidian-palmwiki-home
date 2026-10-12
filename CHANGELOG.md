@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.3 — 2026-10-12
+
+- Start card hover previews only on devices reporting hover and a fine pointer, matching 2hop-links-plus. Touch-generated mouse events no longer open desktop previews when tapping a Home card.
+
 ## 1.12.2 — 2026-10-12
 
 - Apply the two-pane search layout only on wide screens. Narrow screens retain Obsidian's native prompt height and result scrolling, keeping the bottom search input reachable when many results are shown.

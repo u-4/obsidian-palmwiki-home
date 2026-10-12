@@ -48,6 +48,7 @@ function environment() {
   };
   const doc = new Element(null, 'document'); doc.ownerDocument = doc; doc.hidden = false;
   const win = new Element(doc, 'window'); doc.defaultView = win;
+  win.matchMedia = () => ({ matches: true }); // Default fixture has a mouse.
   win.requestAnimationFrame = fn => { const id = ++next; frames.set(id, fn); return id; };
   win.cancelAnimationFrame = id => frames.delete(id);
   doc.createElement = tag => new Element(doc, tag);
@@ -347,6 +348,26 @@ test('failed image is hidden and does not automatically retry forever', async ()
 test('images can be disabled without changing search settings or reading image files', async () => {
   const f = await fixture(1); f.files.set('a.png', new TFile('a.png')); f.metadata.set('0.md', { embeds: [{ link: 'a.png' }] });
   f.plugin.settings.showImages = false; f.refresh(); await f.pump(); assert.equal(f.calls.images.length, 0); assert.equal(f.plugin.settings.searchCommand, 'omnisearch:show-modal'); f.stop();
+});
+test('touch-generated mouseover never starts a card preview, and the first click opens the note', async () => {
+  const f = await fixture(1); f.refresh();
+  const card = f.view.cards.get('0.md').el;
+  f.doc.defaultView.matchMedia = query => {
+    assert.equal(query, '(hover: hover) and (pointer: fine)');
+    return { matches: false };
+  };
+  f.plugin.settings.popupTrigger = 'hover';
+  card.emit('mouseover', { metaKey: true });
+  f.doc.emit('mousemove', { screenX: 4, screenY: 4, target: card });
+  f.clock.tick(); await settle();
+  assert.equal(f.plugin.cardPopover.hovered, null);
+  assert.equal(f.doc.body.children.length, 0);
+  card.emit('click');
+  assert.deepEqual(f.calls.opens, ['0.md']);
+  f.plugin.settings.cardPopover = false;
+  card.emit('mouseover', { metaKey: true });
+  assert.equal(f.calls.triggers.length, 0, 'touch must not launch the external hover preview either');
+  f.stop();
 });
 test('deleted notes cannot be opened from stale cards', async () => {
   const f = await fixture(1); f.refresh(); const card = f.view.cards.get('0.md'); f.files.delete('0.md'); card.el.emit('click', { button: 0 });
