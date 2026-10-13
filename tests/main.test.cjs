@@ -918,18 +918,18 @@ test('match ranges map folded words back to the text as written', () => {
   assert.deepEqual([...matchRanges('ＡＮＡ SFC', ['ana', 'sfc']).map(r => [...r])], [[0, 3], [4, 7]]);
   assert.equal(matchRanges('なし', ['あり']).length, 0);
 });
-test('title and body-search rows highlight the matched words', async () => {
+test('only matches in note text are highlighted, not in titles', async () => {
   const f = await fixture(0); searchVault(f);
+  const marked = el => { const out = []; const walk = e => { if (String(e.className).includes('suggestion-highlight')) out.push(e.textContent); e.children.forEach(walk); }; walk(el); return out; };
   const u = new f.UnifiedSearch(f.app, f.plugin); u.inputEl.value = '整備';
   const row = u.getSuggestions('整備').find(r => r.kind === 'note' && r.file.basename === 'R7機器整備');
-  const el = f.doc.createElement('div'); u.renderSuggestion(row, el);
-  const spans = []; const walk = e => { if (String(e.className).includes('suggestion-highlight')) spans.push(e.textContent); e.children.forEach(walk); }; walk(el);
-  assert.deepEqual(spans, ['整備']);
-  f.bodies.set('00_Inbox/カタカナのメモ.md', 'セイビ記録');
+  const el = f.doc.createElement('div'); u.renderSuggestion(row, el); assert.deepEqual(marked(el), []);
+  f.bodies.set('00_Inbox/カタカナのメモ.md', 'セイビ記録'); f.bodies.set('00_Inbox/R7機器整備.md', 'なし');
   const s = new f.BodySearch(f.app, f.plugin, 'せいび'); s.getSuggestions('せいび'); for (let i = 0; i < 6; i++) await settle();
   const hit = s.getSuggestions('せいび')[1]; const el2 = f.doc.createElement('div'); s.renderSuggestion(hit, el2);
-  const spans2 = []; const walk2 = e => { if (String(e.className).includes('suggestion-highlight')) spans2.push(e.textContent); e.children.forEach(walk2); }; walk2(el2);
-  assert.deepEqual(spans2, ['セイビ']); s.onClose(); f.stop();
+  assert.deepEqual(marked(el2), ['セイビ']); // in the excerpt
+  const title = el2.children.find(c => c.className === 'palmwiki-search-title'); assert.equal(title.textContent, 'カタカナのメモ'); assert.equal(title.children.length, 0);
+  s.onClose(); f.stop();
 });
 test('a new query stops the earlier body search', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.BodySearch(f.app, f.plugin, '機器');

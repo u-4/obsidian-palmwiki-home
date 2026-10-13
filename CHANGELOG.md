@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.14.1 — 2026-10-13
+
+- Highlight only matches in note text: the excerpt in body-search results and the body of the previews. Titles (title matches, result titles, preview titles) and aliases are no longer highlighted.
+
 ## 1.14.0 — 2026-10-13
 
 - Omnisearch integration removed (the owner's decision: its in-memory index made Obsidian restart on the iPhone, and the link-rank body search replaces it). Gone: the preview pane on Omnisearch's screen, the hand-off of body search to Omnisearch or Obsidian's search, and the settings for the search-button mode, the external search command, the body-search target, "no Omnisearch on phones" and the Omnisearch preview. The search icon and Cmd+G always open the unified search.

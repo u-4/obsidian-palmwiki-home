@@ -1595,7 +1595,7 @@ class NotePreview {
     this.file = selected.file;
     const title = doc.createElement('div');
     title.className = 'palmwiki-search-preview-title';
-    setHighlighted(title, selected.file.basename, this.terms());
+    title.textContent = selected.file.basename;
     title.title = selected.file.basename;
     const content = doc.createElement('div');
     content.className = 'palmwiki-search-preview-body';
@@ -2247,14 +2247,12 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const meta = doc.createElement('small');
     meta.className = 'palmwiki-search-meta';
     if (row.kind === 'note') {
-      const words = (this.inputEl?.value || '').split(/\s+/).filter(Boolean);
-      if (row.recent) title.textContent = row.file.basename; else setHighlighted(title, row.file.basename, words);
+      title.textContent = row.file.basename;
       const terms = normalizeSearch(this.inputEl?.value || '').split(/\s+/).filter(Boolean);
       const viaAlias = row.note && terms.length && !terms.every(term => row.note.titleKey.includes(term));
       const alias = viaAlias ? row.note.aliases.find(a => terms.some(term => normalizeSearch(a).includes(term))) : null;
       const folder = row.file.parent?.path && row.file.parent.path !== '/' ? row.file.parent.path : '';
-      if (alias) setHighlighted(meta, [`別名: ${alias}`, folder].filter(Boolean).join(' · '), words);
-      else meta.textContent = [row.recent ? '最近開いた' : '', folder].filter(Boolean).join(' · ');
+      meta.textContent = [row.recent ? '最近開いた' : '', alias ? `別名: ${alias}` : '', folder].filter(Boolean).join(' · ');
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
       meta.textContent = { rank: 'リンクの多いノートから順に並べる', modified: '更新が新しい順に並べる', name: '名前順に並べる' }[this.plugin.settings.bodySearchOrder];
@@ -2432,7 +2430,7 @@ class BodySearch extends (SuggestModal || class {}) {
     title.className = 'palmwiki-search-title';
     const query = (this.scan?.query || '').trim();
     const words = query.split(/\s+/).filter(Boolean);
-    setHighlighted(title, row.file.basename, words);
+    title.textContent = row.file.basename;
     el.append(title);
     const why = row.tier === 2 ? `[[${query}]] へのリンクあり` : row.tier === 1 ? `「${query}」で始まる・終わる名前へのリンクあり` : '';
     if (row.snippet || why) {
