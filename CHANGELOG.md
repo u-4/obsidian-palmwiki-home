@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.14.2 — 2026-10-13
+
+- Both search screens use the note background on every device. On phones and tablets Obsidian gives prompts the secondary background with a blur; with the Cosense-style snippet that is the blue canvas, so on the iPad the large two-pane screen showed the notes behind it and the text was hard to read.
+
 ## 1.14.1 — 2026-10-13
 
 - Highlight only matches in note text: the excerpt in body-search results and the body of the previews. Titles (title matches, result titles, preview titles) and aliases are no longer highlighted.

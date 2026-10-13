@@ -2189,6 +2189,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
   onOpen() {
     super.onOpen?.();
     this.plugin.openSearchScreen = this;
+    this.modalEl?.classList?.add('palmwiki-search');
     if (!this.plugin.settings.searchPreview || !this.modalEl) return;
     if (!wideEnoughForPreview(this.modalEl.ownerDocument?.defaultView || globalThis.activeWindow)) return;
     this.pane = new NotePreviewPane(this.app, this.modalEl, this.resultContainerEl, () => this.paneSelection(), {
@@ -2325,6 +2326,7 @@ class BodySearch extends (SuggestModal || class {}) {
       this.inputEl.value = this.initial;
       this.inputEl.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
     }
+    this.modalEl?.classList?.add('palmwiki-search');
     if (!this.plugin.settings.searchPreview || !this.modalEl) return;
     if (!wideEnoughForPreview(this.modalEl.ownerDocument?.defaultView || globalThis.activeWindow)) return;
     this.pane = new NotePreviewPane(this.app, this.modalEl, this.resultContainerEl, () => this.paneSelection(), {

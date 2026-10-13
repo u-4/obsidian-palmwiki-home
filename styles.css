@@ -95,6 +95,12 @@ body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is
 .palmwiki-search-title.is-action { color: var(--text-accent); font-weight: 600; }
 .palmwiki-search-meta { display: block; color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
+/* Both search screens use the note background on every device. On phones and tablets Obsidian gives
+   prompts the secondary background with a blur (--prompt-background, --prompt-backdrop-filter); with a
+   theme or snippet whose secondary background is a coloured canvas, the large two-pane screen showed
+   the notes behind it and the text was hard to read (seen on the iPad). */
+.prompt.palmwiki-search { background-color: var(--background-primary); backdrop-filter: none; -webkit-backdrop-filter: none; }
+
 /* Search screen with a fixed preview pane (unified search). */
 /* Leave Obsidian's native phone prompt sizing (including the bottom input) intact. */
 @media (min-width: 761px) {
