@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, Modal, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags, Platform } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, Modal, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
@@ -18,19 +18,13 @@ const HOME_ICONS = Object.freeze({
 });
 const DEFAULTS = Object.freeze({
   homePath: 'PalmWiki Home.base',
-  searchCommand: 'omnisearch:show-modal',
   switchCommand: '',
   showImages: true,
-  searchMode: 'unified', // 'unified': PalmWiki's own search screen; 'separate': the external search command
   homeLabel: '', // the Home button's text; empty shows the Vault's name
   homeIcon: 'home', // the Home button's icon (a Lucide name from HOME_ICONS)
   searchExcludeFolders: ['99_System'],
-  searchPreview: true,
-  omnisearchPreview: true,
-  mobileCoreSearch: true, // phones and tablets search note text with Obsidian's own search, not Omnisearch
-  bodySearch: 'ranked', // 'ranked': PalmWiki's own body search ordered by link rank; 'external': Omnisearch or Obsidian's search
+  searchPreview: true, // the side preview on both search screens (wide screens only)
   bodySearchOrder: 'rank', // 'rank' (link rank, PageRank), 'modified' (newest first) or 'name'
-  bodySearchPreview: true,
   rankWeakDaily: true, // links from daily notes count for less in the link rank
   rankDownFolders: ['04_Archives', '90_象の墓場'], // notes here sort lower in the link-rank order
   cardPopover: true,
@@ -168,7 +162,7 @@ function setHighlighted(el, text, words) {
   for (const [start, end] of ranges) {
     if (start > pos) el.append(doc.createTextNode(text.slice(pos, start)));
     const span = doc.createElement('span');
-    span.className = 'suggestion-highlight';
+    span.className = 'suggestion-highlight palmwiki-search-match';
     span.textContent = text.slice(start, end);
     el.append(span);
     pos = end;
@@ -326,12 +320,6 @@ function complementWords(app, term) {
 // below). On a phone the pane is not built at all, so no note is read or rendered for it.
 function wideEnoughForPreview(win) {
   return !!win?.matchMedia?.('(min-width: 761px)')?.matches;
-}
-
-function omnisearchSelection(app, modal) {
-  const path = modal.querySelector('.omnisearch-result.is-selected')?.dataset?.resultId;
-  const file = path ? app.vault.getAbstractFileByPath(path) : null;
-  return file instanceof TFile && file.extension === 'md' ? { file } : { hint: '' };
 }
 
 function noteTitle(path) {
@@ -517,20 +505,13 @@ class PalmWikiHome extends Plugin {
     this.settings = { ...DEFAULTS };
     if (saved && typeof saved === 'object') {
       this.settings.homePath = safeHomePath(saved.homePath) || DEFAULTS.homePath;
-      for (const key of ['searchCommand', 'switchCommand']) {
-        if (typeof saved[key] === 'string' && saved[key].length < 512) this.settings[key] = saved[key];
-      }
+      if (typeof saved.switchCommand === 'string' && saved.switchCommand.length < 512) this.settings.switchCommand = saved.switchCommand;
     }
     this.settings.showImages = saved?.showImages !== false;
-    this.settings.searchMode = saved?.searchMode === 'separate' ? 'separate' : 'unified';
     this.settings.homeLabel = typeof saved?.homeLabel === 'string' ? saved.homeLabel.slice(0, 80) : '';
     this.settings.homeIcon = HOME_ICONS[saved?.homeIcon] ? saved.homeIcon : 'home';
     this.settings.searchPreview = saved?.searchPreview !== false;
-    this.settings.omnisearchPreview = saved?.omnisearchPreview !== false;
-    this.settings.mobileCoreSearch = saved?.mobileCoreSearch !== false;
-    this.settings.bodySearch = saved?.bodySearch === 'external' ? 'external' : 'ranked';
     this.settings.bodySearchOrder = ['modified', 'name'].includes(saved?.bodySearchOrder) ? saved.bodySearchOrder : 'rank';
-    this.settings.bodySearchPreview = saved?.bodySearchPreview !== false;
     this.settings.rankWeakDaily = saved?.rankWeakDaily !== false;
     this.settings.rankDownFolders = Array.isArray(saved?.rankDownFolders) ? saved.rankDownFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')) : [...DEFAULTS.rankDownFolders];
     this.settings.cardPopover = saved?.cardPopover !== false;
@@ -601,43 +582,6 @@ class PalmWikiHome extends Plugin {
       this.registerEvent(this.app.vault.on('rename', (file, oldPath) => this.followRename(file, oldPath)));
       this.registerEvent(this.app.vault.on('delete', file => this.followDelete(file)));
       this.syncBars();
-      this.watchOmnisearch();
-    });
-  }
-
-  // Adds the same preview pane to Omnisearch's screen when it opens. Omnisearch is not changed:
-  // the pane reads the selected result's data-result-id; if that markup changes, no pane appears.
-  watchOmnisearch() {
-    const doc = globalThis.activeDocument || globalThis.document;
-    const Observer = doc?.defaultView?.MutationObserver;
-    if (!Observer || !doc.body) return;
-    this.omnisearchPanes = new Map();
-    // Omnisearch builds its list a moment after its screen appears, so a new screen is re-checked briefly.
-    const attach = (container, tries) => {
-      if (this.disposed || !container.isConnected || this.omnisearchPanes.has(container)) return;
-      const modal = container.querySelector('.omnisearch-modal');
-      if (!modal || !wideEnoughForPreview(doc.defaultView)) return;
-      const results = modal.querySelector('.prompt-results');
-      if (!results) { if (tries < 40) setTimeout(() => attach(container, tries + 1), 50); return; }
-      const input = modal.querySelector('input');
-      const pane = new NotePreviewPane(this.app, modal, results, () => omnisearchSelection(this.app, modal), {
-        terms: () => omnisearchTerms(input?.value || ''),
-      });
-      this.omnisearchPanes.set(container, pane);
-      pane.follow();
-    };
-    const observer = new Observer(() => {
-      for (const [container, pane] of this.omnisearchPanes) {
-        if (!container.isConnected) { pane.dispose(); this.omnisearchPanes.delete(container); }
-      }
-      if (!this.settings.omnisearchPreview) return;
-      for (const container of doc.body.querySelectorAll(':scope > .modal-container')) attach(container, 0);
-    });
-    observer.observe(doc.body, { childList: true }); // top-level additions only
-    this.register(() => {
-      observer.disconnect();
-      for (const pane of this.omnisearchPanes.values()) pane.dispose();
-      this.omnisearchPanes.clear();
     });
   }
 
@@ -873,10 +817,9 @@ class PalmWikiHome extends Plugin {
     }).open();
   }
 
-  // The 検索 button and Cmd+G follow the setting, so both styles can be tried side by side.
+  // The 検索 button and Cmd+G open the unified search.
   openSearch(leaf) {
-    if (this.settings.searchMode === 'unified') this.openUnifiedSearch(leaf);
-    else this.runExternal('searchCommand', leaf);
+    this.openUnifiedSearch(leaf);
   }
 
   openUnifiedSearch(leaf) {
@@ -900,32 +843,6 @@ class PalmWikiHome extends Plugin {
     return this.rankCache;
   }
 
-  hasOmnisearch() {
-    return !!commandBridge(this.app)?.listCommands().some(c => c.id === 'omnisearch:show-modal');
-  }
-
-  // Omnisearch rebuilds its whole index in memory on every start on iOS, which can crash the app there.
-  skipsOmnisearchHere() {
-    return this.settings.mobileCoreSearch && !!Platform?.isMobile;
-  }
-
-  usesOmnisearch() {
-    return !this.skipsOmnisearchHere() && this.hasOmnisearch();
-  }
-
-  searchBodies(query) {
-    const text = query.trim();
-    if (this.usesOmnisearch()) {
-      // Omnisearch's documented URL scheme opens its own screen with the query filled in.
-      const url = `obsidian://omnisearch?vault=${encodeURIComponent(this.app.vault.getName())}&query=${encodeURIComponent(text)}`;
-      (globalThis.activeWindow || globalThis.window || globalThis).open?.(url);
-      return;
-    }
-    // Where Omnisearch is turned off (the iPhone, to save memory), Obsidian's own search takes the words.
-    if (this.openCoreSearch(text)) return;
-    this.runExternal('searchCommand');
-  }
-
   async createNote(name) {
     const title = name.replace(/[\\/:*?"<>|#^[\]]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!title) { new Notice('ノート名にできる文字がありません。'); return; }
@@ -937,27 +854,14 @@ class PalmWikiHome extends Plugin {
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file, { active: true });
   }
 
-  // Obsidian's own search, with the words filled in when that is possible. False when it is not available.
-  openCoreSearch(text) {
-    const coreSearch = this.app.internalPlugins?.getPluginById?.('global-search');
-    if (coreSearch?.enabled && typeof coreSearch.instance?.openGlobalSearch === 'function') {
-      coreSearch.instance.openGlobalSearch(text);
-      return true;
-    }
-    const registry = commandBridge(this.app);
-    return !!registry?.listCommands().some(c => c.id === 'global-search:open') && registry.executeCommandById('global-search:open') !== false;
-  }
-
   runExternal(key, leaf) {
     if (this.disposed) return;
     try {
       if (leaf) this.app.workspace.setActiveLeaf(leaf, { focus: true });
       const registry = commandBridge(this.app);
       const id = this.settings[key];
-      if (key === 'searchCommand' && id === 'omnisearch:show-modal' && this.skipsOmnisearchHere() && this.openCoreSearch('')) return;
       if (!registry || !id || id.startsWith(`${this.manifest.id}:`) || !registry.listCommands().some(c => c.id === id)) {
-        // The chosen plugin may be turned off on this device (Omnisearch on the iPhone): use Obsidian's own.
-        if (key === 'searchCommand' && this.openCoreSearch('')) return;
+        // No command chosen, or its plugin is off on this device: use Obsidian's own quick switcher.
         if (key === 'switchCommand' && registry?.listCommands().some(c => c.id === 'switcher:open') && registry.executeCommandById('switcher:open') !== false) return;
         new Notice('PalmWiki Homeの設定で、インストール済みの外部プラグインのコマンドを選んでください。');
         return;
@@ -1594,12 +1498,6 @@ function previewMarkdown(body) {
   return text.length > PREVIEW_CHARS ? { text: text.slice(0, PREVIEW_CHARS), cut: true } : { text, cut: false };
 }
 
-// Words to mark in a preview, from an Omnisearch query: drops -exclusions, field filters and quotes.
-function omnisearchTerms(query) {
-  return String(query).split(/\s+/).map(word => word.replace(/^"+|"+$/g, ''))
-    .filter(word => word && !word.startsWith('-') && !/^[a-z]+:/i.test(word));
-}
-
 function normalizeHeading(text) {
   return String(text).replace(/\s+/g, ' ').trim().toLowerCase();
 }
@@ -1814,7 +1712,7 @@ class TouchCardPreview extends Modal {
 }
 
 // A pane beside a result list that shows the selected row's note (a NotePreview).
-// Shared by the unified search and Omnisearch's screen. `select()` returns { file } for a note
+// Shared by the unified search and the body search. `select()` returns { file } for a note
 // row, { hint } for anything else; `terms()` gives words to mark and scroll to.
 class NotePreviewPane {
   constructor(app, modalEl, resultEl, select, options = {}) {
@@ -1832,7 +1730,7 @@ class NotePreviewPane {
     this.el.className = 'palmwiki-search-preview markdown-rendered';
     this.preview = new NotePreview(app, this.el, options);
     modalEl.append(this.el);
-    // Obsidian (and Omnisearch) handle the arrow keys themselves, so the selection is watched instead.
+    // Obsidian handles the arrow keys itself, so the selection is watched instead.
     const Observer = doc.defaultView?.MutationObserver;
     if (Observer && resultEl) {
       this.observer = new Observer(() => this.follow());
@@ -2273,7 +2171,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
       { command: 'Esc', purpose: '閉じる' },
     ]);
-    // Same key as Omnisearch's screen: make (or open) the note named by the words, whatever row is selected.
+    // Shift+Enter makes (or opens) the note named by the words, whatever row is selected.
     this.scope?.register?.(['Shift'], 'Enter', evt => {
       evt?.preventDefault?.();
       this.createFromInput();
@@ -2315,8 +2213,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
     const row = el ? this.rows.get(el) : null;
     if (row?.kind === 'note') return { file: row.file };
-    return { hint: row?.kind === 'body' ? (this.plugin.settings.bodySearch === 'ranked' ? 'Enter で本文を検索し、リンクの多いノートから順に並べます'
-      : `Enter で${this.plugin.usesOmnisearch() ? ' Omnisearch の' : '標準の検索で'}本文検索を開きます`)
+    return { hint: row?.kind === 'body' ? 'Enter で本文を検索します'
       : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
       : row?.kind === 'word' ? '選ぶと入力に反映します' : '' };
   }
@@ -2360,8 +2257,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       else meta.textContent = [row.recent ? '最近開いた' : '', folder].filter(Boolean).join(' · ');
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
-      meta.textContent = this.plugin.settings.bodySearch === 'ranked' ? 'リンクの多いノートから順に並べる'
-        : this.plugin.usesOmnisearch() ? 'Omnisearch で開く' : '標準の検索で開く';
+      meta.textContent = { rank: 'リンクの多いノートから順に並べる', modified: '更新が新しい順に並べる', name: '名前順に並べる' }[this.plugin.settings.bodySearchOrder];
     } else if (row.kind === 'word') {
       title.textContent = `語句の候補：${row.text}`;
       meta.textContent = 'Various Complements（選ぶと入力に反映）';
@@ -2388,8 +2284,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 
   onChooseSuggestion(row, evt) {
     if (row.kind === 'body') {
-      if (this.plugin.settings.bodySearch === 'ranked' && typeof SuggestModal === 'function') new BodySearch(this.app, this.plugin, row.text).open();
-      else this.plugin.searchBodies(row.text);
+      new BodySearch(this.app, this.plugin, row.text).open();
       return;
     }
     if (row.kind === 'create') { void this.plugin.createNote(row.text).catch(() => new Notice('ノートを作れませんでした。')); return; }
@@ -2402,7 +2297,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 
 // Body search ordered by link rank. Notes are read one by one while searching and their text is not
 // kept (only a one-line excerpt per hit), so nothing stays in memory between searches; this matters
-// on phones, where Omnisearch's in-memory index made Obsidian restart. Title matches were already
+// on phones, where an in-memory index (Omnisearch) made Obsidian restart. Title matches were already
 // offered on the unified search, so by default hits that link to the words come first ([[レシピ]], then
 // links whose name contains them), then by link rank and last change; settings can order them newest
 // first or by name instead.
@@ -2432,7 +2327,7 @@ class BodySearch extends (SuggestModal || class {}) {
       this.inputEl.value = this.initial;
       this.inputEl.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
     }
-    if (!this.plugin.settings.bodySearchPreview || !this.modalEl) return;
+    if (!this.plugin.settings.searchPreview || !this.modalEl) return;
     if (!wideEnoughForPreview(this.modalEl.ownerDocument?.defaultView || globalThis.activeWindow)) return;
     this.pane = new NotePreviewPane(this.app, this.modalEl, this.resultContainerEl, () => this.paneSelection(), {
       terms: () => (this.scan?.query || '').split(/\s+/).filter(Boolean),
@@ -2594,28 +2489,10 @@ class LiteSettings extends PluginSettingTab {
           try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
         });
       });
-    new Setting(containerEl).setName('検索ボタンの動き')
-      .setDesc('「統合検索」は最近のノート・題名と別名・本文検索（Omnisearch）・新規作成をまとめた検索画面です。Cmd+G も同じになります。「外部の検索コマンド」は、下で選んだコマンドを直接開きます。')
-      .addDropdown(dropdown => dropdown
-        .addOption('unified', '統合検索')
-        .addOption('separate', '外部の検索コマンド')
-        .setValue(this.plugin.settings.searchMode)
-        .onChange(async value => {
-          this.plugin.settings.searchMode = value === 'separate' ? 'separate' : 'unified';
-          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
-        }));
-    new Setting(containerEl).setName('統合検索の「本文を検索」')
-      .setDesc('「リンクの多い順」は PalmWiki Home が本文を探し、多くのノートから（またよく参照されるノートから）リンクされているノートを上に並べます。題名に語が入るノートは、その前の題名の候補に出ています。「外部の検索」は Omnisearch（なければ Obsidian 標準の検索）に渡します。')
-      .addDropdown(dropdown => dropdown
-        .addOption('ranked', 'リンクの多い順（PalmWiki Home）')
-        .addOption('external', '外部の検索（Omnisearch・標準の検索）')
-        .setValue(this.plugin.settings.bodySearch)
-        .onChange(async value => {
-          this.plugin.settings.bodySearch = value === 'external' ? 'external' : 'ranked';
-          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
-        }));
+    new Setting(containerEl).setName('検索').setHeading()
+      .setDesc('検索ボタンと Cmd+G は統合検索を開きます。語を入れると最近のノートと題名・別名の候補が出て、いちばん上の「本文を検索」で本文を探します。');
     new Setting(containerEl).setName('本文検索の並び順')
-      .setDesc('「リンクの多い順」（PageRank）は、多くのノートから、またよく参照されるノートからリンクされているノートを上に並べます。')
+      .setDesc('「リンクの多い順」（PageRank）は、検索語へのリンク（[[語]]）があるノートを先にし、そのあと多くのノートから、またよく参照されるノートからリンクされているノートを上に並べます。中身のないページへのリンクも数えます。')
       .addDropdown(dropdown => dropdown
         .addOption('rank', 'リンクの多い順（PageRank）')
         .addOption('modified', '更新が新しい順')
@@ -2633,36 +2510,25 @@ class LiteSettings extends PluginSettingTab {
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
     new Setting(containerEl).setName('リンクの多い順：下げるフォルダ')
-      .setDesc('ここに入れたフォルダのノートは、リンクの多い順で下に並びます（順位を10分の1にします）。完了した案件やアーカイブなど。カンマで区切ります。空にすると下げません。')
+      .setDesc('ここに入れたフォルダのノートは下に並びます（順位を10分の1にします）。完了した案件やアーカイブなど。カンマで区切ります。空にすると下げません。')
       .addText(text => text.setValue(this.plugin.settings.rankDownFolders.join(', ')).onChange(async value => {
         this.plugin.settings.rankDownFolders = value.split(',').map(f => f.trim().replace(/\/+$/, '')).filter(Boolean).slice(0, 50);
         this.plugin.rankCache = null;
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
-    new Setting(containerEl).setName('本文検索の画面にプレビューを表示')
-      .setDesc('選んでいる結果のノートを、本文検索の画面の右側に表示し、検索語に印を付けます（幅の狭い画面では表示しません）。')
-      .addToggle(toggle => toggle.setValue(this.plugin.settings.bodySearchPreview).onChange(async value => {
-        this.plugin.settings.bodySearchPreview = value;
-        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
-      }));
-    new Setting(containerEl).setName('スマホ・タブレットでは Omnisearch を使わない')
-      .setDesc('オンにすると、iPhone・iPad では本文検索を Obsidian 標準の検索で開きます。Omnisearch はモバイルでは起動のたびに索引をメモリに作り直すため、ノートが多いとアプリが落ちることがあります。パソコンでは今までどおり Omnisearch を使います。')
-      .addToggle(toggle => toggle.setValue(this.plugin.settings.mobileCoreSearch).onChange(async value => {
-        this.plugin.settings.mobileCoreSearch = value;
+    new Setting(containerEl).setName('検索から外すフォルダ')
+      .setDesc('統合検索の候補と本文検索の対象に入れないフォルダ（カンマ区切り）。Obsidian の「除外ファイル」も外します。')
+      .addText(text => text.setValue(this.plugin.settings.searchExcludeFolders.join(', ')).onChange(async value => {
+        this.plugin.settings.searchExcludeFolders = value.split(',').map(f => f.trim().replace(/\/+$/, '')).filter(Boolean).slice(0, 50);
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
     new Setting(containerEl).setName('検索画面にプレビューを表示')
-      .setDesc('選んでいる候補のノートを、検索画面の右側に表示します（幅の狭い画面では表示しません）。')
+      .setDesc('選んでいるノートを、統合検索と本文検索の画面の右側に表示し、検索語に印を付けます。幅の狭い画面（スマホ）では表示しません。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.searchPreview).onChange(async value => {
         this.plugin.settings.searchPreview = value;
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
-    new Setting(containerEl).setName('Omnisearch の画面にもプレビューを表示')
-      .setDesc('Omnisearch の検索画面の右側に、選んでいる結果のノートを表示し、検索語に印を付けます。')
-      .addToggle(toggle => toggle.setValue(this.plugin.settings.omnisearchPreview).onChange(async value => {
-        this.plugin.settings.omnisearchPreview = value;
-        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
-      }));
+    new Setting(containerEl).setName('ホームのカード').setHeading();
     new Setting(containerEl).setName('ホームのカードは軽いプレビューで表示')
       .setDesc('Cmd を押しながらカードにマウスを乗せると、読むだけの軽いプレビューを出します。中をクリックすると編集できるプレビュー（Hover Editor）に切り替わります。オフにすると、はじめから編集できるプレビューを出します。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.cardPopover).onChange(async value => {
@@ -2691,12 +2557,6 @@ class LiteSettings extends PluginSettingTab {
           this.plugin.settings.popupCardsPosition = ['below', 'auto'].includes(value) ? value : 'above';
           try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
         }));
-    new Setting(containerEl).setName('検索候補から外すフォルダ')
-      .setDesc('まとめた検索の候補に出さないフォルダ（カンマ区切り）。')
-      .addText(text => text.setValue(this.plugin.settings.searchExcludeFolders.join(', ')).onChange(async value => {
-        this.plugin.settings.searchExcludeFolders = value.split(',').map(f => f.trim().replace(/\/+$/, '')).filter(Boolean).slice(0, 50);
-        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
-      }));
     new Setting(containerEl).setName('カードに画像を表示')
       .setDesc('最初のローカルPNG・JPEG・WebP（2 MiB以下）のみ。表示付近で読み込みます。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.showImages).onChange(async value => {
@@ -2707,8 +2567,8 @@ class LiteSettings extends PluginSettingTab {
     const registry = commandBridge(this.app);
     const commands = (registry?.listCommands() || []).filter(c => !c.id.startsWith(`${this.plugin.manifest.id}:`))
       .sort((a, b) => a.name.localeCompare(b.name));
-    for (const [key, label] of [['searchCommand', '検索ボタン'], ['switchCommand', '移動ボタン']]) {
-      new Setting(containerEl).setName(label).setDesc('OmnisearchやAnother Quick Switcherのコマンドを選んでください。')
+    for (const [key, label] of [['switchCommand', 'ページ切り替えのコマンド']]) {
+      new Setting(containerEl).setName(label).setDesc('コマンド「Open page switcher」で開くコマンドです（Another Quick Switcher など）。未設定なら Obsidian のクイックスイッチャーを開きます。')
         .addDropdown(dropdown => {
           dropdown.addOption('', '未設定');
           const selected = this.plugin.settings[key];

@@ -104,8 +104,7 @@ body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas: "input preview" "results preview" "help preview";
 }
-.palmwiki-search-modal > .prompt-input-container,
-.palmwiki-search-modal > .omnisearch-input-container { grid-area: input; }
+.palmwiki-search-modal > .prompt-input-container { grid-area: input; }
 .palmwiki-search-modal > .prompt-results { grid-area: results; max-height: none; overflow-y: auto; }
 .palmwiki-search-modal > .prompt-instructions { grid-area: help; }
 }
@@ -121,7 +120,11 @@ body:not(.is-phone) .view-header:has(> .view-header-left > .palmwiki-lite-nav.is
 @media (max-width: 760px) {
   .palmwiki-search-preview { display: none; }
 }
-.palmwiki-search-preview mark.palmwiki-search-preview-match { background: var(--text-highlight-bg); color: inherit; border-radius: 2px; }
+/* Search words: a visible fill of their own, since some themes leave --text-highlight-bg empty. */
+body { --palmwiki-match-bg: rgba(255, 196, 0, 0.45); }
+body.theme-dark { --palmwiki-match-bg: rgba(255, 196, 0, 0.35); }
+.palmwiki-search-preview mark.palmwiki-search-preview-match,
+.palmwiki-search-match { background: var(--palmwiki-match-bg); color: inherit; border-radius: 2px; }
 
 /* Home card popups (Cmd+hover): a row of linked cards above the light read-only preview, 520×440 in
    all, as in 2hop-links-plus. The row has no background; pointer events pass between its cards. */

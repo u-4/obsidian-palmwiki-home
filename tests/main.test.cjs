@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -241,14 +241,15 @@ test('invalid or missing-parent Home paths fail without writes', async () => {
   const f = await fixture(); f.plugin.settings.homePath = 'Missing/Home.base'; await f.plugin.openHome();
   f.plugin.settings.homePath = '.obsidian/Home.base'; await f.plugin.openHome(); assert.equal(f.calls.creates, 0); assert.ok(f.notices.length); f.stop();
 });
-test('external search and switch settings are preserved across load and save', async () => {
-  const h = load(), a = appDouble(h.doc); a.app.saved = { homePath: 'My.base', searchCommand: 'omnisearch:show-modal', switchCommand: 'aqs:recent' };
-  const p = new h.Main(a.app); await p.onload(); p.runExternal('searchCommand'); p.runExternal('switchCommand'); await p.saveSettings();
-  assert.deepEqual(a.calls.commands, ['omnisearch:show-modal', 'aqs:recent']); assert.equal(a.app.saved.switchCommand, 'aqs:recent'); p.onunload();
+test('the page switcher setting is kept across load and save; old search settings are dropped', async () => {
+  const h = load(), a = appDouble(h.doc); a.app.saved = { homePath: 'My.base', searchCommand: 'omnisearch:show-modal', searchMode: 'separate', switchCommand: 'aqs:recent' };
+  const p = new h.Main(a.app); await p.onload(); p.runExternal('switchCommand'); await p.saveSettings();
+  assert.deepEqual(a.calls.commands, ['aqs:recent']); assert.equal(a.app.saved.switchCommand, 'aqs:recent');
+  assert.equal('searchCommand' in a.app.saved, false); assert.equal('searchMode' in a.app.saved, false); p.onunload();
 });
-test('missing external command does not fall back or recurse', async () => {
-  const f = await fixture(); f.plugin.runExternal('switchCommand'); f.plugin.settings.searchCommand = 'palmwiki-home:focus-search';
-  f.plugin.runExternal('searchCommand'); assert.equal(f.calls.commands.length, 0); assert.ok(f.notices.length); f.stop();
+test('a switcher command pointing back at this plugin does not recurse', async () => {
+  const f = await fixture(); f.app.commands.listCommands = () => [{ id: 'palmwiki-home:focus-search' }]; f.plugin.settings.switchCommand = 'palmwiki-home:focus-search';
+  f.plugin.runExternal('switchCommand'); assert.equal(f.calls.commands.length, 0); assert.ok(f.notices.length); f.stop();
 });
 test('initial DOM is 24, first frame reads nothing, pending body reads are capped at two', async () => {
   const f = await fixture(10000); const waiters = []; f.app.vault.cachedRead = file => { f.calls.reads.push(file.path); return new Promise(r => waiters.push(r)); };
@@ -357,7 +358,7 @@ test('failed image is hidden and does not automatically retry forever', async ()
 });
 test('images can be disabled without changing search settings or reading image files', async () => {
   const f = await fixture(1); f.files.set('a.png', new TFile('a.png')); f.metadata.set('0.md', { embeds: [{ link: 'a.png' }] });
-  f.plugin.settings.showImages = false; f.refresh(); await f.pump(); assert.equal(f.calls.images.length, 0); assert.equal(f.plugin.settings.searchCommand, 'omnisearch:show-modal'); f.stop();
+  f.plugin.settings.showImages = false; f.refresh(); await f.pump(); assert.equal(f.calls.images.length, 0); assert.equal(f.plugin.settings.searchPreview, true); f.stop();
 });
 test('touch-generated mouseover never starts a card preview, and the first click opens the note', async () => {
   const f = await fixture(1); f.refresh();
@@ -592,11 +593,10 @@ test('create row is offered only when no note has exactly that name', async () =
   assert.equal(titles(s.getSuggestions('r7機器整備')).some(t => t.startsWith('create:')), false);
   f.stop();
 });
-test('Enter on the first row hands the words to Omnisearch; choosing a note opens it', async () => {
-  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+test('Enter on the first row opens the body search; choosing a note opens it', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
   const rows = s.getSuggestions('機器 整備');
-  s.selectSuggestion(rows[0], { key: 'Enter' });
-  assert.deepEqual([...f.urls], ['obsidian://omnisearch?vault=PalmWiki&query=%E6%A9%9F%E5%99%A8%20%E6%95%B4%E5%82%99']);
+  s.selectSuggestion(rows[0], { key: 'Enter' }); assert.ok(f.modals.at(-1) instanceof f.BodySearch); assert.equal(f.modals.at(-1).initial, '機器 整備'); assert.deepEqual([...f.urls], []);
   s.selectSuggestion(rows[1], { key: 'Enter' }); await settle();
   assert.equal(f.calls.opens.at(-1), '10_Notes/Projects/機器整備_駒込2026.md');
   f.stop();
@@ -635,16 +635,13 @@ test('Various Complements words complete the last word and keep the screen open;
   assert.deepEqual(titles(s.getSuggestions('委員')).filter(t => t.startsWith('word:')), []);
   f.stop();
 });
-test('the 検索 button and Cmd+G open the unified search by default; the external command stays a setting, which persists', async () => {
-  const f = await fixture(0);
-  f.plugin.openSearch(); assert.equal(f.modals.length, 1); assert.ok(f.modals[0] instanceof f.UnifiedSearch);
-  f.plugin.settings.searchMode = 'separate'; await f.plugin.saveSettings();
-  f.plugin.openSearch(); assert.deepEqual(f.calls.commands.slice(-1), ['omnisearch:show-modal']); assert.equal(f.modals.length, 1);
-  const again = new f.Main(f.app); await again.onload(); assert.equal(again.settings.searchMode, 'separate');
+test('the 検索 button and Cmd+G always open the unified search, even with an old external-search setting', async () => {
+  const f = await fixture(0); f.app.saved = { searchMode: 'separate', searchCommand: 'omnisearch:show-modal' };
+  const again = new f.Main(f.app); await again.onload(); again.openSearch();
+  assert.ok(f.modals.at(-1) instanceof f.UnifiedSearch); assert.equal(f.calls.commands.length, 0);
   assert.deepEqual([...again.settings.searchExcludeFolders], ['99_System']); again.onunload();
   f.stop();
 });
-
 test('with the light popup off, cards join page preview / Hover Editor through the standard hover-link event, Cmd by default', async () => {
   const f = await fixture(3); f.plugin.settings.cardPopover = false; f.refresh();
   assert.equal(f.plugin.hoverSources['palmwiki-home'].defaultMod, true);
@@ -808,7 +805,7 @@ test('the card popup closes after the pointer leaves, and goes with the view', a
 
 
 test('search preview pane shows the selected note (no frontmatter), hints for action rows, and follows the selection', async () => {
-  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
   f.bodies.set('10_Notes/Projects/機器整備_駒込2026.md', '---\ntags: [Projects]\n---\n# 計画\n本文A');
   f.bodies.set('00_Inbox/R7機器整備.md', '本文B');
   s.modalEl = f.doc.createElement('div'); s.modalEl.classList = { add() {}, remove() {} };
@@ -818,7 +815,7 @@ test('search preview pane shows the selected note (no frontmatter), hints for ac
   const [body, a, b] = rows.slice(0, 3).map(row => { const el = f.doc.createElement('div'); s.renderSuggestion(row, el); return el; });
   const text = el => [el.textContent, ...el.children.map(text)].join('|');
   selected = body; s.pane.follow(); f.clock.tick(); await settle();
-  assert.match(text(s.pane.el), /Omnisearch の本文検索/);
+  assert.match(text(s.pane.el), /本文を検索します/);
   selected = a; s.pane.follow(); selected = b; s.pane.follow(); // fast moves settle on b
   f.clock.tick(); await settle(); await settle();
   assert.match(text(s.pane.el), /R7機器整備\|本文B/); assert.deepEqual([...f.rendered], ['本文B']);
@@ -833,38 +830,11 @@ test('narrow screens (phones) build no search preview pane', async () => {
   s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null);
   f.stop();
 });
-test('without Omnisearch the body row hands the words to Obsidian\'s own search', async () => {
-  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const searched = [];
-  f.app.commands.listCommands = () => [{ id: 'aqs:recent', name: 'Recent' }];
-  f.app.internalPlugins = { getPluginById: id => id === 'global-search' ? { enabled: true, instance: { openGlobalSearch: q => searched.push(q) } } : null };
-  const s = new f.UnifiedSearch(f.app, f.plugin);
-  const rows = s.getSuggestions('機器 整備');
-  const el = f.doc.createElement('div'); s.renderSuggestion(rows[0], el);
-  const text = e => [e.textContent, ...e.children.map(text)].join('|');
-  assert.match(text(el), /標準の検索で開く/);
-  s.selectSuggestion(rows[0], { key: 'Enter' });
-  assert.deepEqual(searched, ['機器 整備']); assert.deepEqual([...f.urls], []);
-  f.stop();
-});
-test('when the chosen search or switcher plugin is off on this device, Obsidian\'s own opens instead of a notice', async () => {
+test('without a chosen switcher (or with its plugin off on this device) Obsidian\'s quick switcher opens instead of a notice', async () => {
   const f = await fixture(0); const run = [];
-  f.app.commands.listCommands = () => [{ id: 'global-search:open' }, { id: 'switcher:open' }];
+  f.app.commands.listCommands = () => [{ id: 'switcher:open' }];
   f.app.commands.executeCommandById = id => { run.push(id); return true; };
-  f.app.internalPlugins = { getPluginById: () => null };
-  f.plugin.runExternal('searchCommand'); f.plugin.runExternal('switchCommand'); f.plugin.searchBodies('機器');
-  assert.deepEqual(run, ['global-search:open', 'switcher:open', 'global-search:open']); assert.deepEqual([...f.urls], []);
-  f.stop();
-});
-test('on phones and tablets the body search uses Obsidian\'s own search even with Omnisearch on (setting, default on)', async () => {
-  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const searched = [];
-  f.app.internalPlugins = { getPluginById: id => id === 'global-search' ? { enabled: true, instance: { openGlobalSearch: q => searched.push(q) } } : null };
-  f.platform.isMobile = true;
-  const s = new f.UnifiedSearch(f.app, f.plugin); const rows = s.getSuggestions('機器 整備');
-  s.selectSuggestion(rows[0], { key: 'Enter' });
-  assert.deepEqual(searched, ['機器 整備']); assert.deepEqual([...f.urls], []);
-  f.plugin.settings.mobileCoreSearch = false;
-  const t = new f.UnifiedSearch(f.app, f.plugin); t.selectSuggestion(t.getSuggestions('機器')[0], { key: 'Enter' });
-  assert.equal(f.urls.length, 1); assert.equal(searched.length, 1);
+  f.plugin.runExternal('switchCommand'); assert.deepEqual(run, ['switcher:open']); assert.equal(f.notices.length, 0);
   f.stop();
 });
 test('link rank puts notes linked from many (and from well-linked) notes first', () => {
@@ -902,9 +872,9 @@ test('body search can be ordered newest first or by name, and its preview can be
   assert.deepEqual(await run('rank'), ['ANA SFC', 'R7機器整備', 'カタカナのメモ']);
   assert.deepEqual(await run('modified'), ['R7機器整備', 'ANA SFC', 'カタカナのメモ']);
   assert.deepEqual(await run('name'), ['ANA SFC', 'R7機器整備', 'カタカナのメモ'].sort((a, b) => a.localeCompare(b, 'ja')));
-  f.plugin.settings.bodySearchPreview = false; const s = new f.BodySearch(f.app, f.plugin, 'x');
+  f.plugin.settings.searchPreview = false; const s = new f.BodySearch(f.app, f.plugin, 'x');
   s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null); s.onClose();
-  f.plugin.settings.bodySearchPreview = true; const t = new f.BodySearch(f.app, f.plugin, 'x');
+  f.plugin.settings.searchPreview = true; const t = new f.BodySearch(f.app, f.plugin, 'x');
   t.modalEl = f.doc.createElement('div'); t.modalEl.classList = { add() {}, remove() {} }; t.onOpen(); assert.ok(t.pane); t.onClose();
   f.stop();
 });
@@ -953,12 +923,12 @@ test('title and body-search rows highlight the matched words', async () => {
   const u = new f.UnifiedSearch(f.app, f.plugin); u.inputEl.value = '整備';
   const row = u.getSuggestions('整備').find(r => r.kind === 'note' && r.file.basename === 'R7機器整備');
   const el = f.doc.createElement('div'); u.renderSuggestion(row, el);
-  const spans = []; const walk = e => { if (e.className === 'suggestion-highlight') spans.push(e.textContent); e.children.forEach(walk); }; walk(el);
+  const spans = []; const walk = e => { if (String(e.className).includes('suggestion-highlight')) spans.push(e.textContent); e.children.forEach(walk); }; walk(el);
   assert.deepEqual(spans, ['整備']);
   f.bodies.set('00_Inbox/カタカナのメモ.md', 'セイビ記録');
   const s = new f.BodySearch(f.app, f.plugin, 'せいび'); s.getSuggestions('せいび'); for (let i = 0; i < 6; i++) await settle();
   const hit = s.getSuggestions('せいび')[1]; const el2 = f.doc.createElement('div'); s.renderSuggestion(hit, el2);
-  const spans2 = []; const walk2 = e => { if (e.className === 'suggestion-highlight') spans2.push(e.textContent); e.children.forEach(walk2); }; walk2(el2);
+  const spans2 = []; const walk2 = e => { if (String(e.className).includes('suggestion-highlight')) spans2.push(e.textContent); e.children.forEach(walk2); }; walk2(el2);
   assert.deepEqual(spans2, ['セイビ']); s.onClose(); f.stop();
 });
 test('a new query stops the earlier body search', async () => {
@@ -969,19 +939,6 @@ test('a new query stops the earlier body search', async () => {
 test('search preview can be turned off in settings', async () => {
   const f = await fixture(0); f.plugin.settings.searchPreview = false; const s = new f.UnifiedSearch(f.app, f.plugin);
   s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null);
-  f.stop();
-});
-
-test('Omnisearch query words to mark skip exclusions, field filters and quotes', () => {
-  const { omnisearchTerms } = load();
-  assert.deepEqual([...omnisearchTerms('機器 -除外 "委員会" path:10_Notes ext:md 整備')], ['機器', '委員会', '整備']);
-});
-test('Omnisearch selection maps the selected result id to a note, anything else to nothing', async () => {
-  const f = await fixture(0); searchVault(f);
-  const modal = id => ({ querySelector: () => (id === null ? null : { dataset: { resultId: id } }) });
-  assert.equal(f.omnisearchSelection(f.app, modal('00_Inbox/R7機器整備.md')).file.path, '00_Inbox/R7機器整備.md');
-  assert.equal(f.omnisearchSelection(f.app, modal('missing.md')).file, undefined);
-  assert.equal(f.omnisearchSelection(f.app, modal(null)).file, undefined);
   f.stop();
 });
 

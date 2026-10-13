@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.0 — 2026-10-13
+
+- Omnisearch integration removed (the owner's decision: its in-memory index made Obsidian restart on the iPhone, and the link-rank body search replaces it). Gone: the preview pane on Omnisearch's screen, the hand-off of body search to Omnisearch or Obsidian's search, and the settings for the search-button mode, the external search command, the body-search target, "no Omnisearch on phones" and the Omnisearch preview. The search icon and Cmd+G always open the unified search.
+- Search settings reorganized under a 検索 heading: body-search order, the two link-rank options, folders left out of search (now also the body search's), and one preview toggle for both search screens. The page-switcher command stays (Obsidian's quick switcher when none is chosen).
+- Highlights now have a visible fill of their own: some themes leave `--text-highlight-bg` empty, so the marks in previews did not show, and list highlights were only bold.
+
 ## 1.13.3 — 2026-10-13
 
 - Highlight the search words: in the title and alias of title matches on the unified search, in the title and excerpt of body-search results (Obsidian's own suggestion highlight), and in the preview of both screens (its title too). Matching folds hiragana/katakana and full/half width as the search does, so 「セイビ」 and 「ｾｲﾋﾞ」 are marked for 「せいび」.

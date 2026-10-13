@@ -13,7 +13,7 @@
 
 - PalmWiki Home 1.0 is a rebuild of the former 0.x plugin (tag `0.6.1`) on top of the Lite prototype. It is one dependency-free CommonJS file, `main.js`, loaded by Obsidian as is.
 - Lists, sorting and filtering belong to Obsidian Bases; this plugin adds the card view (`palmwiki-lite-cards`), the Home/search/switch buttons, and settings.
-- Body search is PalmWiki Home's own (1.13): it reads notes per search, keeps no text, and orders hits by link rank (PageRank over `metadataCache.resolvedLinks`, owner's decision 2026-10-13). Do not add a full-text index or a persistent cache of note text. Omnisearch stays an optional target and is not used on phones (owner's rule). Page switching calls Another Quick Switcher. 2hop-links-plus keeps its own order for now; the owner wants the two orders unified later.
+- Body search is PalmWiki Home's own (1.13): it reads notes per search, keeps no text, and orders hits by link rank (PageRank over `metadataCache.resolvedLinks`, owner's decision 2026-10-13). Do not add a full-text index or a persistent cache of note text. There is no Omnisearch integration (removed in 1.14.0, owner's decision 2026-10-13); do not add one back. Page switching calls the chosen command (Another Quick Switcher) or Obsidian's quick switcher. 2hop-links-plus keeps its own order for now; the owner wants the two orders unified later.
 - Keep it independent from `2hop-links-plus` at runtime.
 - `docs/ROADMAP.md` holds the next steps.
 
