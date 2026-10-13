@@ -197,6 +197,21 @@ function linkRanks(resolvedLinks, iterations = 30, damping = 0.85) {
   return ranks;
 }
 
+// How strongly a note links to the search words, from the links Obsidian already keeps (no text read):
+// 2 when it links to a page named exactly a word ([[レシピ]], even an empty page), 1 when a link's
+// page name starts or ends with a word ([[しそバターレシピ]]), else 0. A word in the middle of another
+// (クリオプレシピテート, in the text or as [[クリオプレシピテート]]) stays at 0.
+function linkTier(cache, terms) {
+  let tier = 0;
+  for (const link of [...(cache?.links || []), ...(cache?.frontmatterLinks || [])]) {
+    const name = normalizeSearch(String(link?.link || '').split('#')[0].split('|')[0].split('/').pop().trim());
+    if (!name) continue;
+    if (terms.includes(name)) return 2;
+    if (terms.some(term => name.startsWith(term) || name.endsWith(term))) tier = 1;
+  }
+  return tier;
+}
+
 // One line of the note around the first search word, for the result list.
 function bodySnippet(text, key, terms) {
   let at = -1;
@@ -2302,8 +2317,9 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 // Body search ordered by link rank. Notes are read one by one while searching and their text is not
 // kept (only a one-line excerpt per hit), so nothing stays in memory between searches; this matters
 // on phones, where Omnisearch's in-memory index made Obsidian restart. Title matches were already
-// offered on the unified search, so by default hits are ordered by link rank alone, then by last
-// change; settings can order them newest first or by name instead.
+// offered on the unified search, so by default hits that link to the words come first ([[レシピ]], then
+// links whose name contains them), then by link rank and last change; settings can order them newest
+// first or by name instead.
 const BODY_SEARCH_LIMIT = 200;
 class BodySearch extends (SuggestModal || class {}) {
   constructor(app, plugin, query) {
@@ -2378,7 +2394,8 @@ class BodySearch extends (SuggestModal || class {}) {
             const text = await this.app.vault.cachedRead(file);
             const key = normalizeSearch(text);
             if (terms.every(term => key.includes(term))) {
-              scan.hits.push({ kind: 'note', file, rank: ranks.get(file.path) || 0, snippet: bodySnippet(text, key, terms) });
+              scan.hits.push({ kind: 'note', file, rank: ranks.get(file.path) || 0, snippet: bodySnippet(text, key, terms),
+                tier: linkTier(this.app.metadataCache.getFileCache(file), terms) });
               this.refreshSoon();
             }
           } catch { /* unreadable notes are skipped */ }
@@ -2413,7 +2430,7 @@ class BodySearch extends (SuggestModal || class {}) {
     const order = this.plugin.settings.bodySearchOrder;
     const byTime = (a, b) => b.file.stat.mtime - a.file.stat.mtime;
     const hits = [...scan.hits].sort(order === 'name' ? (a, b) => a.file.basename.localeCompare(b.file.basename, 'ja')
-      : order === 'modified' ? byTime : (a, b) => b.rank - a.rank || byTime(a, b));
+      : order === 'modified' ? byTime : (a, b) => b.tier - a.tier || b.rank - a.rank || byTime(a, b));
     const count = hits.length.toLocaleString('ja-JP');
     const status = scan.done
       ? `本文に含むノート ${count}件（${scan.total.toLocaleString('ja-JP')}件を ${(scan.ms / 1000).toFixed(1)}秒で検索）${hits.length > BODY_SEARCH_LIMIT ? `・上位${BODY_SEARCH_LIMIT}件を表示` : ''}`
@@ -2434,10 +2451,12 @@ class BodySearch extends (SuggestModal || class {}) {
     title.className = 'palmwiki-search-title';
     title.textContent = row.file.basename;
     el.append(title);
-    if (row.snippet) {
+    const words = (this.scan?.query || '').trim();
+    const why = row.tier === 2 ? `[[${words}]] へのリンクあり` : row.tier === 1 ? `「${words}」で始まる・終わる名前へのリンクあり` : '';
+    if (row.snippet || why) {
       const meta = doc.createElement('small');
       meta.className = 'palmwiki-search-meta';
-      meta.textContent = row.snippet;
+      meta.textContent = [why, row.snippet].filter(Boolean).join(' · ');
       el.append(meta);
     }
   }

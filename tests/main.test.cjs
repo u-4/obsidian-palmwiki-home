@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -907,6 +907,20 @@ test('body search can be ordered newest first or by name, and its preview can be
   f.plugin.settings.bodySearchPreview = true; const t = new f.BodySearch(f.app, f.plugin, 'x');
   t.modalEl = f.doc.createElement('div'); t.modalEl.classList = { add() {}, remove() {} }; t.onOpen(); assert.ok(t.pane); t.onClose();
   f.stop();
+});
+test('notes that link to the search word come before notes that only contain it inside another word', async () => {
+  const f = await fixture(0); searchVault(f);
+  f.bodies.set('00_Inbox/ANA SFC.md', '[[クリオプレシピテート]]の準備'); f.metadata.set('00_Inbox/ANA SFC.md', { links: [{ link: 'クリオプレシピテート' }] }); f.bodies.set('00_Inbox/カタカナのメモ.md', '[[しそバターレシピ]]');
+  f.bodies.set('00_Inbox/R7機器整備.md', '今日の[[レシピ]]');
+  f.metadata.set('00_Inbox/カタカナのメモ.md', { links: [{ link: 'しそバターレシピ' }] });
+  f.metadata.set('00_Inbox/R7機器整備.md', { links: [{ link: 'レシピ#材料' }] });
+  f.app.metadataCache.resolvedLinks = { 'x.md': { '00_Inbox/ANA SFC.md': 1 }, 'y.md': { '00_Inbox/ANA SFC.md': 1 } }; // the most linked note
+  const s = new f.BodySearch(f.app, f.plugin, 'れしぴ'); s.getSuggestions('れしぴ'); for (let i = 0; i < 6; i++) await settle();
+  const rows = s.getSuggestions('れしぴ');
+  assert.deepEqual([...rows.slice(1).map(r => r.file.basename)], ['R7機器整備', 'カタカナのメモ', 'ANA SFC']);
+  const el = f.doc.createElement('div'); s.renderSuggestion(rows[1], el);
+  assert.match([el.textContent, ...el.children.map(c => c.textContent)].join('|'), /\[\[れしぴ\]\] へのリンクあり/);
+  s.onClose(); f.stop();
 });
 test('a new query stops the earlier body search', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.BodySearch(f.app, f.plugin, '機器');

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.13.1 — 2026-10-13
+
+- In the link-rank order, notes that link to the search word come first: a link to a page named exactly the word (`[[レシピ]]`, even an empty page), then a link whose page name starts or ends with it (`[[しそバターレシピ]]`), then the rest, including a word in the middle of another (クリオプレシピテート, even when linked). The result line says why. Uses the links Obsidian already keeps; no note text is read for this.
+
 ## 1.13.0 — 2026-10-13
 
 - Body search of its own. In the unified search, the body-search row (Enter) now opens a PalmWiki Home screen that reads the notes and lists those containing every word, ordered by link rank (PageRank over Obsidian's resolved links, as Cosense orders pages). Title matches stay where they were, on the unified search before it. Hiragana/katakana and full/half width are folded as in the title search. Note text is not kept: only a one-line excerpt per hit, so nothing stays in memory between searches. The first line shows progress, then the count and how long the search took.
