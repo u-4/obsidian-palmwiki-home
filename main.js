@@ -123,6 +123,59 @@ function normalizeSearch(text) {
     .replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
 }
 
+// Where the search words are in a text, as ranges of the original text. Each character is normalized
+// on its own (as normalizeSearch does for the whole), so a range maps back to the text as written:
+// 「セイビ」 is found and marked for the word 「せいび」.
+function matchRanges(text, words) {
+  const terms = [...new Set(words.map(normalizeSearch).map(term => term.trim()).filter(Boolean))];
+  if (!terms.length || !text) return [];
+  let key = '';
+  const map = [];
+  let at = 0;
+  const chars = [...String(text)];
+  for (let c = 0; c < chars.length; c++) {
+    // A voicing mark that follows (half-width ﾞﾟ or a combining one) is normalized with its kana: ﾋﾞ → び.
+    let ch = chars[c];
+    while (c + 1 < chars.length && /[\uff9e\uff9f\u3099\u309a]/.test(chars[c + 1])) ch += chars[++c];
+    const norm = normalizeSearch(ch);
+    for (let k = 0; k < norm.length; k++) map.push(at);
+    key += norm;
+    at += ch.length;
+  }
+  map.push(at);
+  const ranges = [];
+  for (const term of terms) {
+    for (let i = key.indexOf(term); i >= 0 && ranges.length < 200; i = key.indexOf(term, i + term.length)) {
+      ranges.push([map[i], map[i + term.length]]);
+    }
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  return merged;
+}
+
+// Fills el with text, the search words wrapped in Obsidian's own highlight for suggestion lists.
+function setHighlighted(el, text, words) {
+  const ranges = matchRanges(text, words);
+  if (!ranges.length) { el.textContent = text; return; }
+  const doc = el.ownerDocument;
+  let pos = 0;
+  for (const [start, end] of ranges) {
+    if (start > pos) el.append(doc.createTextNode(text.slice(pos, start)));
+    const span = doc.createElement('span');
+    span.className = 'suggestion-highlight';
+    span.textContent = text.slice(start, end);
+    el.append(span);
+    pos = end;
+  }
+  if (pos < text.length) el.append(doc.createTextNode(text.slice(pos)));
+}
+
 function inFolders(path, folders) {
   return folders.some(folder => path === folder || path.startsWith(folder + '/'));
 }
@@ -1644,7 +1697,7 @@ class NotePreview {
     this.file = selected.file;
     const title = doc.createElement('div');
     title.className = 'palmwiki-search-preview-title';
-    title.textContent = selected.file.basename;
+    setHighlighted(title, selected.file.basename, this.terms());
     title.title = selected.file.basename;
     const content = doc.createElement('div');
     content.className = 'palmwiki-search-preview-body';
@@ -1696,9 +1749,10 @@ class NotePreview {
     this.el.scrollTop = Math.max(0, this.el.scrollTop + at.top - box.top - this.el.clientHeight / 3);
   }
 
-  // Marks the query words in the rendered preview and scrolls to the first one.
+  // Marks the query words in the rendered preview (hiragana/katakana and width folded, as the search
+  // does) and scrolls to the first one.
   markTerms(content) {
-    const terms = this.terms().map(term => term.toLowerCase()).filter(term => term.length > 0);
+    const terms = this.terms().filter(term => String(term).trim().length > 0);
     const doc = content.ownerDocument;
     if (!terms.length || typeof doc.createTreeWalker !== 'function') return;
     const walker = doc.createTreeWalker(content, 4 /* NodeFilter.SHOW_TEXT */);
@@ -1707,22 +1761,20 @@ class NotePreview {
     let first = null;
     let marks = 0;
     for (const node of nodes) {
-      const lower = node.nodeValue.toLowerCase();
-      let at = -1;
-      let length = 0;
-      for (const term of terms) {
-        const i = lower.indexOf(term);
-        if (i >= 0 && (at < 0 || i < at)) { at = i; length = term.length; }
+      const ranges = matchRanges(node.nodeValue, terms);
+      // From the end, so earlier offsets stay valid while splitting.
+      for (let r = ranges.length - 1; r >= 0; r--) {
+        const [at, end] = ranges[r];
+        const hit = node.splitText(at);
+        hit.splitText(end - at);
+        const mark = doc.createElement('mark');
+        mark.className = 'palmwiki-search-preview-match';
+        hit.replaceWith(mark);
+        mark.append(hit);
+        if (r === 0 && !first) first = mark;
+        marks++;
       }
-      if (at < 0) continue;
-      const hit = node.splitText(at);
-      hit.splitText(length);
-      const mark = doc.createElement('mark');
-      mark.className = 'palmwiki-search-preview-match';
-      hit.replaceWith(mark);
-      mark.append(hit);
-      first = first || mark;
-      if (++marks >= 200) break;
+      if (marks >= 200) break;
     }
     if (first) this.el.scrollTop = Math.max(0, first.offsetTop - this.el.clientHeight / 3);
   }
@@ -2242,6 +2294,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     if (!this.plugin.settings.searchPreview || !this.modalEl) return;
     if (!wideEnoughForPreview(this.modalEl.ownerDocument?.defaultView || globalThis.activeWindow)) return;
     this.pane = new NotePreviewPane(this.app, this.modalEl, this.resultContainerEl, () => this.paneSelection(), {
+      terms: () => (this.inputEl?.value || '').split(/\s+/).filter(Boolean),
       onLink: (link, source, event) => {
         this.close();
         void this.app.workspace.openLinkText(link, source, Keymap.isModEvent(event));
@@ -2297,12 +2350,14 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const meta = doc.createElement('small');
     meta.className = 'palmwiki-search-meta';
     if (row.kind === 'note') {
-      title.textContent = row.file.basename;
+      const words = (this.inputEl?.value || '').split(/\s+/).filter(Boolean);
+      if (row.recent) title.textContent = row.file.basename; else setHighlighted(title, row.file.basename, words);
       const terms = normalizeSearch(this.inputEl?.value || '').split(/\s+/).filter(Boolean);
       const viaAlias = row.note && terms.length && !terms.every(term => row.note.titleKey.includes(term));
       const alias = viaAlias ? row.note.aliases.find(a => terms.some(term => normalizeSearch(a).includes(term))) : null;
       const folder = row.file.parent?.path && row.file.parent.path !== '/' ? row.file.parent.path : '';
-      meta.textContent = [row.recent ? '最近開いた' : '', alias ? `別名: ${alias}` : '', folder].filter(Boolean).join(' · ');
+      if (alias) setHighlighted(meta, [`別名: ${alias}`, folder].filter(Boolean).join(' · '), words);
+      else meta.textContent = [row.recent ? '最近開いた' : '', folder].filter(Boolean).join(' · ');
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
       meta.textContent = this.plugin.settings.bodySearch === 'ranked' ? 'リンクの多いノートから順に並べる'
@@ -2480,14 +2535,16 @@ class BodySearch extends (SuggestModal || class {}) {
       return;
     }
     title.className = 'palmwiki-search-title';
-    title.textContent = row.file.basename;
+    const query = (this.scan?.query || '').trim();
+    const words = query.split(/\s+/).filter(Boolean);
+    setHighlighted(title, row.file.basename, words);
     el.append(title);
-    const words = (this.scan?.query || '').trim();
-    const why = row.tier === 2 ? `[[${words}]] へのリンクあり` : row.tier === 1 ? `「${words}」で始まる・終わる名前へのリンクあり` : '';
+    const why = row.tier === 2 ? `[[${query}]] へのリンクあり` : row.tier === 1 ? `「${query}」で始まる・終わる名前へのリンクあり` : '';
     if (row.snippet || why) {
       const meta = doc.createElement('small');
       meta.className = 'palmwiki-search-meta';
-      meta.textContent = [why, row.snippet].filter(Boolean).join(' · ');
+      if (why) meta.append(doc.createTextNode(why + (row.snippet ? ' · ' : '')));
+      if (row.snippet) { const line = doc.createElement('span'); setHighlighted(line, row.snippet, words); meta.append(line); }
       el.append(meta);
     }
   }

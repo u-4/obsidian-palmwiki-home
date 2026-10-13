@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -938,8 +938,28 @@ test('notes that link to the search word come before notes that only contain it 
   const rows = s.getSuggestions('れしぴ');
   assert.deepEqual([...rows.slice(1).map(r => r.file.basename)], ['R7機器整備', 'カタカナのメモ', 'ANA SFC']);
   const el = f.doc.createElement('div'); s.renderSuggestion(rows[1], el);
-  assert.match([el.textContent, ...el.children.map(c => c.textContent)].join('|'), /\[\[れしぴ\]\] へのリンクあり/);
+  const all = e => [e.textContent, ...e.children.map(all)].join('|');
+  assert.match(all(el), /\[\[れしぴ\]\] へのリンクあり/);
   s.onClose(); f.stop();
+});
+test('match ranges map folded words back to the text as written', () => {
+  const { matchRanges } = load();
+  assert.deepEqual([...matchRanges('機器のセイビ記録とｾｲﾋﾞ', ['せいび']).map(r => [...r])], [[3, 6], [9, 13]]);
+  assert.deepEqual([...matchRanges('ＡＮＡ SFC', ['ana', 'sfc']).map(r => [...r])], [[0, 3], [4, 7]]);
+  assert.equal(matchRanges('なし', ['あり']).length, 0);
+});
+test('title and body-search rows highlight the matched words', async () => {
+  const f = await fixture(0); searchVault(f);
+  const u = new f.UnifiedSearch(f.app, f.plugin); u.inputEl.value = '整備';
+  const row = u.getSuggestions('整備').find(r => r.kind === 'note' && r.file.basename === 'R7機器整備');
+  const el = f.doc.createElement('div'); u.renderSuggestion(row, el);
+  const spans = []; const walk = e => { if (e.className === 'suggestion-highlight') spans.push(e.textContent); e.children.forEach(walk); }; walk(el);
+  assert.deepEqual(spans, ['整備']);
+  f.bodies.set('00_Inbox/カタカナのメモ.md', 'セイビ記録');
+  const s = new f.BodySearch(f.app, f.plugin, 'せいび'); s.getSuggestions('せいび'); for (let i = 0; i < 6; i++) await settle();
+  const hit = s.getSuggestions('せいび')[1]; const el2 = f.doc.createElement('div'); s.renderSuggestion(hit, el2);
+  const spans2 = []; const walk2 = e => { if (e.className === 'suggestion-highlight') spans2.push(e.textContent); e.children.forEach(walk2); }; walk2(el2);
+  assert.deepEqual(spans2, ['セイビ']); s.onClose(); f.stop();
 });
 test('a new query stops the earlier body search', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.BodySearch(f.app, f.plugin, '機器');

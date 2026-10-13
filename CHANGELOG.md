@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.13.3 — 2026-10-13
+
+- Highlight the search words: in the title and alias of title matches on the unified search, in the title and excerpt of body-search results (Obsidian's own suggestion highlight), and in the preview of both screens (its title too). Matching folds hiragana/katakana and full/half width as the search does, so 「セイビ」 and 「ｾｲﾋﾞ」 are marked for 「せいび」.
+
 ## 1.13.2 — 2026-10-13
 
 - The link rank counts links to pages that do not exist (`[[語]]` with no note, common in notes from Cosense): such an empty page passes its rank back to the notes linking to it, so notes sharing a `[[語]]` are connected, as in Cosense.
