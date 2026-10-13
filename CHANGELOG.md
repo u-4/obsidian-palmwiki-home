@@ -1,5 +1,13 @@
 # Changelog
 
+
+## 1.15.0 — 2026-10-14
+
+- Pasting as in Cosense (setting 「Cosense に近い貼り付け」, on by default):
+  - Pasting several lines on a quote line (`> `) keeps every pasted line in the quote. Obsidian still does the paste itself, so copied web pages still become Markdown; the added lines then get the same `> ` (an empty line gets `>` so the quote does not break).
+  - A YouTube URL pasted alone on an empty line (list and quote marks are fine) becomes Obsidian's embed, `![](URL)`, which shows the thumbnail and plays in place. Shorts and live URLs are given as `watch?v=` URLs, the form the embed reads.
+  - Cmd+Shift+V in a note: a URL becomes a link titled with the page's name (og:title, else <title>; the page's own charset is honored). The URL goes in at once and is replaced when the page answers, unless it was edited meanwhile. Text that is not a URL is pasted plain, as Obsidian's paste without formatting does, staying in a quote. X posts are pasted as the URL for now. On iPhone and iPad the command 「Paste URL as titled link」 does the same.
+
 ## 1.14.2 — 2026-10-13
 
 - Both search screens use the note background on every device. On phones and tablets Obsidian gives prompts the secondary background with a blur; with the Cosense-style snippet that is the blue canvas, so on the iPad the large two-pane screen showed the notes behind it and the text was hard to read.

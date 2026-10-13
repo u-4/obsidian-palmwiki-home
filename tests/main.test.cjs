@@ -82,7 +82,7 @@ class Plugin extends Component {
 }
 function load() {
   const { doc, clock } = environment(); const notices = []; const modals = []; const urls = []; const rendered = []; const platform = { isMobile: false };
-  const context = { module: { exports: {} }, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+  const context = { module: { exports: {} }, console, URL, TextDecoder, TextEncoder, Uint8Array, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     require(id) { assert.equal(id, 'obsidian'); return { Plugin, BasesView, TFile, Platform: platform,
       PluginSettingTab: class {}, Setting: class {}, Notice: class { constructor(text) { notices.push(text); } },
       Keymap: { isModEvent: ev => {
@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -980,4 +980,99 @@ test('closing the touch modal keeps Home and the next short tap opens normally',
   assert.ok(modal.closed); assert.equal(f.calls.opens.length, 0);
   card.emit('pointerdown', down); card.emit('pointerup'); card.emit('click');
   assert.deepEqual(f.calls.opens, ['0.md']); f.stop();
+});
+
+test('paste: quote prefix and the edits that keep pasted lines in the quote', () => {
+  const t = load();
+  assert.equal(t.quotePrefix('> 引用'), '> ');
+  assert.equal(t.quotePrefix('  > > 二重'), '  > > ');
+  assert.equal(t.quotePrefix('本文'), '');
+  const edits = t.quoteEdits(['二行目', '', '> 既に引用', '四行目'], 3, 7, '> ');
+  assert.deepEqual([...edits].map(e => ({ ...e })), [
+    { line: 4, insert: '> ' }, { line: 5, insert: '>' }, { line: 7, insert: '> ' },
+  ]);
+  assert.equal(t.quoteEdits(['x'], 0, 1, '').length, 0);
+});
+
+test('paste: YouTube URLs become the form the embed reads; others are left alone', () => {
+  const t = load();
+  assert.equal(t.videoEmbedUrl('https://www.youtube.com/watch?v=aqz-KE-bpKQ&t=30'), 'https://www.youtube.com/watch?v=aqz-KE-bpKQ&t=30');
+  assert.equal(t.videoEmbedUrl(' https://youtu.be/aqz-KE-bpKQ?si=x \n'), 'https://youtu.be/aqz-KE-bpKQ?si=x');
+  assert.equal(t.videoEmbedUrl('https://m.youtube.com/watch?v=aqz-KE-bpKQ'), 'https://m.youtube.com/watch?v=aqz-KE-bpKQ');
+  assert.equal(t.videoEmbedUrl('https://www.youtube.com/shorts/aqz-KE-bpKQ'), 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
+  assert.equal(t.videoEmbedUrl('https://www.youtube.com/live/aqz-KE-bpKQ?feature=share'), 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
+  assert.equal(t.videoEmbedUrl('https://www.youtube.com/@channel'), '');
+  assert.equal(t.videoEmbedUrl('見て https://youtu.be/aqz-KE-bpKQ'), '');
+  assert.equal(t.videoEmbedUrl('https://example.com/watch?v=1'), '');
+  assert.ok(t.isTweetUrl('https://x.com/obsdmd/status/1580548874246443010?s=20'));
+  assert.ok(t.isTweetUrl('https://twitter.com/a/status/1'));
+  assert.ok(!t.isTweetUrl('https://x.com/obsdmd'));
+});
+
+test('paste: an embed only where the line has no text of its own', () => {
+  const t = load();
+  assert.ok(t.emptyLineAt('', ''));
+  assert.ok(t.emptyLineAt('- ', ''));
+  assert.ok(t.emptyLineAt('  1. ', ' '));
+  assert.ok(t.emptyLineAt('> ', ''));
+  assert.ok(!t.emptyLineAt('動画は', ''));
+  assert.ok(!t.emptyLineAt('', 'あと'));
+});
+
+test('paste: page titles from og:title or <title>, decoded, and the link escapes brackets', async () => {
+  const t = load();
+  assert.equal(t.pageTitle('<head><title>Site &amp; Page</title><meta property="og:title" content="記事 &#x300C;題&#x300D;"></head>'), '記事 「題」');
+  assert.equal(t.pageTitle('<title>\n  Only   title </title>'), 'Only title');
+  assert.equal(t.pageTitle('<p>none</p>'), '');
+  assert.equal(t.titledLink('a [b]', 'https://e.com/x'), '[a \\[b\\]](https://e.com/x)');
+  assert.equal(t.titledLink('t', 'https://e.com/a_(b)'), '[t](<https://e.com/a_(b)>)');
+  assert.equal(t.pageCharset('text/html; charset=Shift_JIS', new Uint8Array()), 'shift_jis');
+  const bytes = new TextEncoder().encode('<meta charset="euc-jp"><title>x</title>');
+  assert.equal(t.pageCharset('text/html', bytes), 'euc-jp');
+  const html = new TextEncoder().encode('<title>見出し</title>').buffer;
+  assert.equal(await t.fetchPageTitle('https://e.com', async () => ({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, arrayBuffer: html })), '見出し');
+  assert.equal(await t.fetchPageTitle('https://e.com', async () => ({ status: 404, headers: {}, arrayBuffer: html })), '');
+  assert.equal(await t.fetchPageTitle('https://e.com/a.pdf', async () => ({ status: 200, headers: { 'content-type': 'application/pdf' }, arrayBuffer: html })), '');
+  assert.equal(await t.fetchPageTitle('https://e.com', async () => { throw new Error('offline'); }), '');
+});
+
+function editorDouble(lines, cursor) {
+  const ed = { lines: [...lines], cursor: { ...cursor }, replaced: null, changes: null,
+    getCursor() { return { ...ed.cursor }; }, getLine(i) { return ed.lines[i]; },
+    replaceSelection(text) { ed.replaced = text; },
+    transaction({ changes }) { ed.changes = changes; for (const c of changes) ed.lines[c.from.line] = c.text + ed.lines[c.from.line]; } };
+  return ed;
+}
+
+test('paste: Cmd+V of a YouTube URL on an empty line embeds it; inside a sentence it does not', () => {
+  const { Main } = load();
+  const self = { settings: { cosensePaste: true }, continueQuote: Main.prototype.continueQuote };
+  const ev = text => { const e = { defaultPrevented: false, clipboardData: { getData: () => text } }; e.preventDefault = () => { e.defaultPrevented = true; }; return e; };
+  let ed = editorDouble(['- '], { line: 0, ch: 2 });
+  let e = ev('https://www.youtube.com/shorts/aqz-KE-bpKQ');
+  Main.prototype.onPaste.call(self, e, ed);
+  assert.ok(e.defaultPrevented);
+  assert.equal(ed.replaced, '![](https://www.youtube.com/watch?v=aqz-KE-bpKQ)');
+  ed = editorDouble(['動画は '], { line: 0, ch: 4 });
+  e = ev('https://youtu.be/aqz-KE-bpKQ');
+  Main.prototype.onPaste.call(self, e, ed);
+  assert.ok(!e.defaultPrevented);
+  assert.equal(ed.replaced, null);
+  self.settings.cosensePaste = false;
+  ed = editorDouble([''], { line: 0, ch: 0 });
+  e = ev('https://youtu.be/aqz-KE-bpKQ');
+  Main.prototype.onPaste.call(self, e, ed);
+  assert.ok(!e.defaultPrevented);
+});
+
+test('paste: after Obsidian pastes into a quote line, the added lines join the quote', () => {
+  const { Main, clock } = load();
+  const self = { settings: { cosensePaste: true }, continueQuote: Main.prototype.continueQuote };
+  const ed = editorDouble(['> 一行目', '二行目', '', '三行目', '後ろの段落'], { line: 0, ch: 2 });
+  const e = { defaultPrevented: false, clipboardData: { getData: () => '一行目\n二行目\n\n三行目' }, preventDefault() { this.defaultPrevented = true; } };
+  Main.prototype.onPaste.call(self, e, ed);
+  assert.ok(!e.defaultPrevented); // Obsidian does the paste itself
+  ed.cursor = { line: 3, ch: 3 }; // where Obsidian leaves the cursor
+  clock.tick(0);
+  assert.deepEqual([...ed.lines], ['> 一行目', '> 二行目', '>', '> 三行目', '後ろの段落']);
 });

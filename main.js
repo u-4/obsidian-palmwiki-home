@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, Modal, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, TFile, BasesView, Keymap, setIcon, Modal, FuzzySuggestModal, SuggestModal, prepareFuzzySearch, normalizePath, MarkdownRenderer, Component, Scope, FileView, WorkspaceLeaf, getAllTags, requestUrl } = require('obsidian');
 
 const VIEW_TYPE = 'palmwiki-lite-cards';
 const HOVER_SOURCE = 'palmwiki-home';
@@ -30,6 +30,7 @@ const DEFAULTS = Object.freeze({
   cardPopover: true,
   popupTrigger: 'mod', // 'mod': Cmd/Ctrl + hover; 'hover': hover only (as in 2hop-links-plus)
   popupCardsPosition: 'above', // 'above' | 'below' | 'auto'
+  cosensePaste: true, // pasting as in Cosense: quotes continue, YouTube embeds, Cmd+Shift+V titled links
 });
 const PREVIEW_CHARS = 20000;
 const MAX_NOTE_SUGGESTIONS = 30;
@@ -41,6 +42,102 @@ const SCAN_WORKERS = 4;
 const SCOPE_KINDS = Object.freeze({ Projects: 'プロジェクト', Areas: 'エリア' });
 const DONE_STATUSES = new Set(['completed', 'done', 'archived', 'cancelled', 'canceled', '完了', '終了', '中止']);
 const STATUS_LABELS = Object.freeze({ active: '進行中', completed: '完了', done: '完了', archived: 'アーカイブ' });
+
+// Pasting as in Cosense (owner 2026-10-14). Cmd+V pastes text: inside a quote every pasted line
+// stays in the quote, and a YouTube URL alone on a line becomes Obsidian's embed (it plays in place).
+// Cmd+Shift+V turns a URL into a link titled with the page's name.
+const QUOTE_PREFIX = /^([ \t]*(?:>[ \t]?)+)/;
+const ONLY_MARKS = /^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+|>[ \t]?)*$/;
+const SINGLE_URL = /^https?:\/\/[^\s<>"]+$/i;
+const TWEET_URL = /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^/\s]+\/status\/\d+/i;
+const TITLE_TIMEOUT = 8000;
+
+function quotePrefix(line) {
+  const m = QUOTE_PREFIX.exec(line || '');
+  return m ? m[1] : '';
+}
+
+// Edits that put the quote prefix on lines from+1..to (the lines a paste added), skipping lines
+// that already carry it; an empty line gets the bare marker so the quote does not break.
+function quoteEdits(lines, from, to, prefix) {
+  const edits = [];
+  if (!prefix) return edits;
+  const bare = prefix.replace(/[ \t]+$/, '');
+  for (let i = from + 1; i <= to; i++) {
+    const text = lines[i - from - 1] ?? '';
+    if (text.startsWith(bare)) continue;
+    edits.push({ line: i, insert: text.trim() === '' ? bare : prefix });
+  }
+  return edits;
+}
+
+// The URL Obsidian's YouTube embed understands, or '' when the text is not one YouTube video URL.
+function videoEmbedUrl(text) {
+  const url = String(text || '').trim();
+  if (!SINGLE_URL.test(url)) return '';
+  let parsed;
+  try { parsed = new URL(url); } catch { return ''; }
+  const host = parsed.hostname.replace(/^(?:www\.|m\.|music\.)/, '');
+  if (host === 'youtu.be') return /^\/[\w-]{6,}/.test(parsed.pathname) ? url : '';
+  if (host !== 'youtube.com') return '';
+  if (parsed.pathname === '/watch' && parsed.searchParams.get('v')) return url;
+  // Shorts and live URLs: the embed reads the id from ?v=, so they are given in that form.
+  const m = /^\/(?:shorts|live)\/([\w-]{6,})/.exec(parsed.pathname);
+  return m ? `https://www.youtube.com/watch?v=${m[1]}` : '';
+}
+
+function isTweetUrl(text) { return TWEET_URL.test(String(text || '').trim()); }
+
+// The cursor is where a line's own content would start: nothing but list or quote marks before it,
+// nothing after it.
+function emptyLineAt(before, after) { return ONLY_MARKS.test(before) && after.trim() === ''; }
+
+function decodeEntities(text) {
+  const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, code) => {
+    if (code[0] === '#') {
+      const n = code[1].toLowerCase() === 'x' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : all;
+    }
+    return named[code.toLowerCase()] ?? all;
+  });
+}
+
+// A page's name from its HTML: og:title first (sites put the plain name there), else <title>.
+function pageTitle(html) {
+  const head = String(html || '').slice(0, 200000);
+  const meta = /<meta\s[^>]*(?:property|name)\s*=\s*["']og:title["'][^>]*>/i.exec(head)?.[0];
+  const og = meta && /content\s*=\s*(["'])([\s\S]*?)\1/i.exec(meta)?.[2];
+  const title = og || /<title[^>]*>([\s\S]*?)<\/title>/i.exec(head)?.[1] || '';
+  return decodeEntities(title).replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function titledLink(title, url) {
+  const text = title.replace(/([\[\]\\])/g, '\\$1');
+  return `[${text}](${/[\s()<>]/.test(url) ? `<${url}>` : url})`;
+}
+
+// Charset from the Content-Type header, else from the page's own <meta>, else UTF-8.
+function pageCharset(contentType, bytes) {
+  const fromHeader = /charset=["']?([\w-]+)/i.exec(contentType || '')?.[1];
+  if (fromHeader) return fromHeader.toLowerCase();
+  const head = new TextDecoder('latin1').decode(bytes.slice(0, 4096));
+  return (/<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1] || 'utf-8').toLowerCase();
+}
+
+async function fetchPageTitle(url, request = requestUrl) {
+  const res = await Promise.race([
+    request({ url, method: 'GET', throw: false, headers: { 'Accept': 'text/html' } }),
+    new Promise(resolve => setTimeout(() => resolve(null), TITLE_TIMEOUT)),
+  ]).catch(() => null);
+  if (!res || res.status >= 400 || !res.arrayBuffer) return '';
+  const type = res.headers?.['content-type'] || res.headers?.['Content-Type'] || '';
+  if (type && !/html/i.test(type)) return '';
+  const bytes = new Uint8Array(res.arrayBuffer);
+  let text;
+  try { text = new TextDecoder(pageCharset(type, bytes)).decode(bytes); } catch { text = new TextDecoder().decode(bytes); }
+  return pageTitle(text);
+}
 
 function safeHomePath(value) {
   if (typeof value !== 'string') return null;
@@ -517,6 +614,7 @@ class PalmWikiHome extends Plugin {
     this.settings.cardPopover = saved?.cardPopover !== false;
     this.settings.popupTrigger = saved?.popupTrigger === 'hover' ? 'hover' : 'mod';
     this.settings.popupCardsPosition = ['below', 'auto'].includes(saved?.popupCardsPosition) ? saved.popupCardsPosition : 'above';
+    this.settings.cosensePaste = saved?.cosensePaste !== false;
     this.settings.searchExcludeFolders = Array.isArray(saved?.searchExcludeFolders)
       ? saved.searchExcludeFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')).slice(0, 50)
       : [...DEFAULTS.searchExcludeFolders];
@@ -556,6 +654,7 @@ class PalmWikiHome extends Plugin {
     this.addCommand({ id: 'open-unified-search', name: 'Open unified search', callback: () => this.openUnifiedSearch() });
     this.addCommand({ id: 'open-switcher', name: 'Open page switcher', callback: () => this.runExternal('switchCommand') });
     this.addCommand({ id: 'open-scope', name: 'Open project or area', callback: () => this.openScopePicker(null, true) });
+    this.setupPaste();
     this.addRibbonIcon('home', 'PalmWiki Home', () => void this.openHome());
     this.addRibbonIcon('search', '検索', () => this.openSearch());
     this.app.workspace.onLayoutReady(() => {
@@ -583,6 +682,77 @@ class PalmWikiHome extends Plugin {
       this.registerEvent(this.app.vault.on('delete', file => this.followDelete(file)));
       this.syncBars();
     });
+  }
+
+  setupPaste() {
+    this.registerEvent(this.app.workspace.on('editor-paste', (evt, editor) => this.onPaste(evt, editor)));
+    // Before Obsidian's own Cmd+Shift+V (paste without formatting), which this replaces in notes.
+    if (typeof document !== 'undefined') this.registerDomEvent(document, 'keydown', evt => this.onPasteKey(evt), { capture: true });
+    // For iPhone and iPad without a keyboard: the same as Cmd+Shift+V from the command list or a toolbar.
+    this.addCommand({ id: 'paste-as-link', name: 'Paste URL as titled link', editorCallback: editor => void this.pasteSpecial(editor) });
+  }
+
+  onPaste(evt, editor) {
+    if (!this.settings.cosensePaste || evt.defaultPrevented || !editor) return;
+    const text = evt.clipboardData?.getData('text/plain') ?? '';
+    const from = editor.getCursor('from'), to = editor.getCursor('to');
+    const line = editor.getLine(from.line);
+    const embed = videoEmbedUrl(text);
+    if (embed && emptyLineAt(line.slice(0, from.ch), editor.getLine(to.line).slice(to.ch))) {
+      evt.preventDefault();
+      editor.replaceSelection(`![](${embed})`);
+      return;
+    }
+    const prefix = quotePrefix(line);
+    if (!prefix || from.ch < prefix.length) return;
+    // Obsidian pastes first (it turns copied web pages into Markdown); then the new lines join the quote.
+    setTimeout(() => this.continueQuote(editor, from.line, prefix), 0);
+  }
+
+  continueQuote(editor, fromLine, prefix) {
+    const toLine = editor.getCursor('to').line;
+    if (toLine <= fromLine) return;
+    const lines = [];
+    for (let i = fromLine + 1; i <= toLine; i++) lines.push(editor.getLine(i));
+    const edits = quoteEdits(lines, fromLine, toLine, prefix);
+    if (!edits.length) return;
+    editor.transaction({ changes: edits.map(e => ({ from: { line: e.line, ch: 0 }, to: { line: e.line, ch: 0 }, text: e.insert })) });
+  }
+
+  onPasteKey(evt) {
+    if (!this.settings.cosensePaste || evt.altKey || !evt.shiftKey || !(evt.metaKey || evt.ctrlKey)) return;
+    if ((evt.key || '').toLowerCase() !== 'v') return;
+    const editor = this.app.workspace.activeEditor?.editor;
+    if (!editor || typeof editor.hasFocus !== 'function' || !editor.hasFocus()) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    void this.pasteSpecial(editor);
+  }
+
+  async pasteSpecial(editor) {
+    let text = '';
+    try { text = await navigator.clipboard.readText(); } catch { new Notice('クリップボードを読めませんでした。'); return; }
+    if (!text) return;
+    const url = text.trim();
+    if (!SINGLE_URL.test(url)) {
+      // Plain text as Obsidian's paste without formatting would give, staying in a quote.
+      const from = editor.getCursor('from');
+      const prefix = quotePrefix(editor.getLine(from.line));
+      editor.replaceSelection(text);
+      if (prefix && from.ch >= prefix.length) this.continueQuote(editor, from.line, prefix);
+      return;
+    }
+    const embed = videoEmbedUrl(url);
+    if (embed) { editor.replaceSelection(`![](${embed})`); return; }
+    // X posts: how they are pasted is still being decided with the owner; the URL for now.
+    if (isTweetUrl(url)) { editor.replaceSelection(url); return; }
+    // The URL goes in at once; the title replaces it when the page answers, unless it was edited.
+    const start = editor.getCursor('from');
+    editor.replaceSelection(url);
+    const end = { line: start.line, ch: start.ch + url.length };
+    const title = await fetchPageTitle(url);
+    if (!title || editor.getRange(start, end) !== url) return;
+    editor.replaceRange(titledLink(title, url), start, end);
   }
 
   // Switching a tab between Home (a Bases view) and a note makes a new view, and while it loads its
@@ -2526,6 +2696,13 @@ class LiteSettings extends PluginSettingTab {
       .setDesc('選んでいるノートを、統合検索と本文検索の画面の右側に表示し、検索語に印を付けます。幅の狭い画面（スマホ）では表示しません。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.searchPreview).onChange(async value => {
         this.plugin.settings.searchPreview = value;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
+    new Setting(containerEl).setName('貼り付け').setHeading();
+    new Setting(containerEl).setName('Cosense に近い貼り付け')
+      .setDesc('引用（> ）の行に複数行を貼ると、すべての行が引用になります。YouTube の URL だけを空の行に貼ると、その場で再生できる埋め込みになります。Cmd+Shift+V で URL を貼ると、ページの題名のリンクになります（iPhone・iPad ではコマンド「Paste URL as titled link」）。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.cosensePaste).onChange(async value => {
+        this.plugin.settings.cosensePaste = value;
         try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
       }));
     new Setting(containerEl).setName('ホームのカード').setHeading();
