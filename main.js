@@ -31,6 +31,8 @@ const DEFAULTS = Object.freeze({
   bodySearch: 'ranked', // 'ranked': PalmWiki's own body search ordered by link rank; 'external': Omnisearch or Obsidian's search
   bodySearchOrder: 'rank', // 'rank' (link rank, PageRank), 'modified' (newest first) or 'name'
   bodySearchPreview: true,
+  rankWeakDaily: true, // links from daily notes count for less in the link rank
+  rankDownFolders: ['04_Archives', '90_象の墓場'], // notes here sort lower in the link-rank order
   cardPopover: true,
   popupTrigger: 'mod', // 'mod': Cmd/Ctrl + hover; 'hover': hover only (as in 2hop-links-plus)
   popupCardsPosition: 'above', // 'above' | 'below' | 'auto'
@@ -167,29 +169,47 @@ function matchNotes(notes, query, recentPaths = []) {
   return scored.slice(0, MAX_NOTE_SUGGESTIONS).map(item => item.note);
 }
 
-// Link rank (PageRank) of every note from Obsidian's resolved links, as Cosense orders pages:
-// a note ranks higher when more notes, and more highly ranked notes, link to it. No index of
-// note text is built; this uses only the links Obsidian already keeps (a few dozen ms per vault).
-function linkRanks(resolvedLinks, iterations = 30, damping = 0.85) {
+// Link rank (PageRank) of every note from Obsidian's links, as Cosense orders pages: a note ranks
+// higher when more notes, and more highly ranked notes, link to it. No index of note text is built;
+// this uses only the links Obsidian already keeps (a few dozen ms per vault).
+// - Links to pages that do not exist ([[語]] with no note, common in notes from Cosense) count too:
+//   such an empty page passes its rank back to the notes that link to it, so notes sharing a [[語]]
+//   are connected, as in Cosense.
+// - weakSources(path) → true for notes whose links should count for less (daily notes link to
+//   everything they mention); they pass on only a quarter of their rank through links.
+function linkRanks(resolvedLinks, unresolvedLinks = {}, { weakSources = () => false, iterations = 30, damping = 0.85 } = {}) {
   // Notes that only receive links count too, whether or not Obsidian lists them with no links out.
   const seen = new Set();
   for (const [from, links] of Object.entries(resolvedLinks || {})) { seen.add(from); for (const to of Object.keys(links || {})) seen.add(to); }
   const paths = [...seen].filter(path => path.endsWith('.md'));
   const index = new Map(paths.map((path, i) => [path, i]));
-  const n = paths.length;
   const ranks = new Map();
-  if (!n) return ranks;
+  if (!paths.length) return ranks;
   const out = paths.map(path => Object.keys(resolvedLinks?.[path] || {}).filter(to => to !== path && index.has(to)).map(to => index.get(to)));
+  // Empty pages become extra nodes after the notes; each links back to the notes that link to it.
+  const empty = new Map();
+  paths.forEach((path, i) => {
+    for (const name of Object.keys(unresolvedLinks?.[path] || {})) {
+      if (!empty.has(name)) { empty.set(name, paths.length + empty.size); out.push([]); }
+      const node = empty.get(name);
+      out[i].push(node);
+      out[node].push(i);
+    }
+  });
+  const n = out.length;
+  const keep = paths.map(path => weakSources(path) ? 0.25 : 1);
   let rank = new Float64Array(n).fill(1 / n);
   for (let round = 0; round < iterations; round++) {
     const next = new Float64Array(n).fill((1 - damping) / n);
-    let dangling = 0;
+    let pool = 0;
     out.forEach((targets, i) => {
-      if (!targets.length) { dangling += rank[i]; return; }
-      const share = damping * rank[i] / targets.length;
+      const passed = i < keep.length ? keep[i] : 1;
+      if (!targets.length) { pool += rank[i]; return; }
+      pool += rank[i] * (1 - passed);
+      const share = damping * rank[i] * passed / targets.length;
       for (const j of targets) next[j] += share;
     });
-    const spread = damping * dangling / n;
+    const spread = damping * pool / n;
     for (let i = 0; i < n; i++) next[i] += spread;
     rank = next;
   }
@@ -458,6 +478,8 @@ class PalmWikiHome extends Plugin {
     this.settings.bodySearch = saved?.bodySearch === 'external' ? 'external' : 'ranked';
     this.settings.bodySearchOrder = ['modified', 'name'].includes(saved?.bodySearchOrder) ? saved.bodySearchOrder : 'rank';
     this.settings.bodySearchPreview = saved?.bodySearchPreview !== false;
+    this.settings.rankWeakDaily = saved?.rankWeakDaily !== false;
+    this.settings.rankDownFolders = Array.isArray(saved?.rankDownFolders) ? saved.rankDownFolders.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().replace(/\/+$/, '')) : [...DEFAULTS.rankDownFolders];
     this.settings.cardPopover = saved?.cardPopover !== false;
     this.settings.popupTrigger = saved?.popupTrigger === 'hover' ? 'hover' : 'mod';
     this.settings.popupCardsPosition = ['below', 'auto'].includes(saved?.popupCardsPosition) ? saved.popupCardsPosition : 'above';
@@ -812,7 +834,16 @@ class PalmWikiHome extends Plugin {
 
   // Link ranks are worked out when a body search needs them and kept until the links change.
   linkRanks() {
-    if (!this.rankCache) this.rankCache = linkRanks(this.app.metadataCache.resolvedLinks);
+    if (!this.rankCache) {
+      const daily = this.settings.rankWeakDaily ? dailyFolder(this.app) : null;
+      const down = this.settings.rankDownFolders;
+      const ranks = linkRanks(this.app.metadataCache.resolvedLinks, this.app.metadataCache.unresolvedLinks, {
+        weakSources: path => !!daily && path.startsWith(daily),
+      });
+      // Notes in the folders set to sort lower keep a tenth of their rank.
+      if (down.length) for (const [path, rank] of ranks) if (inFolders(path, down)) ranks.set(path, rank / 10);
+      this.rankCache = ranks;
+    }
     return this.rankCache;
   }
 
@@ -2537,6 +2568,20 @@ class LiteSettings extends PluginSettingTab {
           this.plugin.settings.bodySearchOrder = ['modified', 'name'].includes(value) ? value : 'rank';
           try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
         }));
+    new Setting(containerEl).setName('リンクの多い順：日誌からのリンクを弱める')
+      .setDesc('日誌（デイリーノートのフォルダ）からのリンクは、その日に触れたものすべてに向くので、順位への影響を4分の1にします。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.rankWeakDaily).onChange(async value => {
+        this.plugin.settings.rankWeakDaily = value;
+        this.plugin.rankCache = null;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
+    new Setting(containerEl).setName('リンクの多い順：下げるフォルダ')
+      .setDesc('ここに入れたフォルダのノートは、リンクの多い順で下に並びます（順位を10分の1にします）。完了した案件やアーカイブなど。カンマで区切ります。空にすると下げません。')
+      .addText(text => text.setValue(this.plugin.settings.rankDownFolders.join(', ')).onChange(async value => {
+        this.plugin.settings.rankDownFolders = value.split(',').map(f => f.trim().replace(/\/+$/, '')).filter(Boolean).slice(0, 50);
+        this.plugin.rankCache = null;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
     new Setting(containerEl).setName('本文検索の画面にプレビューを表示')
       .setDesc('選んでいる結果のノートを、本文検索の画面の右側に表示し、検索語に印を付けます（幅の狭い画面では表示しません）。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.bodySearchPreview).onChange(async value => {

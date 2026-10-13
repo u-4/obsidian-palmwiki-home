@@ -908,6 +908,25 @@ test('body search can be ordered newest first or by name, and its preview can be
   t.modalEl = f.doc.createElement('div'); t.modalEl.classList = { add() {}, remove() {} }; t.onOpen(); assert.ok(t.pane); t.onClose();
   f.stop();
 });
+test('empty pages connect the notes that share a [[語]], and weak sources pass on less', () => {
+  const { linkRanks } = load();
+  // a and b both link to the empty page 料理; c links to nothing.
+  const r = linkRanks({ 'a.md': {}, 'b.md': {}, 'c.md': {} }, { 'a.md': { 料理: 1 }, 'b.md': { 料理: 1 } });
+  assert.ok(r.get('a.md') > r.get('c.md')); assert.equal(r.has('料理'), false);
+  const links = { 'd/1.md': { 'x.md': 1 }, 'd/2.md': { 'x.md': 1 }, 'y1.md': { 'y.md': 1 }, 'y2.md': { 'y.md': 1 }, 'x.md': {}, 'y.md': {} };
+  const weak = linkRanks(links, {}, { weakSources: p => p.startsWith('d/') });
+  assert.ok(weak.get('y.md') > weak.get('x.md')); // the same two links in, but x's come from daily-like notes
+});
+test('folders set to sort lower, and daily notes, change the link rank (on by default)', async () => {
+  const f = await fixture(0); withDaily(f);
+  f.app.metadataCache.resolvedLinks = { '01_Daily/a.md': { 'x.md': 1 }, '01_Daily/b.md': { 'x.md': 1 }, 'p.md': { 'y.md': 1 }, 'q.md': { 'y.md': 1 },
+    'r.md': { '04_Archives/z.md': 1 }, 's.md': { '04_Archives/z.md': 1 }, 'x.md': {}, 'y.md': {}, '04_Archives/z.md': {} };
+  f.app.metadataCache.unresolvedLinks = {};
+  let r = f.plugin.linkRanks(); assert.ok(r.get('y.md') > r.get('x.md')); assert.ok(r.get('y.md') > 5 * r.get('04_Archives/z.md'));
+  f.plugin.settings.rankWeakDaily = false; f.plugin.settings.rankDownFolders = []; f.plugin.rankCache = null;
+  r = f.plugin.linkRanks(); assert.ok(Math.abs(r.get('y.md') - r.get('x.md')) < 1e-12); assert.ok(Math.abs(r.get('y.md') - r.get('04_Archives/z.md')) < 1e-12);
+  f.stop();
+});
 test('notes that link to the search word come before notes that only contain it inside another word', async () => {
   const f = await fixture(0); searchVault(f);
   f.bodies.set('00_Inbox/ANA SFC.md', '[[クリオプレシピテート]]の準備'); f.metadata.set('00_Inbox/ANA SFC.md', { links: [{ link: 'クリオプレシピテート' }] }); f.bodies.set('00_Inbox/カタカナのメモ.md', '[[しそバターレシピ]]');

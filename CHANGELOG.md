@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.13.2 — 2026-10-13
+
+- The link rank counts links to pages that do not exist (`[[語]]` with no note, common in notes from Cosense): such an empty page passes its rank back to the notes linking to it, so notes sharing a `[[語]]` are connected, as in Cosense.
+- Two settings for the link-rank order, both on by default: links from daily notes count for a quarter (they point at everything mentioned that day), and notes in folders set to sort lower (default `04_Archives`, `90_象の墓場`) keep a tenth of their rank.
+
 ## 1.13.1 — 2026-10-13
 
 - In the link-rank order, notes that link to the search word come first: a link to a page named exactly the word (`[[レシピ]]`, even an empty page), then a link whose page name starts or ends with it (`[[しそバターレシピ]]`), then the rest, including a word in the middle of another (クリオプレシピテート, even when linked). The result line says why. Uses the links Obsidian already keeps; no note text is read for this.
