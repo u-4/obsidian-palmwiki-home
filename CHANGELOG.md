@@ -1,6 +1,10 @@
 # Changelog
 
 
+
+## 1.15.1 — 2026-10-14
+
+- Cmd+Shift+V with an X post URL hands it to PalmWiki X posts when that plugin is on (a card image with the text folded inside); without it the URL is pasted.
 ## 1.15.0 — 2026-10-14
 
 - Pasting as in Cosense (setting 「Cosense に近い貼り付け」, on by default):

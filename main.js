@@ -744,8 +744,13 @@ class PalmWikiHome extends Plugin {
     }
     const embed = videoEmbedUrl(url);
     if (embed) { editor.replaceSelection(`![](${embed})`); return; }
-    // X posts: how they are pasted is still being decided with the owner; the URL for now.
-    if (isTweetUrl(url)) { editor.replaceSelection(url); return; }
+    // X posts go to PalmWiki X posts (card image and text) when it is on; else the URL.
+    if (isTweetUrl(url)) {
+      const xPosts = this.app.plugins?.plugins?.['palmwiki-x-posts'];
+      if (typeof xPosts?.pasteTweet === 'function') { await xPosts.pasteTweet(editor, url); return; }
+      editor.replaceSelection(url);
+      return;
+    }
     // The URL goes in at once; the title replaces it when the page answers, unless it was edited.
     const start = editor.getCursor('from');
     editor.replaceSelection(url);
