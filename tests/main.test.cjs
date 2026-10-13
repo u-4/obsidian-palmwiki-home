@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, omnisearchTerms, omnisearchSelection, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -593,7 +593,7 @@ test('create row is offered only when no note has exactly that name', async () =
   f.stop();
 });
 test('Enter on the first row hands the words to Omnisearch; choosing a note opens it', async () => {
-  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
   const rows = s.getSuggestions('機器 整備');
   s.selectSuggestion(rows[0], { key: 'Enter' });
   assert.deepEqual([...f.urls], ['obsidian://omnisearch?vault=PalmWiki&query=%E6%A9%9F%E5%99%A8%20%E6%95%B4%E5%82%99']);
@@ -808,7 +808,7 @@ test('the card popup closes after the pointer leaves, and goes with the view', a
 
 
 test('search preview pane shows the selected note (no frontmatter), hints for action rows, and follows the selection', async () => {
-  const f = await fixture(0); searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
+  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const s = new f.UnifiedSearch(f.app, f.plugin);
   f.bodies.set('10_Notes/Projects/機器整備_駒込2026.md', '---\ntags: [Projects]\n---\n# 計画\n本文A');
   f.bodies.set('00_Inbox/R7機器整備.md', '本文B');
   s.modalEl = f.doc.createElement('div'); s.modalEl.classList = { add() {}, remove() {} };
@@ -834,7 +834,7 @@ test('narrow screens (phones) build no search preview pane', async () => {
   f.stop();
 });
 test('without Omnisearch the body row hands the words to Obsidian\'s own search', async () => {
-  const f = await fixture(0); searchVault(f); const searched = [];
+  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const searched = [];
   f.app.commands.listCommands = () => [{ id: 'aqs:recent', name: 'Recent' }];
   f.app.internalPlugins = { getPluginById: id => id === 'global-search' ? { enabled: true, instance: { openGlobalSearch: q => searched.push(q) } } : null };
   const s = new f.UnifiedSearch(f.app, f.plugin);
@@ -856,7 +856,7 @@ test('when the chosen search or switcher plugin is off on this device, Obsidian\
   f.stop();
 });
 test('on phones and tablets the body search uses Obsidian\'s own search even with Omnisearch on (setting, default on)', async () => {
-  const f = await fixture(0); searchVault(f); const searched = [];
+  const f = await fixture(0); f.plugin.settings.bodySearch = 'external'; searchVault(f); const searched = [];
   f.app.internalPlugins = { getPluginById: id => id === 'global-search' ? { enabled: true, instance: { openGlobalSearch: q => searched.push(q) } } : null };
   f.platform.isMobile = true;
   const s = new f.UnifiedSearch(f.app, f.plugin); const rows = s.getSuggestions('機器 整備');
@@ -866,6 +866,52 @@ test('on phones and tablets the body search uses Obsidian\'s own search even wit
   const t = new f.UnifiedSearch(f.app, f.plugin); t.selectSuggestion(t.getSuggestions('機器')[0], { key: 'Enter' });
   assert.equal(f.urls.length, 1); assert.equal(searched.length, 1);
   f.stop();
+});
+test('link rank puts notes linked from many (and from well-linked) notes first', () => {
+  const { linkRanks } = load();
+  const r = linkRanks({ 'a.md': { 'hub.md': 1 }, 'b.md': { 'hub.md': 1 }, 'c.md': { 'hub.md': 1, 'side.md': 1 }, 'hub.md': { 'end.md': 1 }, 'side.md': {}, 'end.md': {}, 'img.png': {} });
+  assert.ok(r.get('hub.md') > r.get('side.md')); assert.ok(r.get('end.md') > r.get('side.md')); assert.ok(r.get('side.md') > r.get('a.md'));
+  assert.equal(r.has('img.png'), false);
+});
+test('the body row opens PalmWiki\'s own body search, ordered by link rank, without keeping note text', async () => {
+  const f = await fixture(0); searchVault(f);
+  f.bodies.set('00_Inbox/ANA SFC.md', '修行のメモ\n機器のｾｲﾋﾞは別'); f.bodies.set('00_Inbox/カタカナのメモ.md', 'セイビ記録');
+  f.bodies.set('00_Inbox/整備機器リスト.md', '一覧'); f.bodies.set('00_Inbox/R7機器整備.md', 'せいびする');
+  f.app.metadataCache.resolvedLinks = { '00_Inbox/R7機器整備.md': { '00_Inbox/カタカナのメモ.md': 1 }, '00_Inbox/ANA SFC.md': { '00_Inbox/カタカナのメモ.md': 1 } };
+  const u = new f.UnifiedSearch(f.app, f.plugin); u.selectSuggestion(u.getSuggestions('セイビ')[0], { key: 'Enter' });
+  const s = f.modals.at(-1); assert.ok(s instanceof f.BodySearch);
+  s.onOpen(); assert.equal(s.inputEl.value, 'セイビ');
+  s.getSuggestions('セイビ'); for (let i = 0; i < 6; i++) await settle();
+  const rows = s.getSuggestions('セイビ');
+  assert.equal(rows[0].kind, 'status'); assert.match(rows[0].text, /本文に含むノート 3件/);
+  // カタカナのメモ has two links in, so it comes first; the others tie on rank and go newest first.
+  // Hiragana, katakana and half-width katakana all match after normalizing.
+  assert.deepEqual([...rows.slice(1).map(r => r.file.basename)], ['カタカナのメモ', 'R7機器整備', 'ANA SFC']);
+  assert.match(rows[3].snippet, /機器のｾｲﾋﾞは別/);
+  s.selectSuggestion(rows[0], {}); assert.equal(s.closed, undefined); // the status line keeps the screen open
+  s.selectSuggestion(rows[1], { key: 'Enter' }); await settle(); assert.equal(f.calls.opens.at(-1), '00_Inbox/カタカナのメモ.md');
+  s.onClose(); assert.equal(s.scan.live, false);
+  f.stop();
+});
+test('body search can be ordered newest first or by name, and its preview can be turned off', async () => {
+  const f = await fixture(0); searchVault(f);
+  for (const p of ['00_Inbox/ANA SFC.md', '00_Inbox/R7機器整備.md', '00_Inbox/カタカナのメモ.md']) f.bodies.set(p, 'せいび');
+  f.app.metadataCache.resolvedLinks = { '00_Inbox/R7機器整備.md': { '00_Inbox/ANA SFC.md': 1 } };
+  const run = async order => { f.plugin.settings.bodySearchOrder = order; const s = new f.BodySearch(f.app, f.plugin, 'せいび');
+    s.getSuggestions('せいび'); for (let i = 0; i < 6; i++) await settle(); const names = [...s.getSuggestions('せいび').slice(1).map(r => r.file.basename)]; s.onClose(); return names; };
+  assert.deepEqual(await run('rank'), ['ANA SFC', 'R7機器整備', 'カタカナのメモ']);
+  assert.deepEqual(await run('modified'), ['R7機器整備', 'ANA SFC', 'カタカナのメモ']);
+  assert.deepEqual(await run('name'), ['ANA SFC', 'R7機器整備', 'カタカナのメモ'].sort((a, b) => a.localeCompare(b, 'ja')));
+  f.plugin.settings.bodySearchPreview = false; const s = new f.BodySearch(f.app, f.plugin, 'x');
+  s.modalEl = f.doc.createElement('div'); s.onOpen(); assert.equal(s.pane, null); s.onClose();
+  f.plugin.settings.bodySearchPreview = true; const t = new f.BodySearch(f.app, f.plugin, 'x');
+  t.modalEl = f.doc.createElement('div'); t.modalEl.classList = { add() {}, remove() {} }; t.onOpen(); assert.ok(t.pane); t.onClose();
+  f.stop();
+});
+test('a new query stops the earlier body search', async () => {
+  const f = await fixture(0); searchVault(f); const s = new f.BodySearch(f.app, f.plugin, '機器');
+  s.getSuggestions('機器'); const first = s.scan; s.getSuggestions('整備'); assert.equal(first.live, false); assert.equal(s.scan.query, '整備');
+  s.onClose(); f.stop();
 });
 test('search preview can be turned off in settings', async () => {
   const f = await fixture(0); f.plugin.settings.searchPreview = false; const s = new f.UnifiedSearch(f.app, f.plugin);

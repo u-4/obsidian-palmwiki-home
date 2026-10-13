@@ -28,6 +28,9 @@ const DEFAULTS = Object.freeze({
   searchPreview: true,
   omnisearchPreview: true,
   mobileCoreSearch: true, // phones and tablets search note text with Obsidian's own search, not Omnisearch
+  bodySearch: 'ranked', // 'ranked': PalmWiki's own body search ordered by link rank; 'external': Omnisearch or Obsidian's search
+  bodySearchOrder: 'rank', // 'rank' (link rank, PageRank), 'modified' (newest first) or 'name'
+  bodySearchPreview: true,
   cardPopover: true,
   popupTrigger: 'mod', // 'mod': Cmd/Ctrl + hover; 'hover': hover only (as in 2hop-links-plus)
   popupCardsPosition: 'above', // 'above' | 'below' | 'auto'
@@ -162,6 +165,47 @@ function matchNotes(notes, query, recentPaths = []) {
     return 0;
   });
   return scored.slice(0, MAX_NOTE_SUGGESTIONS).map(item => item.note);
+}
+
+// Link rank (PageRank) of every note from Obsidian's resolved links, as Cosense orders pages:
+// a note ranks higher when more notes, and more highly ranked notes, link to it. No index of
+// note text is built; this uses only the links Obsidian already keeps (a few dozen ms per vault).
+function linkRanks(resolvedLinks, iterations = 30, damping = 0.85) {
+  // Notes that only receive links count too, whether or not Obsidian lists them with no links out.
+  const seen = new Set();
+  for (const [from, links] of Object.entries(resolvedLinks || {})) { seen.add(from); for (const to of Object.keys(links || {})) seen.add(to); }
+  const paths = [...seen].filter(path => path.endsWith('.md'));
+  const index = new Map(paths.map((path, i) => [path, i]));
+  const n = paths.length;
+  const ranks = new Map();
+  if (!n) return ranks;
+  const out = paths.map(path => Object.keys(resolvedLinks?.[path] || {}).filter(to => to !== path && index.has(to)).map(to => index.get(to)));
+  let rank = new Float64Array(n).fill(1 / n);
+  for (let round = 0; round < iterations; round++) {
+    const next = new Float64Array(n).fill((1 - damping) / n);
+    let dangling = 0;
+    out.forEach((targets, i) => {
+      if (!targets.length) { dangling += rank[i]; return; }
+      const share = damping * rank[i] / targets.length;
+      for (const j of targets) next[j] += share;
+    });
+    const spread = damping * dangling / n;
+    for (let i = 0; i < n; i++) next[i] += spread;
+    rank = next;
+  }
+  paths.forEach((path, i) => ranks.set(path, rank[i]));
+  return ranks;
+}
+
+// One line of the note around the first search word, for the result list.
+function bodySnippet(text, key, terms) {
+  let at = -1;
+  for (const term of terms) { const i = key.indexOf(term); if (i >= 0 && (at < 0 || i < at)) at = i; }
+  if (at < 0) return '';
+  const start = Math.max(0, text.lastIndexOf('\n', at) + 1, at - 30);
+  const endLine = text.indexOf('\n', at);
+  const end = Math.min(endLine < 0 ? text.length : endLine, at + 60);
+  return (start > 0 && text[start - 1] !== '\n' ? '…' : '') + text.slice(start, end).trim();
 }
 
 // Various Complements has no public API; its word index is read defensively and simply
@@ -396,6 +440,9 @@ class PalmWikiHome extends Plugin {
     this.settings.searchPreview = saved?.searchPreview !== false;
     this.settings.omnisearchPreview = saved?.omnisearchPreview !== false;
     this.settings.mobileCoreSearch = saved?.mobileCoreSearch !== false;
+    this.settings.bodySearch = saved?.bodySearch === 'external' ? 'external' : 'ranked';
+    this.settings.bodySearchOrder = ['modified', 'name'].includes(saved?.bodySearchOrder) ? saved.bodySearchOrder : 'rank';
+    this.settings.bodySearchPreview = saved?.bodySearchPreview !== false;
     this.settings.cardPopover = saved?.cardPopover !== false;
     this.settings.popupTrigger = saved?.popupTrigger === 'hover' ? 'hover' : 'mod';
     this.settings.popupCardsPosition = ['below', 'auto'].includes(saved?.popupCardsPosition) ? saved.popupCardsPosition : 'above';
@@ -456,6 +503,7 @@ class PalmWikiHome extends Plugin {
       }
       // Scope membership follows links; favorites follow renamed or deleted notes.
       this.registerEvent(this.app.metadataCache.on('resolved', () => {
+        this.rankCache = null;
         if (!this.scope) return;
         this.scopeCache = null;
         for (const view of this.cardViews) view.onDataUpdated();
@@ -745,6 +793,12 @@ class PalmWikiHome extends Plugin {
     if (this.disposed || typeof SuggestModal !== 'function') return;
     if (leaf) this.app.workspace.setActiveLeaf(leaf, { focus: true });
     new UnifiedSearch(this.app, this).open();
+  }
+
+  // Link ranks are worked out when a body search needs them and kept until the links change.
+  linkRanks() {
+    if (!this.rankCache) this.rankCache = linkRanks(this.app.metadataCache.resolvedLinks);
+    return this.rankCache;
   }
 
   hasOmnisearch() {
@@ -2162,7 +2216,8 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
     const row = el ? this.rows.get(el) : null;
     if (row?.kind === 'note') return { file: row.file };
-    return { hint: row?.kind === 'body' ? `Enter で${this.plugin.usesOmnisearch() ? ' Omnisearch の' : '標準の検索で'}本文検索を開きます`
+    return { hint: row?.kind === 'body' ? (this.plugin.settings.bodySearch === 'ranked' ? 'Enter で本文を検索し、リンクの多いノートから順に並べます'
+      : `Enter で${this.plugin.usesOmnisearch() ? ' Omnisearch の' : '標準の検索で'}本文検索を開きます`)
       : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
       : row?.kind === 'word' ? '選ぶと入力に反映します' : '' };
   }
@@ -2204,7 +2259,8 @@ class UnifiedSearch extends (SuggestModal || class {}) {
       meta.textContent = [row.recent ? '最近開いた' : '', alias ? `別名: ${alias}` : '', folder].filter(Boolean).join(' · ');
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
-      meta.textContent = this.plugin.usesOmnisearch() ? 'Omnisearch で開く' : '標準の検索で開く';
+      meta.textContent = this.plugin.settings.bodySearch === 'ranked' ? 'リンクの多いノートから順に並べる'
+        : this.plugin.usesOmnisearch() ? 'Omnisearch で開く' : '標準の検索で開く';
     } else if (row.kind === 'word') {
       title.textContent = `語句の候補：${row.text}`;
       meta.textContent = 'Various Complements（選ぶと入力に反映）';
@@ -2230,11 +2286,170 @@ class UnifiedSearch extends (SuggestModal || class {}) {
   }
 
   onChooseSuggestion(row, evt) {
-    if (row.kind === 'body') { this.plugin.searchBodies(row.text); return; }
+    if (row.kind === 'body') {
+      if (this.plugin.settings.bodySearch === 'ranked' && typeof SuggestModal === 'function') new BodySearch(this.app, this.plugin, row.text).open();
+      else this.plugin.searchBodies(row.text);
+      return;
+    }
     if (row.kind === 'create') { void this.plugin.createNote(row.text).catch(() => new Notice('ノートを作れませんでした。')); return; }
     if (row.kind !== 'note') return;
     const mode = evt && Keymap.isModEvent(evt);
     const leaf = mode ? this.app.workspace.getLeaf('tab') : this.app.workspace.getLeaf(false);
+    void leaf.openFile(row.file, { active: true }).catch(() => new Notice('ノートを開けませんでした。'));
+  }
+}
+
+// Body search ordered by link rank. Notes are read one by one while searching and their text is not
+// kept (only a one-line excerpt per hit), so nothing stays in memory between searches; this matters
+// on phones, where Omnisearch's in-memory index made Obsidian restart. Title matches were already
+// offered on the unified search, so by default hits are ordered by link rank alone, then by last
+// change; settings can order them newest first or by name instead.
+const BODY_SEARCH_LIMIT = 200;
+class BodySearch extends (SuggestModal || class {}) {
+  constructor(app, plugin, query) {
+    super(app);
+    this.plugin = plugin;
+    this.initial = query;
+    this.scan = null;
+    this.rows = new WeakMap();
+    this.pane = null;
+    this.refreshTimer = null;
+    this.limit = BODY_SEARCH_LIMIT + 1;
+    this.emptyStateText = '本文に含むノートは見つかりませんでした。';
+    this.setPlaceholder?.('本文を検索（リンクの多いノートから順）');
+    this.setInstructions?.([
+      { command: 'Enter', purpose: 'ノートを開く' },
+      { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
+      { command: 'Esc', purpose: '閉じる' },
+    ]);
+  }
+
+  onOpen() {
+    super.onOpen?.();
+    if (this.inputEl) {
+      this.inputEl.value = this.initial;
+      this.inputEl.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
+    }
+    if (!this.plugin.settings.bodySearchPreview || !this.modalEl) return;
+    if (!wideEnoughForPreview(this.modalEl.ownerDocument?.defaultView || globalThis.activeWindow)) return;
+    this.pane = new NotePreviewPane(this.app, this.modalEl, this.resultContainerEl, () => this.paneSelection(), {
+      terms: () => (this.scan?.query || '').split(/\s+/).filter(Boolean),
+      onLink: (link, source, event) => {
+        this.close();
+        void this.app.workspace.openLinkText(link, source, Keymap.isModEvent(event));
+      },
+    });
+    this.pane.follow();
+  }
+
+  onClose() {
+    super.onClose?.();
+    if (this.scan) this.scan.live = false;
+    if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    this.pane?.dispose();
+    this.pane = null;
+  }
+
+  // With the status line selected (as when the list first appears), the preview shows the top hit.
+  paneSelection() {
+    const el = this.resultContainerEl?.querySelector('.suggestion-item.is-selected');
+    const row = el ? this.rows.get(el) : null;
+    if (row?.kind === 'note') return { file: row.file };
+    const top = el?.nextElementSibling ? this.rows.get(el.nextElementSibling) : null;
+    return top?.kind === 'note' ? { file: top.file } : { hint: '' };
+  }
+
+  // Starts reading the notes for a new query; earlier searches stop.
+  start(query) {
+    if (this.scan) this.scan.live = false;
+    const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
+    const files = searchableNotes(this.app, this.plugin.settings.searchExcludeFolders).map(note => note.file);
+    const scan = { query, terms, hits: [], checked: 0, total: files.length, done: !terms.length, live: true, started: Date.now(), ms: 0 };
+    this.scan = scan;
+    if (scan.done) return;
+    const ranks = this.plugin.settings.bodySearchOrder === 'rank' ? this.plugin.linkRanks() : new Map();
+    let next = 0;
+    const worker = async () => {
+      while (next < files.length && scan.live) {
+        const file = files[next++];
+        if (file.stat.size <= MAX_SCAN_BYTES) {
+          try {
+            const text = await this.app.vault.cachedRead(file);
+            const key = normalizeSearch(text);
+            if (terms.every(term => key.includes(term))) {
+              scan.hits.push({ kind: 'note', file, rank: ranks.get(file.path) || 0, snippet: bodySnippet(text, key, terms) });
+              this.refreshSoon();
+            }
+          } catch { /* unreadable notes are skipped */ }
+        }
+        scan.checked++;
+        if (scan.checked % 500 === 0) this.refreshSoon();
+      }
+    };
+    void Promise.all(Array.from({ length: SCAN_WORKERS }, worker)).then(() => {
+      if (!scan.live) return;
+      scan.done = true;
+      scan.ms = Date.now() - scan.started;
+      this.refreshSoon(0);
+    });
+  }
+
+  // Redraws the list as hits arrive, at most a few times a second.
+  refreshSoon(delay = 250) {
+    if (this.refreshTimer !== null) { if (delay) return; clearTimeout(this.refreshTimer); }
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      if (!this.inputEl || !this.scan?.live) return;
+      this.inputEl.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
+    }, delay);
+  }
+
+  getSuggestions(input) {
+    const query = input.trim();
+    if (!this.scan || this.scan.query !== query) this.start(query);
+    const scan = this.scan;
+    if (!scan.terms.length) return [];
+    const order = this.plugin.settings.bodySearchOrder;
+    const byTime = (a, b) => b.file.stat.mtime - a.file.stat.mtime;
+    const hits = [...scan.hits].sort(order === 'name' ? (a, b) => a.file.basename.localeCompare(b.file.basename, 'ja')
+      : order === 'modified' ? byTime : (a, b) => b.rank - a.rank || byTime(a, b));
+    const count = hits.length.toLocaleString('ja-JP');
+    const status = scan.done
+      ? `本文に含むノート ${count}件（${scan.total.toLocaleString('ja-JP')}件を ${(scan.ms / 1000).toFixed(1)}秒で検索）${hits.length > BODY_SEARCH_LIMIT ? `・上位${BODY_SEARCH_LIMIT}件を表示` : ''}`
+      : `検索中 ${scan.checked.toLocaleString('ja-JP')} / ${scan.total.toLocaleString('ja-JP')}（${count}件）`;
+    return [{ kind: 'status', text: status }, ...hits.slice(0, BODY_SEARCH_LIMIT)];
+  }
+
+  renderSuggestion(row, el) {
+    this.rows.set(el, row);
+    const doc = el.ownerDocument;
+    const title = doc.createElement('div');
+    if (row.kind === 'status') {
+      title.className = 'palmwiki-search-meta';
+      title.textContent = row.text;
+      el.append(title);
+      return;
+    }
+    title.className = 'palmwiki-search-title';
+    title.textContent = row.file.basename;
+    el.append(title);
+    if (row.snippet) {
+      const meta = doc.createElement('small');
+      meta.className = 'palmwiki-search-meta';
+      meta.textContent = row.snippet;
+      el.append(meta);
+    }
+  }
+
+  selectSuggestion(row, evt) {
+    if (row.kind === 'status') return; // keep the screen open
+    super.selectSuggestion(row, evt);
+  }
+
+  onChooseSuggestion(row, evt) {
+    if (row.kind !== 'note') return;
+    const leaf = evt && Keymap.isModEvent(evt) ? this.app.workspace.getLeaf('tab') : this.app.workspace.getLeaf(false);
     void leaf.openFile(row.file, { active: true }).catch(() => new Notice('ノートを開けませんでした。'));
   }
 }
@@ -2282,6 +2497,33 @@ class LiteSettings extends PluginSettingTab {
           this.plugin.settings.searchMode = value === 'separate' ? 'separate' : 'unified';
           try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
         }));
+    new Setting(containerEl).setName('統合検索の「本文を検索」')
+      .setDesc('「リンクの多い順」は PalmWiki Home が本文を探し、多くのノートから（またよく参照されるノートから）リンクされているノートを上に並べます。題名に語が入るノートは、その前の題名の候補に出ています。「外部の検索」は Omnisearch（なければ Obsidian 標準の検索）に渡します。')
+      .addDropdown(dropdown => dropdown
+        .addOption('ranked', 'リンクの多い順（PalmWiki Home）')
+        .addOption('external', '外部の検索（Omnisearch・標準の検索）')
+        .setValue(this.plugin.settings.bodySearch)
+        .onChange(async value => {
+          this.plugin.settings.bodySearch = value === 'external' ? 'external' : 'ranked';
+          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+        }));
+    new Setting(containerEl).setName('本文検索の並び順')
+      .setDesc('「リンクの多い順」（PageRank）は、多くのノートから、またよく参照されるノートからリンクされているノートを上に並べます。')
+      .addDropdown(dropdown => dropdown
+        .addOption('rank', 'リンクの多い順（PageRank）')
+        .addOption('modified', '更新が新しい順')
+        .addOption('name', '名前順')
+        .setValue(this.plugin.settings.bodySearchOrder)
+        .onChange(async value => {
+          this.plugin.settings.bodySearchOrder = ['modified', 'name'].includes(value) ? value : 'rank';
+          try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+        }));
+    new Setting(containerEl).setName('本文検索の画面にプレビューを表示')
+      .setDesc('選んでいる結果のノートを、本文検索の画面の右側に表示し、検索語に印を付けます（幅の狭い画面では表示しません）。')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.bodySearchPreview).onChange(async value => {
+        this.plugin.settings.bodySearchPreview = value;
+        try { await this.plugin.saveSettings(); } catch { new Notice('設定を保存できませんでした。'); }
+      }));
     new Setting(containerEl).setName('スマホ・タブレットでは Omnisearch を使わない')
       .setDesc('オンにすると、iPhone・iPad では本文検索を Obsidian 標準の検索で開きます。Omnisearch はモバイルでは起動のたびに索引をメモリに作り直すため、ノートが多いとアプリが落ちることがあります。パソコンでは今までどおり Omnisearch を使います。')
       .addToggle(toggle => toggle.setValue(this.plugin.settings.mobileCoreSearch).onChange(async value => {

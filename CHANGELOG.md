@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.13.0 — 2026-10-13
+
+- Body search of its own. In the unified search, the body-search row (Enter) now opens a PalmWiki Home screen that reads the notes and lists those containing every word, ordered by link rank (PageRank over Obsidian's resolved links, as Cosense orders pages). Title matches stay where they were, on the unified search before it. Hiragana/katakana and full/half width are folded as in the title search. Note text is not kept: only a one-line excerpt per hit, so nothing stays in memory between searches. The first line shows progress, then the count and how long the search took.
+- The screen has the same side preview as the unified search, marking the words. Settings: the body-search target (this screen, or Omnisearch / Obsidian's search as before), the order (link rank by default, newest first, or by name) and the preview (on by default).
+
 ## 1.12.8 — 2026-10-13
 
 - New setting right under the search-button mode: "Don't use Omnisearch on phones and tablets" (on by default). On mobile, body search and an Omnisearch search command open Obsidian's own search, even where Omnisearch is enabled, because Omnisearch rebuilds its whole index in memory at every start on iOS.
