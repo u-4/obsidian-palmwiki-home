@@ -38,6 +38,15 @@ const MAX_WORD_SUGGESTIONS = 5;
 const MAX_FAVORITES = 100;
 const MAX_SCAN_BYTES = 2 * 1024 * 1024;
 const SCAN_WORKERS = 4;
+// Attachments arriving by sync are handled together, at most twice a second.
+const ATTACHMENT_BATCH_MS = 500;
+// After the links change, the link rank is worked out again only when it is this old, or when the
+// number of links changed.
+const RANK_MAX_AGE = 5 * 60 * 1000;
+// The body search starts reading once typing pauses this long.
+const BODY_SEARCH_DELAY = 300;
+// The Home list position is noted this long after scrolling stops.
+const POSITION_SAVE_MS = 150;
 // PARA-PKM marks Project and Area notes with these frontmatter tags.
 const SCOPE_KINDS = Object.freeze({ Projects: 'プロジェクト', Areas: 'エリア' });
 const DONE_STATUSES = new Set(['completed', 'done', 'archived', 'cancelled', 'canceled', '完了', '終了', '中止']);
@@ -214,6 +223,106 @@ function normalizeSearch(text) {
     .replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
 }
 
+// A quick test on the raw note text, before normalizeSearch, that never drops a note the full test
+// would keep. For a search character, every raw character that can turn into it is listed from the
+// runtime's own Unicode tables, once per session (in small steps, so nothing waits on it):
+// - fold: raw characters whose normalized form, or the normalized form of a part of their
+//   decomposition, contains it (\uff76, \u30ab, \u30ac and \u32d5 for \u304b; A, \uff21 and \u00e1 for a);
+// - parts: raw characters whose decomposition contains it (\uff9c and \u30f7 for \u30ef), for characters that
+//   normalization puts together from a base and a mark that follows (\uff9c\uff9e \u2192 \u30f7).
+// Until the lists are ready, every note gets the full test.
+const FOLD_LAST = 0x2ffff; // beyond this there are no characters that normalize to others
+const FOLD_STEP = 0x2000;
+let foldTable = null;
+let foldBuild = null;
+
+function addFoldSources(table, from, to) {
+  for (let cp = from; cp < to; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const ch = String.fromCodePoint(cp);
+    const parts = ch.normalize('NFKD');
+    if (parts === ch && ch.toLowerCase() === ch && !(cp >= 0x30a1 && cp <= 0x30f6)) continue;
+    const outs = new Set(normalizeSearch(ch));
+    for (const part of parts) for (const c of normalizeSearch(part)) outs.add(c);
+    outs.delete(ch);
+    for (const c of outs) { const list = table.fold.get(c); if (list) list.push(ch); else table.fold.set(c, [ch]); }
+    if (parts !== ch) {
+      for (const part of new Set(parts)) {
+        if (part === ch) continue;
+        const list = table.parts.get(part); if (list) list.push(ch); else table.parts.set(part, [ch]);
+      }
+    }
+  }
+}
+
+function newFoldTable() { return { fold: new Map(), parts: new Map(), sources: new Map() }; }
+
+// The lists at once (tests), or null while they are being made in the background.
+function searchFoldTable({ now = false } = {}) {
+  if (foldTable) return foldTable;
+  if (now) {
+    const table = newFoldTable();
+    addFoldSources(table, 0, FOLD_LAST + 1);
+    foldTable = table; foldBuild = null;
+    return foldTable;
+  }
+  if (!foldBuild) {
+    const table = newFoldTable();
+    let cp = 0;
+    const step = () => {
+      if (foldTable) return;
+      const end = Math.min(cp + FOLD_STEP, FOLD_LAST + 1);
+      addFoldSources(table, cp, end);
+      cp = end;
+      if (cp > FOLD_LAST) { foldTable = table; foldBuild = null; } else foldBuild = setTimeout(step, 0);
+    };
+    foldBuild = setTimeout(step, 0);
+  }
+  return null;
+}
+
+// Every raw character that can become `ch` in normalized text.
+function foldSources(table, ch) {
+  const known = table.sources.get(ch);
+  if (known) return known;
+  const chars = new Set([ch, ...(table.fold.get(ch) || [])]);
+  for (const x of [...chars]) {
+    const base = x.normalize('NFD');
+    if (base === x) continue;
+    const starter = String.fromCodePoint(base.codePointAt(0));
+    chars.add(starter);
+    for (const raw of table.parts.get(starter) || []) chars.add(raw);
+  }
+  table.sources.set(ch, chars);
+  return chars;
+}
+
+// For each normalized search word, the raw-text test of its most telling character, or null while
+// the lists are not ready. A word with no usable character (only marks) has no test. Final sigma
+// (\u03c2, from \u03a3 at a word's end) depends on context, so it is never used.
+function searchPretest(terms, table = searchFoldTable()) {
+  if (!table) return null;
+  const tests = [];
+  for (const term of terms) {
+    let best = null;
+    for (const ch of new Set(term)) {
+      if (ch === '\u03c2' || /^\p{M}$/u.test(ch)) continue;
+      const chars = foldSources(table, ch);
+      if (!best || chars.size < best.size) best = chars;
+    }
+    if (!best) continue;
+    const cls = [...best].map(c => /[\\\]\[^-]/.test(c) ? '\\' + c : c).join('');
+    tests.push(new RegExp(`[${cls}]`, 'u'));
+  }
+  return text => tests.every(re => re.test(text));
+}
+
+// Whether every note holding all the new words also holds all the earlier ones (each earlier word
+// is inside one of the new words), so the new search can look only at the earlier hits.
+function narrowsQuery(previous, terms) {
+  return previous.length > 0 && terms.length > 0 && previous.every(old => terms.some(term => term.includes(old)));
+}
+
 // Where the search words are in a text, as ranges of the original text. Each character is normalized
 // on its own (as normalizeSearch does for the whole), so a range maps back to the text as written:
 // 「セイビ」 is found and marked for the word 「せいび」.
@@ -282,6 +391,12 @@ function searchableNotes(app, excludeFolders) {
     notes.push({ file, title: file.basename, titleKey: normalizeSearch(file.basename), aliases, aliasKeys: aliases.map(normalizeSearch) });
   }
   return notes;
+}
+
+// The notes the body search reads: the same as searchableNotes, without the names.
+function searchableFiles(app, excludeFolders) {
+  const ignored = typeof app.metadataCache.isUserIgnored === 'function' ? p => app.metadataCache.isUserIgnored(p) : () => false;
+  return app.vault.getMarkdownFiles().filter(file => !inFolders(file.path, excludeFolders) && !ignored(file.path));
 }
 
 // Like Another Quick Switcher's Recent search: every space-separated word must be in the
@@ -464,18 +579,60 @@ function tagKey(text) {
   return String(text).normalize('NFKC').toLowerCase().replace(/[\s_-]+/g, '');
 }
 
+function scopeTagNames(scopePath, aliases) {
+  return new Set([noteTitle(scopePath), ...aliases].map(tagKey).filter(Boolean));
+}
+
+function hasScopeTag(cache, names) {
+  if (!cache) return false;
+  const tags = typeof getAllTags === 'function' ? getAllTags(cache) || []
+    : [...(cache.tags || []).map(t => t.tag), ...[cache.frontmatter?.tags, cache.frontmatter?.tag].flat().filter(t => typeof t === 'string')];
+  return tags.some(tag => String(tag).replace(/^#/, '').split('/').some(part => names.has(tagKey(part))));
+}
+
 function scopeTagged(app, scopePath, aliases) {
-  const names = new Set([noteTitle(scopePath), ...aliases].map(tagKey).filter(Boolean));
+  const names = scopeTagNames(scopePath, aliases);
   const tagged = new Set();
   for (const file of app.vault.getMarkdownFiles()) {
-    const cache = app.metadataCache.getFileCache(file);
-    if (!cache) continue;
-    const tags = typeof getAllTags === 'function' ? getAllTags(cache) || []
-      : [...(cache.tags || []).map(t => t.tag), ...[cache.frontmatter?.tags, cache.frontmatter?.tag].flat().filter(t => typeof t === 'string')];
-    if (tags.some(tag => String(tag).replace(/^#/, '').split('/').some(part => names.has(tagKey(part))))) tagged.add(file.path);
+    if (hasScopeTag(app.metadataCache.getFileCache(file), names)) tagged.add(file.path);
   }
   tagged.delete(scopePath);
   return tagged;
+}
+
+// Whether notes that changed (edited, created, renamed or deleted; checked once Obsidian has
+// resolved their links) can change a Project/Area's notes: the Project note itself, a note that was
+// in it, a note that links to it or that it links to now, a note with its tag, or a note with the
+// same name (links may now go there instead).
+function scopeAffected(app, scope, changed) {
+  const links = app.metadataCache.resolvedLinks || {};
+  const has = (targets, key) => !!targets && Object.prototype.hasOwnProperty.call(targets, key);
+  const name = noteTitle(scope.path).toLowerCase();
+  for (const path of changed) {
+    if (path === scope.path || scope.members.has(path) || scope.tagged.has(path)) return true;
+    if (has(links[path], scope.path) || has(links[scope.path], path)) return true;
+    if (noteTitle(path).toLowerCase() === name) return true;
+    const file = app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile && hasScopeTag(app.metadataCache.getFileCache(file), scope.names)) return true;
+  }
+  return false;
+}
+
+// How many notes and links the link graph has; counted without copying it.
+function linkGraphSize(resolvedLinks, unresolvedLinks) {
+  let size = 0;
+  for (const links of [resolvedLinks, unresolvedLinks]) {
+    for (const source in links || {}) { size++; for (const target in links[source] || {}) size++; }
+  }
+  return size;
+}
+
+// Whether kept link ranks can still be used: nothing changed since, or the changes are recent
+// (under RANK_MAX_AGE) and left the number of notes and links the same.
+function ranksFresh(cache, { dirty, now, size }, maxAge = RANK_MAX_AGE) {
+  if (!cache) return false;
+  if (!dirty) return true;
+  return now - cache.at < maxAge && size === cache.size;
 }
 
 function snapshotKey(file) {
@@ -498,6 +655,37 @@ function firstImage(app, file) {
     return image;
   }
   return null;
+}
+
+// File names (with and without extension, lower case) of attachments that changed, for embedsMayUse.
+function attachmentNames(paths) {
+  const names = new Set();
+  for (const path of paths) {
+    if (!path) continue;
+    const name = String(path).split('/').pop().normalize('NFC').toLowerCase();
+    names.add(name);
+    names.add(name.replace(/\.[^.]*$/, ''));
+  }
+  return names;
+}
+
+// Whether a note's embeds (as firstImage reads them) may point at one of those attachments: the
+// last part of the link names one of them. A quick check by name only; firstImage decides.
+function embedsMayUse(embeds, names) {
+  for (const embed of (embeds || []).slice(0, 100)) {
+    let link = String(embed.link || '').split('|')[0].split('#')[0].trim();
+    try { link = decodeURIComponent(link); } catch { continue; }
+    const name = link.split('/').pop().normalize('NFC').toLowerCase();
+    if (name && names.has(name)) return true;
+  }
+  return false;
+}
+
+// The scroll position that puts a remembered card back where it was: `offset` px from the top of the
+// list, the card now `anchorTop` px from it at `scrollTop`. Without the card, the old scroll position.
+function restoredScrollTop({ scrollTop, anchorTop, offset, fallback }) {
+  if (!Number.isFinite(anchorTop) || !Number.isFinite(offset)) return Math.max(0, fallback || 0);
+  return Math.max(0, scrollTop + anchorTop - offset);
 }
 
 // 2hop-links-plus copies this into src/cardPreview.ts; tell its session when it changes.
@@ -623,6 +811,12 @@ class PalmWikiHome extends Plugin {
       : [];
     this.scope = null; // In memory only: Home and back navigation keep it; restart starts at すべて.
     this.scopeCache = null;
+    this.rankCache = null; // { ranks, at, size }
+    this.rankDirty = false;
+    this.linkChanges = new Set(); // notes changed since Obsidian last resolved the links
+    this.attachmentChanges = new Set();
+    this.attachmentTimer = null;
+    this.homePositions = new WeakMap(); // tab → where its Home list was, kept in memory only
     this.previews = new PreviewStore(this.app);
     this.disposed = false;
     this.bars = new Map();
@@ -660,24 +854,28 @@ class PalmWikiHome extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       if (this.disposed) return;
       for (const name of ['layout-change', 'active-leaf-change', 'file-open', 'window-open', 'window-close']) {
-        this.registerEvent(this.app.workspace.on(name, () => this.scheduleBars()));
+        this.registerEvent(this.app.workspace.on(name, () => {
+          this.scheduleBars();
+          // A Home that was hidden catches up once it shows again.
+          for (const view of this.cardViews) if (view.stale || view.imagesStale) view.scheduleViewport();
+        }));
       }
       this.registerEvent(this.app.metadataCache.on('changed', file => {
+        this.linkChanges.add(file.path);
         for (const view of this.cardViews) view.refreshImages(file.path);
       }));
       for (const name of ['create', 'modify', 'delete', 'rename']) {
         this.registerEvent(this.app.vault.on(name, (file, oldPath) => {
-          if (!(file instanceof TFile) || file.extension === 'md') return;
-          for (const view of this.cardViews) view.refreshImages(null, file.path, oldPath);
+          if (!(file instanceof TFile)) return;
+          if (file.extension === 'md') {
+            if (name !== 'modify') { this.linkChanges.add(file.path); if (oldPath) this.linkChanges.add(oldPath); }
+            return;
+          }
+          this.queueAttachment(file.path, oldPath);
         }));
       }
       // Scope membership follows links; favorites follow renamed or deleted notes.
-      this.registerEvent(this.app.metadataCache.on('resolved', () => {
-        this.rankCache = null;
-        if (!this.scope) return;
-        this.scopeCache = null;
-        for (const view of this.cardViews) view.onDataUpdated();
-      }));
+      this.registerEvent(this.app.metadataCache.on('resolved', () => this.onLinksResolved()));
       this.registerEvent(this.app.vault.on('rename', (file, oldPath) => this.followRename(file, oldPath)));
       this.registerEvent(this.app.vault.on('delete', file => this.followDelete(file)));
       this.syncBars();
@@ -905,6 +1103,8 @@ class PalmWikiHome extends Plugin {
       if (this.disposed || path !== this.settings.homePath || file.path !== path) return;
       let leaf = sourceLeaf || this.app.workspace.getMostRecentLeaf();
       if (!leaf || leaf.getViewState().pinned) leaf = this.app.workspace.getLeaf('tab');
+      // The Home button starts at the top; going back to Home returns to where the list was.
+      this.homePositions.delete(leaf);
       await leaf.openFile(file, { active: true });
       if (this.disposed) return;
       await this.app.workspace.revealLeaf(leaf);
@@ -931,13 +1131,50 @@ class PalmWikiHome extends Plugin {
     return this.app.vault.create(path, defaultBase());
   }
 
+  // Attachments that changed (often hundreds while syncing) are gathered and handled together.
+  queueAttachment(path, oldPath) {
+    if (this.disposed) return;
+    this.attachmentChanges.add(path);
+    if (oldPath) this.attachmentChanges.add(oldPath);
+    if (this.attachmentTimer === null) this.attachmentTimer = setTimeout(() => this.flushAttachments(), ATTACHMENT_BATCH_MS);
+  }
+
+  flushAttachments() {
+    if (this.attachmentTimer !== null) clearTimeout(this.attachmentTimer);
+    this.attachmentTimer = null;
+    const paths = this.attachmentChanges;
+    this.attachmentChanges = new Set();
+    if (this.disposed || !paths.size) return;
+    for (const view of this.cardViews) view.refreshAttachments(paths);
+  }
+
+  // Obsidian has resolved the links again. The link rank is only marked as outdated (worked out again
+  // when a body search needs it and it is old enough, see linkRanks()); a Project/Area's notes are
+  // worked out again only when a changed note can change them.
+  onLinksResolved() {
+    const changed = this.linkChanges;
+    this.linkChanges = new Set();
+    if (changed.size) this.rankDirty = true;
+    if (this.disposed || !this.scope || !changed.size) return;
+    if (this.scopeCache?.path === this.scope && !scopeAffected(this.app, this.scopeCache, changed)) return;
+    this.scopeCache = null;
+    for (const view of this.cardViews) view.onDataUpdated();
+  }
+
   currentScope() {
     if (!this.scope) return null;
     if (this.scopeCache?.path !== this.scope) {
+      const aliases = this.aliasesOf(this.scope);
       this.scopeCache = { path: this.scope, members: scopeMembers(this.app, this.scope),
-        tagged: scopeTagged(this.app, this.scope, this.aliasesOf(this.scope)) };
+        tagged: scopeTagged(this.app, this.scope, aliases), names: scopeTagNames(this.scope, aliases) };
     }
     return this.scopeCache;
+  }
+
+  // The notes of the chosen Project/Area for the body search: linked either way, or tagged with its name.
+  scopePaths(path) {
+    const scope = this.scope === path ? this.currentScope() : { members: scopeMembers(this.app, path), tagged: scopeTagged(this.app, path, this.aliasesOf(path)) };
+    return new Set([...scope.members, ...scope.tagged]);
   }
 
   aliasesOf(path) {
@@ -1003,19 +1240,25 @@ class PalmWikiHome extends Plugin {
     new UnifiedSearch(this.app, this).open();
   }
 
-  // Link ranks are worked out when a body search needs them and kept until the links change.
+  // Link ranks are worked out when a body search needs them. After the links change they are kept
+  // for up to RANK_MAX_AGE while the number of notes and links stays the same (an edit or a sync
+  // rarely moves the order much), and worked out again after that.
   linkRanks() {
-    if (!this.rankCache) {
+    const { resolvedLinks, unresolvedLinks } = this.app.metadataCache;
+    const now = Date.now();
+    const size = this.rankCache && this.rankDirty ? linkGraphSize(resolvedLinks, unresolvedLinks) : this.rankCache?.size;
+    if (!ranksFresh(this.rankCache, { dirty: this.rankDirty, now, size })) {
       const daily = this.settings.rankWeakDaily ? dailyFolder(this.app) : null;
       const down = this.settings.rankDownFolders;
-      const ranks = linkRanks(this.app.metadataCache.resolvedLinks, this.app.metadataCache.unresolvedLinks, {
+      const ranks = linkRanks(resolvedLinks, unresolvedLinks, {
         weakSources: path => !!daily && path.startsWith(daily),
       });
       // Notes in the folders set to sort lower keep a tenth of their rank.
       if (down.length) for (const [path, rank] of ranks) if (inFolders(path, down)) ranks.set(path, rank / 10);
-      this.rankCache = ranks;
+      this.rankCache = { ranks, at: now, size: size ?? linkGraphSize(resolvedLinks, unresolvedLinks) };
+      this.rankDirty = false;
     }
-    return this.rankCache;
+    return this.rankCache.ranks;
   }
 
   async createNote(name) {
@@ -1056,6 +1299,7 @@ class PalmWikiHome extends Plugin {
   onunload() {
     this.disposed = true;
     if (this.syncTimer !== null) clearTimeout(this.syncTimer);
+    if (this.attachmentTimer !== null) clearTimeout(this.attachmentTimer);
     for (const record of this.bars?.values() || []) { record.observer?.disconnect(); record.resize?.disconnect(); record.bar.remove(); }
     this.bars?.clear();
     for (const view of [...(this.cardViews || [])]) view.dispose();
@@ -1082,6 +1326,11 @@ class LiteCards extends BasesView {
     this.viewportFrame = null;
     this.moreFrame = null;
     this.disposed = false;
+    this.stale = false; // data arrived while hidden; worked out when shown again
+    this.imagesStale = false; // attachments changed while hidden
+    this.positionTimer = null;
+    this.restoreChecked = false; // the remembered list position is looked at once, with the first notes
+    this.leaf = null;
     this.lastScrollTop = parent.scrollTop;
     this.hoverPopover = null; // Lets this view act as the hover parent for card previews.
     const doc = parent.ownerDocument;
@@ -1121,10 +1370,15 @@ class LiteCards extends BasesView {
       const down = top > this.lastScrollTop;
       this.lastScrollTop = top;
       this.scheduleViewport();
+      this.schedulePosition();
       if (down && this.visible() && parent.scrollHeight - top - parent.clientHeight < 320) this.requestMore();
     }, { passive: true });
     this.registerDomEvent(doc, 'visibilitychange', () => this.scheduleViewport());
     this.registerDomEvent(doc.defaultView, 'resize', () => this.scheduleViewport());
+    // A tab or pane that shows again gets its size back: catch up then.
+    const Resize = doc.defaultView?.ResizeObserver;
+    this.resizeObserver = Resize ? new Resize(() => { if (this.stale || this.imagesStale) this.scheduleViewport(); }) : null;
+    this.resizeObserver?.observe(parent);
     plugin.cardViews.add(this);
     this.register(() => this.dispose());
   }
@@ -1134,25 +1388,84 @@ class LiteCards extends BasesView {
       this.parent.clientHeight > 0 && this.root.getClientRects().length > 0;
   }
 
+  // While the Home is hidden (another tab, the app in the background), updates are only noted and
+  // worked out once it shows again (scheduleViewport).
   onDataUpdated() {
     if (this.disposed || this.renderFrame !== null) return;
     this.renderFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
       this.renderFrame = null;
       if (this.disposed) return;
+      if (!this.visible()) { this.stale = true; return; }
       this.refreshWindow();
     });
   }
 
   refreshWindow() {
     if (this.disposed) return;
+    this.stale = false;
     this.ensureScans();
+    const saved = this.restoreChecked ? null : this.savedPosition();
+    if (saved) this.limit = Math.min(MAX_CARDS, Math.max(this.limit, saved.limit));
     const window = cardWindow(this.data, this.limit, this.currentFilter());
     this.files = window.files; this.total = window.total;
     this.render();
+    if (!this.restoreChecked && this.files.length) {
+      this.restoreChecked = true;
+      if (saved) this.restorePosition(saved);
+    }
+  }
+
+  // The tab this Home is in: positions are remembered per tab, since Home and notes share a tab and
+  // going back to Home builds a new view.
+  ownerLeaf() {
+    if (!this.leaf) this.app.workspace.iterateAllLeaves(leaf => { if (!this.leaf && leaf.view?.containerEl?.contains(this.root)) this.leaf = leaf; });
+    return this.leaf;
+  }
+
+  positionKey() {
+    return JSON.stringify([this.plugin.scope, this.includeDaily, this.includeMentions, this.includeTagged, this.bodyQuery]);
+  }
+
+  savedPosition() {
+    const leaf = this.ownerLeaf();
+    const saved = leaf ? this.plugin.homePositions.get(leaf) : null;
+    return saved && saved.key === this.positionKey() ? saved : null;
+  }
+
+  schedulePosition() {
+    if (this.disposed || this.positionTimer !== null) return;
+    this.positionTimer = setTimeout(() => { this.positionTimer = null; this.rememberPosition(); }, POSITION_SAVE_MS);
+  }
+
+  // Notes the first card showing at the top of the list, and how far from the top it is.
+  rememberPosition() {
+    if (this.disposed || !this.visible() || !this.restoreChecked) return;
+    const leaf = this.ownerLeaf();
+    if (!leaf) return;
+    const top = this.parent.scrollTop;
+    if (top <= 0) { this.plugin.homePositions.delete(leaf); return; }
+    const parentTop = this.parent.getBoundingClientRect().top;
+    let anchor = null;
+    for (const file of this.files.slice(0, this.limit)) {
+      const card = this.cards.get(file.path);
+      if (card && card.el.getBoundingClientRect().bottom > parentTop) { anchor = card; break; }
+    }
+    this.plugin.homePositions.set(leaf, { key: this.positionKey(), limit: this.limit, top,
+      path: anchor?.path || null, offset: anchor ? anchor.el.getBoundingClientRect().top - parentTop : null });
+  }
+
+  restorePosition(saved) {
+    const card = saved.path ? this.cards.get(saved.path) : null;
+    const parentTop = this.parent.getBoundingClientRect().top;
+    this.parent.scrollTop = restoredScrollTop({ scrollTop: this.parent.scrollTop,
+      anchorTop: card ? card.el.getBoundingClientRect().top - parentTop : NaN, offset: saved.offset, fallback: saved.top });
+    this.lastScrollTop = this.parent.scrollTop;
+    this.scheduleViewport();
   }
 
   resetScope() {
     if (this.disposed) return;
+    this.restoreChecked = true;
     this.limit = INITIAL_CARDS;
     this.parent.scrollTop = 0; this.lastScrollTop = 0;
     this.bodyQuery = '';
@@ -1302,8 +1615,11 @@ class LiteCards extends BasesView {
 
   goFirst() {
     this.limit = INITIAL_CARDS;
+    this.restoreChecked = true;
+    const leaf = this.ownerLeaf();
+    if (leaf) this.plugin.homePositions.delete(leaf);
     this.parent.scrollTop = 0; this.lastScrollTop = 0;
-    this.render();
+    if (this.stale) this.refreshWindow(); else this.render();
   }
 
   requestMore() {
@@ -1375,6 +1691,8 @@ class LiteCards extends BasesView {
     this.viewportFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
       this.viewportFrame = null;
       const visible = this.visible();
+      if (visible && this.stale) { this.refreshWindow(); return; } // it schedules this again
+      if (visible) this.imagesStale = false;
       const bounds = this.parent.getBoundingClientRect();
       for (const card of this.cards.values()) {
         const rect = card.el.getBoundingClientRect();
@@ -1415,6 +1733,8 @@ class LiteCards extends BasesView {
       if (this.disposed) return;
       // Opening a note (even in another tab, where this view stays) puts the card popups away.
       this.plugin.cardPopover?.close();
+      this.rememberPosition(); // for coming back
+      if (this.positionTimer !== null) { clearTimeout(this.positionTimer); this.positionTimer = null; }
       const current = this.app.vault.getAbstractFileByPath(file.path);
       if (!(current instanceof TFile)) { new Notice('このノートは移動または削除されました。'); return; }
       const mode = Keymap.isModEvent(event);
@@ -1499,12 +1819,24 @@ class LiteCards extends BasesView {
     this.scheduleImages();
   }
 
+  // One note's embeds changed (notePath), or every card (the image setting).
   refreshImages(notePath, attachmentPath, oldPath) {
     if (this.disposed) return;
+    if (attachmentPath) { this.refreshAttachments(new Set([attachmentPath, oldPath].filter(Boolean))); return; }
+    if (notePath) { const card = this.cards.get(notePath); if (card?.near) this.updateImage(card); return; }
+    for (const card of this.cards.values()) if (card.near) this.updateImage(card);
+  }
+
+  // Attachments were added, changed, renamed or removed: only cards showing one of them, or whose
+  // embeds name one of them, look for their first image again. A hidden Home waits until it shows
+  // (its cards look again when they come into view).
+  refreshAttachments(paths) {
+    if (this.disposed || !paths.size) return;
+    if (!this.visible()) { this.imagesStale = true; return; }
+    const names = attachmentNames(paths);
     for (const card of this.cards.values()) {
-      if (notePath && notePath !== card.path) continue;
-      if (attachmentPath && card.imagePath && card.imagePath !== attachmentPath && card.imagePath !== oldPath) continue;
-      if (card.near) this.updateImage(card);
+      if (!card.near) continue;
+      if ((card.imagePath && paths.has(card.imagePath)) || embedsMayUse(this.app.metadataCache.getFileCache(card.file)?.embeds, names)) this.updateImage(card);
     }
   }
 
@@ -1572,8 +1904,10 @@ class LiteCards extends BasesView {
     for (const frame of [this.renderFrame, this.viewportFrame, this.moreFrame]) if (frame !== null) win?.cancelAnimationFrame(frame);
     if (this.imageTimer !== null) clearTimeout(this.imageTimer);
     if (this.queryTimer !== null) clearTimeout(this.queryTimer);
+    if (this.positionTimer !== null) clearTimeout(this.positionTimer);
     this.scans = { mentions: null, body: null };
     this.observer?.disconnect();
+    this.resizeObserver?.disconnect();
     this.imageQueue.clear();
     for (const card of this.cards.values()) { card.disposePress?.(); this.releaseImage(card); }
     this.touchPreview?.close();
@@ -2324,6 +2658,8 @@ class CardPopover {
 const SEARCH_SOURCES = [
   (search, query) => query ? [] : search.recent().map(file => ({ kind: 'note', file, recent: true })),
   (search, query) => query ? [{ kind: 'body', text: query }] : [],
+  // With a Project/Area chosen on the Home: the same, within its notes.
+  (search, query) => query && search.plugin.scope ? [{ kind: 'scopeBody', text: query, scope: search.plugin.scope }] : [],
   (search, query) => query ? matchNotes(search.notes(), query, search.recentPaths()).map(note => ({ kind: 'note', file: note.file, note })) : [],
   (search, query) => {
     const last = query.split(/\s+/).pop();
@@ -2390,6 +2726,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const row = el ? this.rows.get(el) : null;
     if (row?.kind === 'note') return { file: row.file };
     return { hint: row?.kind === 'body' ? 'Enter で本文を検索します'
+      : row?.kind === 'scopeBody' ? `選ぶと「${noteTitle(row.scope)}」とつながるノートの本文を検索します`
       : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
       : row?.kind === 'word' ? '選ぶと入力に反映します' : '' };
   }
@@ -2432,6 +2769,9 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
       meta.textContent = { rank: 'リンクの多いノートから順に並べる', modified: '更新が新しい順に並べる', name: '名前順に並べる' }[this.plugin.settings.bodySearchOrder];
+    } else if (row.kind === 'scopeBody') {
+      title.textContent = `この中を検索：「${row.text}」`;
+      meta.textContent = `「${noteTitle(row.scope)}」とつながるノートの本文から`;
     } else if (row.kind === 'word') {
       title.textContent = `語句の候補：${row.text}`;
       meta.textContent = 'Various Complements（選ぶと入力に反映）';
@@ -2457,8 +2797,8 @@ class UnifiedSearch extends (SuggestModal || class {}) {
   }
 
   onChooseSuggestion(row, evt) {
-    if (row.kind === 'body') {
-      new BodySearch(this.app, this.plugin, row.text).open();
+    if (row.kind === 'body' || row.kind === 'scopeBody') {
+      new BodySearch(this.app, this.plugin, row.text, row.kind === 'scopeBody' ? row.scope : null).open();
       return;
     }
     if (row.kind === 'create') { void this.plugin.createNote(row.text).catch(() => new Notice('ノートを作れませんでした。')); return; }
@@ -2477,17 +2817,24 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 // first or by name instead.
 const BODY_SEARCH_LIMIT = 200;
 class BodySearch extends (SuggestModal || class {}) {
-  constructor(app, plugin, query) {
+  // With scopePath, only that Project/Area's notes are searched (「この中を検索」).
+  constructor(app, plugin, query, scopePath = null) {
     super(app);
     this.plugin = plugin;
     this.initial = query;
+    this.scopePath = scopePath;
     this.scan = null;
+    this.fileList = null;
+    this.pending = null; // words waiting for typing to pause
+    this.startTimer = null;
     this.rows = new WeakMap();
     this.pane = null;
     this.refreshTimer = null;
+    this.drawn = null; // what the list shows: { scan, version }
+    this.statusEl = null;
     this.limit = BODY_SEARCH_LIMIT + 1;
     this.emptyStateText = '本文に含むノートは見つかりませんでした。';
-    this.setPlaceholder?.('本文を検索（リンクの多いノートから順）');
+    this.setPlaceholder?.(`${scopePath ? `「${noteTitle(scopePath)}」の中の` : ''}本文を検索（リンクの多いノートから順）`);
     this.setInstructions?.([
       { command: 'Enter', purpose: 'ノートを開く' },
       { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
@@ -2517,8 +2864,9 @@ class BodySearch extends (SuggestModal || class {}) {
   onClose() {
     super.onClose?.();
     if (this.scan) this.scan.live = false;
-    if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
+    for (const timer of [this.refreshTimer, this.startTimer]) if (timer !== null) clearTimeout(timer);
     this.refreshTimer = null;
+    this.startTimer = null;
     this.pane?.dispose();
     this.pane = null;
   }
@@ -2532,15 +2880,40 @@ class BodySearch extends (SuggestModal || class {}) {
     return top?.kind === 'note' ? { file: top.file } : { hint: '' };
   }
 
-  // Starts reading the notes for a new query; earlier searches stop.
+  // The notes to search, listed once per screen.
+  files() {
+    if (!this.fileList) {
+      let files = searchableFiles(this.app, this.plugin.settings.searchExcludeFolders);
+      if (this.scopePath) {
+        const paths = this.plugin.scopePaths(this.scopePath);
+        files = files.filter(file => paths.has(file.path));
+      }
+      this.fileList = files;
+    }
+    return this.fileList;
+  }
+
+  // Starts reading the notes for a new query; earlier searches stop. When the earlier search finished
+  // and the new words only narrow it (「せいび」 → 「せいび 機器」, 「せい」 → 「せいび」), only its hits are
+  // read again, with notes changed since it started.
   start(query) {
-    if (this.scan) this.scan.live = false;
+    const previous = this.scan;
+    if (previous) previous.live = false;
     const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
-    const files = searchableNotes(this.app, this.plugin.settings.searchExcludeFolders).map(note => note.file);
-    const scan = { query, terms, hits: [], checked: 0, total: files.length, done: !terms.length, live: true, started: Date.now(), ms: 0 };
+    let files = this.files();
+    let narrowed = false;
+    if (previous?.done && narrowsQuery(previous.terms, terms)) {
+      const hits = new Set(previous.hits.map(hit => hit.file.path));
+      files = files.filter(file => hits.has(file.path) || file.stat.mtime >= previous.started);
+      narrowed = true;
+    }
+    const scan = { query, terms, hits: [], version: 0, sorted: null, sortedKey: '', checked: 0, total: files.length, narrowed,
+      done: !terms.length, live: true, started: Date.now(), ms: 0 };
     this.scan = scan;
     if (scan.done) return;
     const ranks = this.plugin.settings.bodySearchOrder === 'rank' ? this.plugin.linkRanks() : new Map();
+    // A note the raw-text test rules out cannot hold the words, so it is not normalized at all.
+    let pretest = searchPretest(terms);
     let next = 0;
     const worker = async () => {
       while (next < files.length && scan.live) {
@@ -2548,11 +2921,15 @@ class BodySearch extends (SuggestModal || class {}) {
         if (file.stat.size <= MAX_SCAN_BYTES) {
           try {
             const text = await this.app.vault.cachedRead(file);
-            const key = normalizeSearch(text);
-            if (terms.every(term => key.includes(term))) {
-              scan.hits.push({ kind: 'note', file, rank: ranks.get(file.path) || 0, snippet: bodySnippet(text, key, terms),
-                tier: linkTier(this.app.metadataCache.getFileCache(file), terms) });
-              this.refreshSoon();
+            if (!pretest) pretest = searchPretest(terms); // ready meanwhile
+            if (!pretest || pretest(text)) {
+              const key = normalizeSearch(text);
+              if (terms.every(term => key.includes(term))) {
+                scan.hits.push({ kind: 'note', file, rank: ranks.get(file.path) || 0, snippet: bodySnippet(text, key, terms),
+                  tier: linkTier(this.app.metadataCache.getFileCache(file), terms) });
+                scan.version++;
+                this.refreshSoon();
+              }
             }
           } catch { /* unreadable notes are skipped */ }
         }
@@ -2568,30 +2945,83 @@ class BodySearch extends (SuggestModal || class {}) {
     });
   }
 
-  // Redraws the list as hits arrive, at most a few times a second.
+  // While typing, the earlier reading stops at once and the new one starts when typing pauses.
+  queueStart(query) {
+    if (this.pending === query) return;
+    if (this.scan && !this.scan.done) this.scan.live = false;
+    if (this.startTimer !== null) clearTimeout(this.startTimer);
+    this.pending = query;
+    this.startTimer = setTimeout(() => {
+      this.startTimer = null;
+      const words = this.pending;
+      this.pending = null;
+      if (words === null) return;
+      this.start(words);
+      this.redraw();
+    }, BODY_SEARCH_DELAY);
+  }
+
+  cancelPending() {
+    if (this.startTimer !== null) clearTimeout(this.startTimer);
+    this.startTimer = null;
+    this.pending = null;
+  }
+
+  redraw() {
+    this.inputEl?.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
+  }
+
+  // Updates the list as hits arrive, at most a few times a second. When only the count moved, the
+  // status line changes in place and the list is not drawn again.
   refreshSoon(delay = 250) {
     if (this.refreshTimer !== null) { if (delay) return; clearTimeout(this.refreshTimer); }
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      if (!this.inputEl || !this.scan?.live) return;
-      this.inputEl.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
+      const scan = this.scan;
+      if (!this.inputEl || !scan?.live) return;
+      if (this.drawn?.scan === scan && this.drawn.version === scan.version && this.statusEl?.isConnected) {
+        this.statusEl.textContent = this.statusText(scan);
+        return;
+      }
+      this.redraw();
     }, delay);
+  }
+
+  statusText(scan) {
+    if (this.pending !== null) return '入力が止まったら検索します';
+    const n = value => value.toLocaleString('ja-JP');
+    const count = scan.hits.length;
+    if (!scan.done) return `検索中 ${n(scan.checked)} / ${n(scan.total)}（${n(count)}件）`;
+    const where = this.scopePath ? `「${noteTitle(this.scopePath)}」の中で` : '';
+    const searched = scan.narrowed ? `前の結果から ${n(scan.total)}件` : `${n(scan.total)}件`;
+    return `${where}本文に含むノート ${n(count)}件（${searched}を ${(scan.ms / 1000).toFixed(1)}秒で検索）${count > BODY_SEARCH_LIMIT ? `・上位${BODY_SEARCH_LIMIT}件を表示` : ''}`;
+  }
+
+  // Sorted once per change in the hits, not on every redraw.
+  sortedHits(scan) {
+    const order = this.plugin.settings.bodySearchOrder;
+    const key = `${order}:${scan.version}`;
+    if (scan.sorted && scan.sortedKey === key) return scan.sorted;
+    const byTime = (a, b) => b.file.stat.mtime - a.file.stat.mtime;
+    scan.sorted = [...scan.hits].sort(order === 'name' ? (a, b) => a.file.basename.localeCompare(b.file.basename, 'ja')
+      : order === 'modified' ? byTime : (a, b) => b.tier - a.tier || b.rank - a.rank || byTime(a, b));
+    scan.sortedKey = key;
+    return scan.sorted;
   }
 
   getSuggestions(input) {
     const query = input.trim();
-    if (!this.scan || this.scan.query !== query) this.start(query);
     const scan = this.scan;
-    if (!scan.terms.length) return [];
-    const order = this.plugin.settings.bodySearchOrder;
-    const byTime = (a, b) => b.file.stat.mtime - a.file.stat.mtime;
-    const hits = [...scan.hits].sort(order === 'name' ? (a, b) => a.file.basename.localeCompare(b.file.basename, 'ja')
-      : order === 'modified' ? byTime : (a, b) => b.tier - a.tier || b.rank - a.rank || byTime(a, b));
-    const count = hits.length.toLocaleString('ja-JP');
-    const status = scan.done
-      ? `本文に含むノート ${count}件（${scan.total.toLocaleString('ja-JP')}件を ${(scan.ms / 1000).toFixed(1)}秒で検索）${hits.length > BODY_SEARCH_LIMIT ? `・上位${BODY_SEARCH_LIMIT}件を表示` : ''}`
-      : `検索中 ${scan.checked.toLocaleString('ja-JP')} / ${scan.total.toLocaleString('ja-JP')}（${count}件）`;
-    return [{ kind: 'status', text: status }, ...hits.slice(0, BODY_SEARCH_LIMIT)];
+    if (!scan) this.start(query); // the words from the unified search: at once
+    else if (scan.query !== query || (!scan.live && !scan.done)) {
+      if (normalizeSearch(query).trim()) this.queueStart(query);
+      else { this.cancelPending(); this.start(query); }
+    } else this.cancelPending(); // back to the words already searched
+    const current = this.scan;
+    if (!current.terms.length && this.pending === null) return [];
+    this.drawn = { scan: current, version: current.version };
+    const hits = current.terms.length ? this.sortedHits(current) : [];
+    return [{ kind: 'status', text: this.statusText(current) }, ...hits.slice(0, BODY_SEARCH_LIMIT)];
   }
 
   renderSuggestion(row, el) {
@@ -2601,6 +3031,7 @@ class BodySearch extends (SuggestModal || class {}) {
     if (row.kind === 'status') {
       title.className = 'palmwiki-search-meta';
       title.textContent = row.text;
+      this.statusEl = title;
       el.append(title);
       return;
     }

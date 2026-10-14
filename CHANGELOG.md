@@ -2,6 +2,15 @@
 
 
 
+## 1.16.0 — 2026-10-14
+
+- Lighter while Obsidian Sync brings in attachments: their events are handled together every 0.5 s, and only cards showing a changed file, or whose embeds name one, look for their first image again (before, every card did, for every file).
+- When links change, a chosen Project/Area's notes are worked out again only if a changed note can change them (the Project note, a note in it, a note linking to it or linked from it, a note with its tag or its name). A Home in a hidden tab, or with the app in the background, catches up when it shows again. The link rank is kept after link changes while under 5 minutes old and the number of notes and links is the same.
+- Body search while typing: reading starts once typing pauses (0.3 s) and the earlier search stops at once; the list of notes is made once per screen; words that only narrow a finished search (「せい」 → 「せいび」, 「せいび」 → 「せいび 機器」) read only its hits again. A quick check on the raw text rules out notes before they are normalized, with the same results (tests cover kana, width, voicing marks and compatibility characters). The list is no longer re-sorted and redrawn while only the count moves.
+- 「この中を検索」: with a Project/Area chosen on the Home, the unified search offers a body search over just its notes (linked either way, or tagged with its name).
+- Going back to Home in the same tab puts the list where it was (the same card at the top, as many cards shown). The Home button still starts at the top. Kept in memory only.
+- Checked with the automated tests (`npm test`, 105 tests) only; not yet tried in Obsidian on the Mac, iPhone or iPad.
+
 ## 1.15.1 — 2026-10-14
 
 - Cmd+Shift+V with an X post URL hands it to PalmWiki X posts when that plugin is on (a card image with the text folded inside); without it the URL is pasted.

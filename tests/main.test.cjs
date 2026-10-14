@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { attachmentNames, embedsMayUse, restoredScrollTop, searchFoldTable, searchPretest, narrowsQuery, scopeAffected, linkGraphSize, ranksFresh, quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -933,7 +933,9 @@ test('only matches in note text are highlighted, not in titles', async () => {
 });
 test('a new query stops the earlier body search', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.BodySearch(f.app, f.plugin, '機器');
-  s.getSuggestions('機器'); const first = s.scan; s.getSuggestions('整備'); assert.equal(first.live, false); assert.equal(s.scan.query, '整備');
+  s.getSuggestions('機器'); const first = s.scan; s.getSuggestions('整備'); assert.equal(first.live, false);
+  // The new words are read once typing pauses (0.3 s).
+  assert.equal(s.scan.query, '機器'); f.clock.tick(299); assert.equal(s.scan.query, '機器'); f.clock.tick(300); assert.equal(s.scan.query, '整備');
   s.onClose(); f.stop();
 });
 test('search preview can be turned off in settings', async () => {
@@ -1075,4 +1077,219 @@ test('paste: after Obsidian pastes into a quote line, the added lines join the q
   ed.cursor = { line: 3, ch: 3 }; // where Obsidian leaves the cursor
   clock.tick(0);
   assert.deepEqual([...ed.lines], ['> 一行目', '> 二行目', '>', '> 三行目', '後ろの段落']);
+});
+
+// 1.16.0: lighter while syncing, faster body search, この中を検索, list position kept
+test('attachments arriving by sync are handled together, and only cards that may show them look again', async () => {
+  const f = await fixture(24);
+  f.files.set('a.png', new TFile('a.png')); f.metadata.set('0.md', { embeds: [{ link: 'a.png' }] });
+  f.metadata.set('1.md', { embeds: [{ link: 'img/%E5%BE%8C.png' }] }); // not synced yet
+  let lookups = 0; const resolve = f.app.metadataCache.getFirstLinkpathDest;
+  f.app.metadataCache.getFirstLinkpathDest = (...args) => { lookups++; return resolve(...args); };
+  f.refresh(); await f.pump(); assert.ok(f.view.cards.get('0.md').img); assert.equal(f.view.cards.get('1.md').img, null);
+  lookups = 0;
+  for (let i = 0; i < 300; i++) f.plugin.queueAttachment(`sync/${i}.jpg`);
+  f.files.set('img/後.png', new TFile('img/後.png')); f.plugin.queueAttachment('img/後.png');
+  assert.equal(lookups, 0); assert.equal(f.plugin.attachmentTimer !== null, true);
+  f.clock.tick(499); assert.equal(lookups, 0);
+  f.clock.tick(500); assert.equal(lookups, 1); // only card 1, whose embed names the new file
+  await f.pump(); assert.ok(f.view.cards.get('1.md').img); assert.equal(f.plugin.attachmentChanges.size, 0);
+  // A changed image is looked at again by the card showing it; a rename counts under both names.
+  lookups = 0; f.plugin.queueAttachment('a.png'); f.clock.tick(500); assert.equal(lookups, 1);
+  lookups = 0; f.plugin.queueAttachment('b.png', 'a.png'); f.clock.tick(500); assert.equal(lookups, 1);
+  // A hidden Home waits and catches up when it shows.
+  f.view.root.hidden = true; lookups = 0; f.plugin.queueAttachment('a.png'); f.clock.tick(500);
+  assert.equal(lookups, 0); assert.equal(f.view.imagesStale, true);
+  f.view.root.hidden = false; f.view.scheduleViewport(); f.doc.flush(); assert.ok(lookups >= 1); assert.equal(f.view.imagesStale, false);
+  f.stop();
+});
+test('the quick check by attachment name', () => {
+  const { attachmentNames, embedsMayUse } = load();
+  const names = attachmentNames(['Attachments/Photo 1.PNG', 'x/y.webp']);
+  assert.ok(embedsMayUse([{ link: 'photo 1.png' }], names));
+  assert.ok(embedsMayUse([{ link: 'Attachments/Photo%201.PNG|200' }], names));
+  assert.ok(embedsMayUse([{ link: 'y' }], names)); // no extension
+  assert.equal(embedsMayUse([{ link: 'z.png' }, { link: 'https://host/q.png' }], names), false);
+  assert.equal(embedsMayUse(undefined, names), false);
+  // macOS may keep file names decomposed (NFD); links are usually composed.
+  assert.ok(embedsMayUse([{ link: 'ガ.png' }], attachmentNames(['ガ.png'])));
+});
+
+function freshFold() { const h = load(); h.searchFoldTable({ now: true }); return h; }
+test('the raw-text check never drops a note the full search keeps (kana, width, marks, compatibility characters)', () => {
+  const { searchPretest, normalizeSearch } = freshFold();
+  const full = (text, terms) => { const key = normalizeSearch(text); return terms.every(t => key.includes(t)); };
+  const words = q => normalizeSearch(q).split(/\s+/).filter(Boolean);
+  const cases = [
+    ['機器のｾｲﾋﾞは別', 'せいび'], ['セイビ記録', 'せいび'], ['ｶﾞｲﾄﾞ', 'がいど'], ['ガイド', 'がいど'], ['がいど', 'がいど'],
+    ['ﾜﾞｲﾝ', 'ヷいん'], ['ヷイン', 'ヷいん'], ['ＡＮＡ ＳＦＣ', 'ana sfc'], ['Ana', 'ANA'], ['㍿パナ', '株式会社'], ['①番', '1番'],
+    ['ǅemal', 'dž'], ['été', 'été'], ['ậ', 'ậ'], ['Ậ', 'ậ'], ['ㄱㅏ', '가'], ['각', '각'], ['İstanbul', 'i'],
+    ['⽊曜', '木曜'], ['𝐀𝐁𝐂', 'abc'], ['ﬁle', 'file'], ['Å', 'å'], ['K', 'k'], ['ｳﾞｧｲｵﾘﾝ', 'ゔぁいおりん'], ['ΟΔΟΣ', 'οδος'],
+    ['-ｰ', 'ー'], ['ﾊﾟﾝ', 'ぱん'], ['パン', 'ぱん'],
+  ];
+  for (const [text, query] of cases) {
+    const terms = words(query);
+    assert.equal(full(text, terms) ? searchPretest(terms)(text) : true, true, `${text} / ${query}`);
+  }
+  // Random texts from tricky characters: whenever the full search matches, the quick check passes.
+  const pool = [...'かカｶﾞﾟがガﾜヷワはﾊぱパeEẹ́́̂ạǅAaａＡ①1㍿株式İiΣσς ㄱㅏ각가機⽊木𝐀ﬁfーｰ-うウｳヴゔÅÅKk゙゚'];
+  let seed = 7; const rand = n => { // mulberry32
+    seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return (((t ^ (t >>> 14)) >>> 0) / 4294967296 * n) | 0; };
+  let matched = 0;
+  for (let i = 0; i < 20000; i++) {
+    const text = Array.from({ length: 1 + rand(8) }, () => pool[rand(pool.length)]).join('');
+    const key = normalizeSearch(text);
+    const from = rand(Math.max(1, key.length)), term = key.slice(from, from + 1 + rand(3));
+    const terms = (rand(4) ? term : Array.from({ length: 1 + rand(3) }, () => pool[rand(pool.length)]).join('')).split(/\s+/).map(normalizeSearch).filter(Boolean);
+    if (!terms.length) continue;
+    if (full(text, terms)) { matched++; assert.equal(searchPretest(terms)(text), true, JSON.stringify([text, terms])); }
+  }
+  assert.ok(matched > 5000, String(matched));
+  // And it does rule notes out.
+  assert.equal(searchPretest(words('せいび'))('機器の点検'), false);
+  assert.equal(searchPretest(words('機器 点検'))('機器のメモ'), false);
+});
+test('narrowing: each earlier word is inside one of the new words', () => {
+  const { narrowsQuery } = load();
+  assert.ok(narrowsQuery(['せい'], ['せいび'])); assert.ok(narrowsQuery(['せいび'], ['せいび', '機器'])); assert.ok(narrowsQuery(['a', 'b'], ['ab']));
+  assert.equal(narrowsQuery(['せいび'], ['せい']), false); assert.equal(narrowsQuery(['せいび', '機器'], ['せいび']), false); assert.equal(narrowsQuery([], ['a']), false);
+});
+test('body search: the raw-text check gives the same hits as normalizing every note', async () => {
+  const run = async ready => {
+    const f = await fixture(0); searchVault(f); if (ready) f.searchFoldTable({ now: true });
+    f.bodies.set('00_Inbox/ANA SFC.md', '修行のメモ\n機器のｾｲﾋﾞは別'); f.bodies.set('00_Inbox/カタカナのメモ.md', 'セイビ記録');
+    f.bodies.set('00_Inbox/整備機器リスト.md', '一覧'); f.bodies.set('00_Inbox/R7機器整備.md', 'ぜいび'); // ぜいび: not a hit
+    const s = new f.BodySearch(f.app, f.plugin, 'セイビ'); s.getSuggestions('セイビ'); for (let i = 0; i < 6; i++) await settle();
+    const rows = s.getSuggestions('セイビ'); s.onClose(); f.stop();
+    return [...rows.slice(1).map(r => [r.file.basename, r.snippet])];
+  };
+  const quick = await run(true), plain = await run(false);
+  assert.deepEqual(quick, plain); assert.equal(quick.length, 2);
+});
+test('body search waits for typing to pause, lists the notes once, and narrows from the earlier hits', async () => {
+  const f = await fixture(0); searchVault(f);
+  f.bodies.set('00_Inbox/ANA SFC.md', 'せいび 機器'); f.bodies.set('00_Inbox/カタカナのメモ.md', 'せいび'); f.bodies.set('00_Inbox/R7機器整備.md', 'せいかつ');
+  const s = new f.BodySearch(f.app, f.plugin, 'せい'); s.getSuggestions('せい'); for (let i = 0; i < 6; i++) await settle();
+  assert.ok(s.scan.done); assert.equal(s.scan.hits.length, 3); const enumerations = f.calls.enumerations;
+  f.calls.reads.length = 0;
+  for (const q of ['せいび', 'せいび ', 'せいび き', 'せいび 機器']) {
+    const rows = s.getSuggestions(q); assert.equal(rows[0].text, '入力が止まったら検索します');
+  }
+  assert.equal(f.calls.reads.length, 0); assert.equal(s.scan.query, 'せい'); // nothing read while typing
+  f.clock.tick(300); for (let i = 0; i < 6; i++) await settle();
+  assert.equal(s.scan.query, 'せいび 機器'); assert.ok(s.scan.narrowed);
+  assert.deepEqual([...new Set(f.calls.reads)].sort(), ['00_Inbox/ANA SFC.md', '00_Inbox/R7機器整備.md', '00_Inbox/カタカナのメモ.md'].sort()); // only the earlier hits
+  const rows = s.getSuggestions('せいび 機器');
+  assert.deepEqual([...rows.slice(1).map(r => r.file.basename)], ['ANA SFC']); assert.match(rows[0].text, /前の結果から 3件/);
+  assert.equal(f.calls.enumerations, enumerations); // the note list is kept for the screen
+  // A word that does not narrow reads every note again.
+  f.calls.reads.length = 0; s.getSuggestions('機器'); f.clock.tick(300); for (let i = 0; i < 6; i++) await settle();
+  assert.equal(s.scan.narrowed, false); assert.equal(new Set(f.calls.reads).size, 5);
+  // Clearing the box stops at once.
+  assert.deepEqual([...s.getSuggestions('')], []);
+  s.onClose(); f.stop();
+});
+test('body search: when only the count moves, the status line changes in place; hits are sorted once per change', async () => {
+  const f = await fixture(0); searchVault(f); f.bodies.set('00_Inbox/ANA SFC.md', 'せいび');
+  const s = new f.BodySearch(f.app, f.plugin, 'せいび'); s.onOpen(); const rows = s.getSuggestions('せいび');
+  const el = f.doc.createElement('div'); s.renderSuggestion(rows[0], el);
+  for (let i = 0; i < 6; i++) await settle();
+  const before = s.inputEl.inputs; f.clock.tick(); assert.equal(s.inputEl.inputs, before + 1); // a new hit: drawn again
+  const again = s.getSuggestions('せいび'); s.renderSuggestion(again[0], f.doc.createElement('div'));
+  const sorted = s.scan.sorted; assert.equal(s.getSuggestions('せいび').length, 2); assert.equal(s.scan.sorted, sorted);
+  s.refreshSoon(0); s.scan.live = true; f.clock.tick(); assert.equal(s.inputEl.inputs, before + 1); // nothing new: no redraw
+  assert.match(s.statusEl.textContent, /本文に含むノート 1件/);
+  s.onClose(); f.stop();
+});
+
+test('link changes redo a Project/Area only when a changed note can change it; a hidden Home waits', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.plugin.setScope(v.project.path); f.doc.flush(); const first = f.plugin.scopeCache; const count = f.calls.enumerations;
+  f.plugin.linkChanges.add('bulk/5.md'); f.plugin.onLinksResolved(); f.doc.flush();
+  assert.equal(f.plugin.scopeCache, first); assert.equal(f.calls.enumerations, count);
+  // A note that now links to the Project
+  f.app.metadataCache.resolvedLinks['bulk/6.md'] = { [v.project.path]: 1 };
+  f.plugin.linkChanges.add('bulk/6.md'); f.plugin.onLinksResolved(); f.doc.flush();
+  assert.notEqual(f.plugin.scopeCache, first); assert.ok(f.view.files.some(file => file.path === 'bulk/6.md'));
+  // A note that leaves it (it was a member), a note given its tag, the Project note itself
+  const { scopeAffected } = f; const scope = f.plugin.currentScope();
+  assert.ok(scopeAffected(f.app, scope, ['bulk/6.md'])); assert.ok(scopeAffected(f.app, scope, [v.project.path]));
+  f.metadata.set('bulk/7.md', { tags: [{ tag: '#機器整備' }] }); assert.ok(scopeAffected(f.app, scope, ['bulk/7.md']));
+  assert.ok(scopeAffected(f.app, scope, ['別の場所/機器整備.md'])); // same name: links may go there now
+  assert.equal(scopeAffected(f.app, scope, ['bulk/8.md']), false);
+  // While hidden, the update waits; it is worked out once the Home shows again.
+  f.view.root.hidden = true; delete f.app.metadataCache.resolvedLinks['bulk/6.md'];
+  f.plugin.linkChanges.add('bulk/6.md'); f.plugin.onLinksResolved(); f.doc.flush();
+  assert.equal(f.view.stale, true); assert.ok(f.view.files.some(file => file.path === 'bulk/6.md'));
+  f.view.root.hidden = false; f.view.scheduleViewport(); f.doc.flush();
+  assert.equal(f.view.stale, false); assert.equal(f.view.files.some(file => file.path === 'bulk/6.md'), false);
+  f.stop();
+});
+test('link ranks are kept after link changes while recent and the same size', async () => {
+  const { ranksFresh, linkGraphSize } = load();
+  assert.equal(linkGraphSize({ 'a.md': { 'b.md': 1, 'c.md': 1 }, 'b.md': {} }, { 'a.md': { x: 1 } }), 6); // 3 + 1 sources, 2 + 1 links
+  const cache = { at: 1000, size: 5 };
+  assert.equal(ranksFresh(null, { dirty: false, now: 0, size: 5 }), false);
+  assert.equal(ranksFresh(cache, { dirty: false, now: 1e12, size: 9 }), true);
+  assert.equal(ranksFresh(cache, { dirty: true, now: 1000 + 60000, size: 5 }), true);
+  assert.equal(ranksFresh(cache, { dirty: true, now: 1000 + 60000, size: 6 }), false);
+  assert.equal(ranksFresh(cache, { dirty: true, now: 1000 + 5 * 60000, size: 5 }), false);
+  const f = await fixture(0);
+  f.app.metadataCache.resolvedLinks = { 'a.md': { 'b.md': 1 }, 'b.md': {} }; f.app.metadataCache.unresolvedLinks = {};
+  const r1 = f.plugin.linkRanks(); f.plugin.linkChanges.add('a.md'); f.plugin.onLinksResolved();
+  assert.equal(f.plugin.linkRanks(), r1); // same size, just now
+  f.app.metadataCache.resolvedLinks['c.md'] = { 'b.md': 1 }; f.plugin.linkChanges.add('c.md'); f.plugin.onLinksResolved();
+  const r2 = f.plugin.linkRanks(); assert.notEqual(r2, r1); assert.ok(r2.has('c.md'));
+  f.plugin.rankCache.at -= 5 * 60000; f.plugin.linkChanges.add('a.md'); f.plugin.onLinksResolved();
+  assert.notEqual(f.plugin.linkRanks(), r2); // old enough
+  f.stop();
+});
+
+test('with a Project chosen, the unified search offers この中を検索, which reads only its notes', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.bodies.set(v.daily.path, '機器の点検予定'); f.bodies.set(v.linked.path, '点検の手順書'); f.bodies.set('bulk/3.md', '点検');
+  const u = new f.UnifiedSearch(f.app, f.plugin);
+  assert.equal(u.getSuggestions('点検').some(r => r.kind === 'scopeBody'), false);
+  f.plugin.setScope(v.project.path);
+  const rows = u.getSuggestions('点検'); assert.equal(rows[0].kind, 'body'); assert.equal(rows[1].kind, 'scopeBody');
+  const el = f.doc.createElement('div'); u.renderSuggestion(rows[1], el);
+  assert.match(labelText(el), /この中を検索：「点検」/); assert.match(labelText(el), /「機器整備」とつながるノート/);
+  u.selectSuggestion(rows[1], {}); const s = f.modals.at(-1); assert.ok(s instanceof f.BodySearch); assert.equal(s.scopePath, v.project.path);
+  f.calls.reads.length = 0; s.getSuggestions('点検'); for (let i = 0; i < 6; i++) await settle();
+  assert.deepEqual([...new Set(f.calls.reads)].sort(), [v.daily.path, v.linked.path, v.project.path].sort());
+  const hits = s.getSuggestions('点検'); assert.deepEqual([...hits.slice(1).map(r => r.file.path)].sort(), [v.daily.path, v.linked.path].sort());
+  assert.match(hits[0].text, /「機器整備」の中で本文に含むノート 2件/);
+  s.onClose(); f.stop();
+});
+
+test('the list position comes back when the Home view is built again; the Home button goes to the top', async () => {
+  const f = await fixture(10000); f.refresh();
+  f.parent.scrollTop = 1600; f.parent.emit('scroll'); f.doc.flush(); assert.equal(f.view.limit, 48);
+  for (const card of f.view.cards.values()) card.el.rect = { top: -400, bottom: -200 };
+  f.view.cards.get('30.md').el.rect = { top: -150, bottom: 50 };
+  f.clock.tick(150); // the position is noted once scrolling stops
+  f.view.cards.get('31.md').el.emit('click', { button: 0 }); // opening a note notes it too
+  f.view.unload();
+  const build = () => { const parent = f.doc.createElement('div'); parent.rect.bottom = 600; f.leaf.view.containerEl.append(parent);
+    const view = new f.LiteCards({ app: f.app }, parent, f.plugin); view.data = f.data; view.onDataUpdated(); f.doc.flush(); return { view, parent }; };
+  let next = build();
+  assert.equal(next.view.limit, 48); assert.equal(next.parent.scrollTop, 150); // card 30 is back 150 px above the top
+  // Without that card (the list changed), the old scroll position.
+  next.parent.scrollTop = 1600; next.parent.emit('scroll'); f.clock.tick(150); next.view.unload();
+  const position = f.plugin.homePositions.get(f.leaf); position.path = 'gone.md';
+  next = build(); assert.equal(next.parent.scrollTop, 1600);
+  // A different Project/Area does not reuse it.
+  next.view.unload(); f.plugin.scope = '0.md'; const other = build(); assert.equal(other.parent.scrollTop, 0); other.view.unload();
+  f.plugin.scope = null; next = build(); assert.equal(next.parent.scrollTop, 1600);
+  // The Home button starts at the top.
+  next.view.goFirst(); assert.equal(f.plugin.homePositions.has(f.leaf), false); assert.equal(next.parent.scrollTop, 0);
+  next.view.unload(); f.plugin.onunload();
+});
+test('restored scroll position from the remembered card', () => {
+  const { restoredScrollTop } = load();
+  assert.equal(restoredScrollTop({ scrollTop: 0, anchorTop: 3000, offset: -50, fallback: 2000 }), 3050);
+  assert.equal(restoredScrollTop({ scrollTop: 100, anchorTop: 20, offset: 40, fallback: 9 }), 80);
+  assert.equal(restoredScrollTop({ scrollTop: 0, anchorTop: NaN, offset: 10, fallback: 2000 }), 2000);
+  assert.equal(restoredScrollTop({ scrollTop: 0, anchorTop: 0, offset: 500, fallback: 0 }), 0);
 });
