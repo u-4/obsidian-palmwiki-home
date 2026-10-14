@@ -14,7 +14,7 @@ Obsidian 用の軽いホーム画面プラグインです。Bases のカード�
 - Search (the search icon, `Open search`, Cmd+G) opens the unified search. `Open page switcher` runs the command you choose (e.g. Another Quick Switcher), or Obsidian's quick switcher.
 - Projects and Areas (1.1): notes tagged `Projects` or `Areas` in frontmatter can be picked from a searchable list, and the home then shows that note and the notes linked to or from it. Favorite ones stay as chips above the cards.
 - Unified search: one screen for recent notes, title/alias matches and new-note creation (Shift+Enter). Its first row, 「本文を検索」, opens the body search (1.13): the notes containing every word, by default ordered with notes that link to the word (`[[語]]`) first, then by link rank (PageRank over Obsidian's links, empty pages included; daily notes count less and chosen folders sort lower), or newest first, or by name. Hiragana/katakana and full/half width are folded, and the words are highlighted in the note text (result excerpts and previews), not in titles. Both screens show a preview of the selected note on wide screens; phones get no preview pane. No other search plugin is needed (Omnisearch was dropped in 1.14 because its in-memory index made Obsidian restart on the iPhone).
-- Filters (1.2): include or hide daily notes; within a Project/Area, add unlinked mentions of its name and search the bodies of just those notes. Bases' toolbar search and filters narrow the cards as usual.
+- Filters (1.2): include or hide daily notes; within a Project/Area, add unlinked mentions of its name and search the bodies of just those notes. Bases' toolbar search and filters narrow the cards as usual. With a Project/Area chosen, the unified search also offers 「この中を検索」, the body search over just its notes (1.16).
 - No own search index, no persistent body cache, no network access.
 
 ## A short pause between Home and a note
@@ -36,7 +36,7 @@ npm run deploy      # owner's vault; backs up the installed files and data.json 
 
 On touch devices, tap a Home card to open its note, or hold it for 0.5 seconds to read a preview. Moving your finger cancels the hold. The preview has Open note and Close buttons. Mouse hover previews retain their existing settings.
 
-Known limitations: list position is not restored after the view is recreated.
+Going back to Home in the same tab puts the list where it was (1.16, kept in memory until Obsidian closes); the Home button starts at the top.
 
 ## License
 
