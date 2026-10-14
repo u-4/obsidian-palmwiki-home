@@ -38,6 +38,11 @@ const MAX_WORD_SUGGESTIONS = 5;
 const MAX_FAVORITES = 100;
 const MAX_SCAN_BYTES = 2 * 1024 * 1024;
 const SCAN_WORKERS = 4;
+// Attachments arriving by sync are handled together, at most twice a second.
+const ATTACHMENT_BATCH_MS = 500;
+// After the links change, the link rank is worked out again only when it is this old, or when the
+// number of links changed.
+const RANK_MAX_AGE = 5 * 60 * 1000;
 // PARA-PKM marks Project and Area notes with these frontmatter tags.
 const SCOPE_KINDS = Object.freeze({ Projects: 'プロジェクト', Areas: 'エリア' });
 const DONE_STATUSES = new Set(['completed', 'done', 'archived', 'cancelled', 'canceled', '完了', '終了', '中止']);
@@ -464,18 +469,60 @@ function tagKey(text) {
   return String(text).normalize('NFKC').toLowerCase().replace(/[\s_-]+/g, '');
 }
 
+function scopeTagNames(scopePath, aliases) {
+  return new Set([noteTitle(scopePath), ...aliases].map(tagKey).filter(Boolean));
+}
+
+function hasScopeTag(cache, names) {
+  if (!cache) return false;
+  const tags = typeof getAllTags === 'function' ? getAllTags(cache) || []
+    : [...(cache.tags || []).map(t => t.tag), ...[cache.frontmatter?.tags, cache.frontmatter?.tag].flat().filter(t => typeof t === 'string')];
+  return tags.some(tag => String(tag).replace(/^#/, '').split('/').some(part => names.has(tagKey(part))));
+}
+
 function scopeTagged(app, scopePath, aliases) {
-  const names = new Set([noteTitle(scopePath), ...aliases].map(tagKey).filter(Boolean));
+  const names = scopeTagNames(scopePath, aliases);
   const tagged = new Set();
   for (const file of app.vault.getMarkdownFiles()) {
-    const cache = app.metadataCache.getFileCache(file);
-    if (!cache) continue;
-    const tags = typeof getAllTags === 'function' ? getAllTags(cache) || []
-      : [...(cache.tags || []).map(t => t.tag), ...[cache.frontmatter?.tags, cache.frontmatter?.tag].flat().filter(t => typeof t === 'string')];
-    if (tags.some(tag => String(tag).replace(/^#/, '').split('/').some(part => names.has(tagKey(part))))) tagged.add(file.path);
+    if (hasScopeTag(app.metadataCache.getFileCache(file), names)) tagged.add(file.path);
   }
   tagged.delete(scopePath);
   return tagged;
+}
+
+// Whether notes that changed (edited, created, renamed or deleted; checked once Obsidian has
+// resolved their links) can change a Project/Area's notes: the Project note itself, a note that was
+// in it, a note that links to it or that it links to now, a note with its tag, or a note with the
+// same name (links may now go there instead).
+function scopeAffected(app, scope, changed) {
+  const links = app.metadataCache.resolvedLinks || {};
+  const has = (targets, key) => !!targets && Object.prototype.hasOwnProperty.call(targets, key);
+  const name = noteTitle(scope.path).toLowerCase();
+  for (const path of changed) {
+    if (path === scope.path || scope.members.has(path) || scope.tagged.has(path)) return true;
+    if (has(links[path], scope.path) || has(links[scope.path], path)) return true;
+    if (noteTitle(path).toLowerCase() === name) return true;
+    const file = app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile && hasScopeTag(app.metadataCache.getFileCache(file), scope.names)) return true;
+  }
+  return false;
+}
+
+// How many notes and links the link graph has; counted without copying it.
+function linkGraphSize(resolvedLinks, unresolvedLinks) {
+  let size = 0;
+  for (const links of [resolvedLinks, unresolvedLinks]) {
+    for (const source in links || {}) { size++; for (const target in links[source] || {}) size++; }
+  }
+  return size;
+}
+
+// Whether kept link ranks can still be used: nothing changed since, or the changes are recent
+// (under RANK_MAX_AGE) and left the number of notes and links the same.
+function ranksFresh(cache, { dirty, now, size }, maxAge = RANK_MAX_AGE) {
+  if (!cache) return false;
+  if (!dirty) return true;
+  return now - cache.at < maxAge && size === cache.size;
 }
 
 function snapshotKey(file) {
@@ -498,6 +545,30 @@ function firstImage(app, file) {
     return image;
   }
   return null;
+}
+
+// File names (with and without extension, lower case) of attachments that changed, for embedsMayUse.
+function attachmentNames(paths) {
+  const names = new Set();
+  for (const path of paths) {
+    if (!path) continue;
+    const name = String(path).split('/').pop().normalize('NFC').toLowerCase();
+    names.add(name);
+    names.add(name.replace(/\.[^.]*$/, ''));
+  }
+  return names;
+}
+
+// Whether a note's embeds (as firstImage reads them) may point at one of those attachments: the
+// last part of the link names one of them. A quick check by name only; firstImage decides.
+function embedsMayUse(embeds, names) {
+  for (const embed of (embeds || []).slice(0, 100)) {
+    let link = String(embed.link || '').split('|')[0].split('#')[0].trim();
+    try { link = decodeURIComponent(link); } catch { continue; }
+    const name = link.split('/').pop().normalize('NFC').toLowerCase();
+    if (name && names.has(name)) return true;
+  }
+  return false;
 }
 
 // 2hop-links-plus copies this into src/cardPreview.ts; tell its session when it changes.
@@ -623,6 +694,11 @@ class PalmWikiHome extends Plugin {
       : [];
     this.scope = null; // In memory only: Home and back navigation keep it; restart starts at すべて.
     this.scopeCache = null;
+    this.rankCache = null; // { ranks, at, size }
+    this.rankDirty = false;
+    this.linkChanges = new Set(); // notes changed since Obsidian last resolved the links
+    this.attachmentChanges = new Set();
+    this.attachmentTimer = null;
     this.previews = new PreviewStore(this.app);
     this.disposed = false;
     this.bars = new Map();
@@ -660,24 +736,28 @@ class PalmWikiHome extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       if (this.disposed) return;
       for (const name of ['layout-change', 'active-leaf-change', 'file-open', 'window-open', 'window-close']) {
-        this.registerEvent(this.app.workspace.on(name, () => this.scheduleBars()));
+        this.registerEvent(this.app.workspace.on(name, () => {
+          this.scheduleBars();
+          // A Home that was hidden catches up once it shows again.
+          for (const view of this.cardViews) if (view.stale || view.imagesStale) view.scheduleViewport();
+        }));
       }
       this.registerEvent(this.app.metadataCache.on('changed', file => {
+        this.linkChanges.add(file.path);
         for (const view of this.cardViews) view.refreshImages(file.path);
       }));
       for (const name of ['create', 'modify', 'delete', 'rename']) {
         this.registerEvent(this.app.vault.on(name, (file, oldPath) => {
-          if (!(file instanceof TFile) || file.extension === 'md') return;
-          for (const view of this.cardViews) view.refreshImages(null, file.path, oldPath);
+          if (!(file instanceof TFile)) return;
+          if (file.extension === 'md') {
+            if (name !== 'modify') { this.linkChanges.add(file.path); if (oldPath) this.linkChanges.add(oldPath); }
+            return;
+          }
+          this.queueAttachment(file.path, oldPath);
         }));
       }
       // Scope membership follows links; favorites follow renamed or deleted notes.
-      this.registerEvent(this.app.metadataCache.on('resolved', () => {
-        this.rankCache = null;
-        if (!this.scope) return;
-        this.scopeCache = null;
-        for (const view of this.cardViews) view.onDataUpdated();
-      }));
+      this.registerEvent(this.app.metadataCache.on('resolved', () => this.onLinksResolved()));
       this.registerEvent(this.app.vault.on('rename', (file, oldPath) => this.followRename(file, oldPath)));
       this.registerEvent(this.app.vault.on('delete', file => this.followDelete(file)));
       this.syncBars();
@@ -931,11 +1011,42 @@ class PalmWikiHome extends Plugin {
     return this.app.vault.create(path, defaultBase());
   }
 
+  // Attachments that changed (often hundreds while syncing) are gathered and handled together.
+  queueAttachment(path, oldPath) {
+    if (this.disposed) return;
+    this.attachmentChanges.add(path);
+    if (oldPath) this.attachmentChanges.add(oldPath);
+    if (this.attachmentTimer === null) this.attachmentTimer = setTimeout(() => this.flushAttachments(), ATTACHMENT_BATCH_MS);
+  }
+
+  flushAttachments() {
+    if (this.attachmentTimer !== null) clearTimeout(this.attachmentTimer);
+    this.attachmentTimer = null;
+    const paths = this.attachmentChanges;
+    this.attachmentChanges = new Set();
+    if (this.disposed || !paths.size) return;
+    for (const view of this.cardViews) view.refreshAttachments(paths);
+  }
+
+  // Obsidian has resolved the links again. The link rank is only marked as outdated (worked out again
+  // when a body search needs it and it is old enough, see linkRanks()); a Project/Area's notes are
+  // worked out again only when a changed note can change them.
+  onLinksResolved() {
+    const changed = this.linkChanges;
+    this.linkChanges = new Set();
+    if (changed.size) this.rankDirty = true;
+    if (this.disposed || !this.scope || !changed.size) return;
+    if (this.scopeCache?.path === this.scope && !scopeAffected(this.app, this.scopeCache, changed)) return;
+    this.scopeCache = null;
+    for (const view of this.cardViews) view.onDataUpdated();
+  }
+
   currentScope() {
     if (!this.scope) return null;
     if (this.scopeCache?.path !== this.scope) {
+      const aliases = this.aliasesOf(this.scope);
       this.scopeCache = { path: this.scope, members: scopeMembers(this.app, this.scope),
-        tagged: scopeTagged(this.app, this.scope, this.aliasesOf(this.scope)) };
+        tagged: scopeTagged(this.app, this.scope, aliases), names: scopeTagNames(this.scope, aliases) };
     }
     return this.scopeCache;
   }
@@ -1003,19 +1114,25 @@ class PalmWikiHome extends Plugin {
     new UnifiedSearch(this.app, this).open();
   }
 
-  // Link ranks are worked out when a body search needs them and kept until the links change.
+  // Link ranks are worked out when a body search needs them. After the links change they are kept
+  // for up to RANK_MAX_AGE while the number of notes and links stays the same (an edit or a sync
+  // rarely moves the order much), and worked out again after that.
   linkRanks() {
-    if (!this.rankCache) {
+    const { resolvedLinks, unresolvedLinks } = this.app.metadataCache;
+    const now = Date.now();
+    const size = this.rankCache && this.rankDirty ? linkGraphSize(resolvedLinks, unresolvedLinks) : this.rankCache?.size;
+    if (!ranksFresh(this.rankCache, { dirty: this.rankDirty, now, size })) {
       const daily = this.settings.rankWeakDaily ? dailyFolder(this.app) : null;
       const down = this.settings.rankDownFolders;
-      const ranks = linkRanks(this.app.metadataCache.resolvedLinks, this.app.metadataCache.unresolvedLinks, {
+      const ranks = linkRanks(resolvedLinks, unresolvedLinks, {
         weakSources: path => !!daily && path.startsWith(daily),
       });
       // Notes in the folders set to sort lower keep a tenth of their rank.
       if (down.length) for (const [path, rank] of ranks) if (inFolders(path, down)) ranks.set(path, rank / 10);
-      this.rankCache = ranks;
+      this.rankCache = { ranks, at: now, size: size ?? linkGraphSize(resolvedLinks, unresolvedLinks) };
+      this.rankDirty = false;
     }
-    return this.rankCache;
+    return this.rankCache.ranks;
   }
 
   async createNote(name) {
@@ -1056,6 +1173,7 @@ class PalmWikiHome extends Plugin {
   onunload() {
     this.disposed = true;
     if (this.syncTimer !== null) clearTimeout(this.syncTimer);
+    if (this.attachmentTimer !== null) clearTimeout(this.attachmentTimer);
     for (const record of this.bars?.values() || []) { record.observer?.disconnect(); record.resize?.disconnect(); record.bar.remove(); }
     this.bars?.clear();
     for (const view of [...(this.cardViews || [])]) view.dispose();
@@ -1082,6 +1200,8 @@ class LiteCards extends BasesView {
     this.viewportFrame = null;
     this.moreFrame = null;
     this.disposed = false;
+    this.stale = false; // data arrived while hidden; worked out when shown again
+    this.imagesStale = false; // attachments changed while hidden
     this.lastScrollTop = parent.scrollTop;
     this.hoverPopover = null; // Lets this view act as the hover parent for card previews.
     const doc = parent.ownerDocument;
@@ -1125,6 +1245,10 @@ class LiteCards extends BasesView {
     }, { passive: true });
     this.registerDomEvent(doc, 'visibilitychange', () => this.scheduleViewport());
     this.registerDomEvent(doc.defaultView, 'resize', () => this.scheduleViewport());
+    // A tab or pane that shows again gets its size back: catch up then.
+    const Resize = doc.defaultView?.ResizeObserver;
+    this.resizeObserver = Resize ? new Resize(() => { if (this.stale || this.imagesStale) this.scheduleViewport(); }) : null;
+    this.resizeObserver?.observe(parent);
     plugin.cardViews.add(this);
     this.register(() => this.dispose());
   }
@@ -1134,17 +1258,21 @@ class LiteCards extends BasesView {
       this.parent.clientHeight > 0 && this.root.getClientRects().length > 0;
   }
 
+  // While the Home is hidden (another tab, the app in the background), updates are only noted and
+  // worked out once it shows again (scheduleViewport).
   onDataUpdated() {
     if (this.disposed || this.renderFrame !== null) return;
     this.renderFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
       this.renderFrame = null;
       if (this.disposed) return;
+      if (!this.visible()) { this.stale = true; return; }
       this.refreshWindow();
     });
   }
 
   refreshWindow() {
     if (this.disposed) return;
+    this.stale = false;
     this.ensureScans();
     const window = cardWindow(this.data, this.limit, this.currentFilter());
     this.files = window.files; this.total = window.total;
@@ -1303,7 +1431,7 @@ class LiteCards extends BasesView {
   goFirst() {
     this.limit = INITIAL_CARDS;
     this.parent.scrollTop = 0; this.lastScrollTop = 0;
-    this.render();
+    if (this.stale) this.refreshWindow(); else this.render();
   }
 
   requestMore() {
@@ -1375,6 +1503,8 @@ class LiteCards extends BasesView {
     this.viewportFrame = this.root.ownerDocument.defaultView.requestAnimationFrame(() => {
       this.viewportFrame = null;
       const visible = this.visible();
+      if (visible && this.stale) { this.refreshWindow(); return; } // it schedules this again
+      if (visible) this.imagesStale = false;
       const bounds = this.parent.getBoundingClientRect();
       for (const card of this.cards.values()) {
         const rect = card.el.getBoundingClientRect();
@@ -1499,12 +1629,24 @@ class LiteCards extends BasesView {
     this.scheduleImages();
   }
 
+  // One note's embeds changed (notePath), or every card (the image setting).
   refreshImages(notePath, attachmentPath, oldPath) {
     if (this.disposed) return;
+    if (attachmentPath) { this.refreshAttachments(new Set([attachmentPath, oldPath].filter(Boolean))); return; }
+    if (notePath) { const card = this.cards.get(notePath); if (card?.near) this.updateImage(card); return; }
+    for (const card of this.cards.values()) if (card.near) this.updateImage(card);
+  }
+
+  // Attachments were added, changed, renamed or removed: only cards showing one of them, or whose
+  // embeds name one of them, look for their first image again. A hidden Home waits until it shows
+  // (its cards look again when they come into view).
+  refreshAttachments(paths) {
+    if (this.disposed || !paths.size) return;
+    if (!this.visible()) { this.imagesStale = true; return; }
+    const names = attachmentNames(paths);
     for (const card of this.cards.values()) {
-      if (notePath && notePath !== card.path) continue;
-      if (attachmentPath && card.imagePath && card.imagePath !== attachmentPath && card.imagePath !== oldPath) continue;
-      if (card.near) this.updateImage(card);
+      if (!card.near) continue;
+      if ((card.imagePath && paths.has(card.imagePath)) || embedsMayUse(this.app.metadataCache.getFileCache(card.file)?.embeds, names)) this.updateImage(card);
     }
   }
 
@@ -1574,6 +1716,7 @@ class LiteCards extends BasesView {
     if (this.queryTimer !== null) clearTimeout(this.queryTimer);
     this.scans = { mentions: null, body: null };
     this.observer?.disconnect();
+    this.resizeObserver?.disconnect();
     this.imageQueue.clear();
     for (const card of this.cards.values()) { card.disposePress?.(); this.releaseImage(card); }
     this.touchPreview?.close();

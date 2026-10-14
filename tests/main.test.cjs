@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { attachmentNames, embedsMayUse, scopeAffected, linkGraphSize, ranksFresh, quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -1075,4 +1075,83 @@ test('paste: after Obsidian pastes into a quote line, the added lines join the q
   ed.cursor = { line: 3, ch: 3 }; // where Obsidian leaves the cursor
   clock.tick(0);
   assert.deepEqual([...ed.lines], ['> 一行目', '> 二行目', '>', '> 三行目', '後ろの段落']);
+});
+
+// 1.16.0: lighter while syncing, faster body search, この中を検索, list position kept
+test('attachments arriving by sync are handled together, and only cards that may show them look again', async () => {
+  const f = await fixture(24);
+  f.files.set('a.png', new TFile('a.png')); f.metadata.set('0.md', { embeds: [{ link: 'a.png' }] });
+  f.metadata.set('1.md', { embeds: [{ link: 'img/%E5%BE%8C.png' }] }); // not synced yet
+  let lookups = 0; const resolve = f.app.metadataCache.getFirstLinkpathDest;
+  f.app.metadataCache.getFirstLinkpathDest = (...args) => { lookups++; return resolve(...args); };
+  f.refresh(); await f.pump(); assert.ok(f.view.cards.get('0.md').img); assert.equal(f.view.cards.get('1.md').img, null);
+  lookups = 0;
+  for (let i = 0; i < 300; i++) f.plugin.queueAttachment(`sync/${i}.jpg`);
+  f.files.set('img/後.png', new TFile('img/後.png')); f.plugin.queueAttachment('img/後.png');
+  assert.equal(lookups, 0); assert.equal(f.plugin.attachmentTimer !== null, true);
+  f.clock.tick(499); assert.equal(lookups, 0);
+  f.clock.tick(500); assert.equal(lookups, 1); // only card 1, whose embed names the new file
+  await f.pump(); assert.ok(f.view.cards.get('1.md').img); assert.equal(f.plugin.attachmentChanges.size, 0);
+  // A changed image is looked at again by the card showing it; a rename counts under both names.
+  lookups = 0; f.plugin.queueAttachment('a.png'); f.clock.tick(500); assert.equal(lookups, 1);
+  lookups = 0; f.plugin.queueAttachment('b.png', 'a.png'); f.clock.tick(500); assert.equal(lookups, 1);
+  // A hidden Home waits and catches up when it shows.
+  f.view.root.hidden = true; lookups = 0; f.plugin.queueAttachment('a.png'); f.clock.tick(500);
+  assert.equal(lookups, 0); assert.equal(f.view.imagesStale, true);
+  f.view.root.hidden = false; f.view.scheduleViewport(); f.doc.flush(); assert.ok(lookups >= 1); assert.equal(f.view.imagesStale, false);
+  f.stop();
+});
+test('the quick check by attachment name', () => {
+  const { attachmentNames, embedsMayUse } = load();
+  const names = attachmentNames(['Attachments/Photo 1.PNG', 'x/y.webp']);
+  assert.ok(embedsMayUse([{ link: 'photo 1.png' }], names));
+  assert.ok(embedsMayUse([{ link: 'Attachments/Photo%201.PNG|200' }], names));
+  assert.ok(embedsMayUse([{ link: 'y' }], names)); // no extension
+  assert.equal(embedsMayUse([{ link: 'z.png' }, { link: 'https://host/q.png' }], names), false);
+  assert.equal(embedsMayUse(undefined, names), false);
+  // macOS may keep file names decomposed (NFD); links are usually composed.
+  assert.ok(embedsMayUse([{ link: 'ガ.png' }], attachmentNames(['ガ.png'])));
+});
+
+test('link changes redo a Project/Area only when a changed note can change it; a hidden Home waits', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.plugin.setScope(v.project.path); f.doc.flush(); const first = f.plugin.scopeCache; const count = f.calls.enumerations;
+  f.plugin.linkChanges.add('bulk/5.md'); f.plugin.onLinksResolved(); f.doc.flush();
+  assert.equal(f.plugin.scopeCache, first); assert.equal(f.calls.enumerations, count);
+  // A note that now links to the Project
+  f.app.metadataCache.resolvedLinks['bulk/6.md'] = { [v.project.path]: 1 };
+  f.plugin.linkChanges.add('bulk/6.md'); f.plugin.onLinksResolved(); f.doc.flush();
+  assert.notEqual(f.plugin.scopeCache, first); assert.ok(f.view.files.some(file => file.path === 'bulk/6.md'));
+  // A note that leaves it (it was a member), a note given its tag, the Project note itself
+  const { scopeAffected } = f; const scope = f.plugin.currentScope();
+  assert.ok(scopeAffected(f.app, scope, ['bulk/6.md'])); assert.ok(scopeAffected(f.app, scope, [v.project.path]));
+  f.metadata.set('bulk/7.md', { tags: [{ tag: '#機器整備' }] }); assert.ok(scopeAffected(f.app, scope, ['bulk/7.md']));
+  assert.ok(scopeAffected(f.app, scope, ['別の場所/機器整備.md'])); // same name: links may go there now
+  assert.equal(scopeAffected(f.app, scope, ['bulk/8.md']), false);
+  // While hidden, the update waits; it is worked out once the Home shows again.
+  f.view.root.hidden = true; delete f.app.metadataCache.resolvedLinks['bulk/6.md'];
+  f.plugin.linkChanges.add('bulk/6.md'); f.plugin.onLinksResolved(); f.doc.flush();
+  assert.equal(f.view.stale, true); assert.ok(f.view.files.some(file => file.path === 'bulk/6.md'));
+  f.view.root.hidden = false; f.view.scheduleViewport(); f.doc.flush();
+  assert.equal(f.view.stale, false); assert.equal(f.view.files.some(file => file.path === 'bulk/6.md'), false);
+  f.stop();
+});
+test('link ranks are kept after link changes while recent and the same size', async () => {
+  const { ranksFresh, linkGraphSize } = load();
+  assert.equal(linkGraphSize({ 'a.md': { 'b.md': 1, 'c.md': 1 }, 'b.md': {} }, { 'a.md': { x: 1 } }), 6); // 3 + 1 sources, 2 + 1 links
+  const cache = { at: 1000, size: 5 };
+  assert.equal(ranksFresh(null, { dirty: false, now: 0, size: 5 }), false);
+  assert.equal(ranksFresh(cache, { dirty: false, now: 1e12, size: 9 }), true);
+  assert.equal(ranksFresh(cache, { dirty: true, now: 1000 + 60000, size: 5 }), true);
+  assert.equal(ranksFresh(cache, { dirty: true, now: 1000 + 60000, size: 6 }), false);
+  assert.equal(ranksFresh(cache, { dirty: true, now: 1000 + 5 * 60000, size: 5 }), false);
+  const f = await fixture(0);
+  f.app.metadataCache.resolvedLinks = { 'a.md': { 'b.md': 1 }, 'b.md': {} }; f.app.metadataCache.unresolvedLinks = {};
+  const r1 = f.plugin.linkRanks(); f.plugin.linkChanges.add('a.md'); f.plugin.onLinksResolved();
+  assert.equal(f.plugin.linkRanks(), r1); // same size, just now
+  f.app.metadataCache.resolvedLinks['c.md'] = { 'b.md': 1 }; f.plugin.linkChanges.add('c.md'); f.plugin.onLinksResolved();
+  const r2 = f.plugin.linkRanks(); assert.notEqual(r2, r1); assert.ok(r2.has('c.md'));
+  f.plugin.rankCache.at -= 5 * 60000; f.plugin.linkChanges.add('a.md'); f.plugin.onLinksResolved();
+  assert.notEqual(f.plugin.linkRanks(), r2); // old enough
+  f.stop();
 });
