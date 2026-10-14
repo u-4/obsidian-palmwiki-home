@@ -43,6 +43,8 @@ const ATTACHMENT_BATCH_MS = 500;
 // After the links change, the link rank is worked out again only when it is this old, or when the
 // number of links changed.
 const RANK_MAX_AGE = 5 * 60 * 1000;
+// The body search starts reading once typing pauses this long.
+const BODY_SEARCH_DELAY = 300;
 // PARA-PKM marks Project and Area notes with these frontmatter tags.
 const SCOPE_KINDS = Object.freeze({ Projects: 'プロジェクト', Areas: 'エリア' });
 const DONE_STATUSES = new Set(['completed', 'done', 'archived', 'cancelled', 'canceled', '完了', '終了', '中止']);
@@ -219,6 +221,106 @@ function normalizeSearch(text) {
     .replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
 }
 
+// A quick test on the raw note text, before normalizeSearch, that never drops a note the full test
+// would keep. For a search character, every raw character that can turn into it is listed from the
+// runtime's own Unicode tables, once per session (in small steps, so nothing waits on it):
+// - fold: raw characters whose normalized form, or the normalized form of a part of their
+//   decomposition, contains it (\uff76, \u30ab, \u30ac and \u32d5 for \u304b; A, \uff21 and \u00e1 for a);
+// - parts: raw characters whose decomposition contains it (\uff9c and \u30f7 for \u30ef), for characters that
+//   normalization puts together from a base and a mark that follows (\uff9c\uff9e \u2192 \u30f7).
+// Until the lists are ready, every note gets the full test.
+const FOLD_LAST = 0x2ffff; // beyond this there are no characters that normalize to others
+const FOLD_STEP = 0x2000;
+let foldTable = null;
+let foldBuild = null;
+
+function addFoldSources(table, from, to) {
+  for (let cp = from; cp < to; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const ch = String.fromCodePoint(cp);
+    const parts = ch.normalize('NFKD');
+    if (parts === ch && ch.toLowerCase() === ch && !(cp >= 0x30a1 && cp <= 0x30f6)) continue;
+    const outs = new Set(normalizeSearch(ch));
+    for (const part of parts) for (const c of normalizeSearch(part)) outs.add(c);
+    outs.delete(ch);
+    for (const c of outs) { const list = table.fold.get(c); if (list) list.push(ch); else table.fold.set(c, [ch]); }
+    if (parts !== ch) {
+      for (const part of new Set(parts)) {
+        if (part === ch) continue;
+        const list = table.parts.get(part); if (list) list.push(ch); else table.parts.set(part, [ch]);
+      }
+    }
+  }
+}
+
+function newFoldTable() { return { fold: new Map(), parts: new Map(), sources: new Map() }; }
+
+// The lists at once (tests), or null while they are being made in the background.
+function searchFoldTable({ now = false } = {}) {
+  if (foldTable) return foldTable;
+  if (now) {
+    const table = newFoldTable();
+    addFoldSources(table, 0, FOLD_LAST + 1);
+    foldTable = table; foldBuild = null;
+    return foldTable;
+  }
+  if (!foldBuild) {
+    const table = newFoldTable();
+    let cp = 0;
+    const step = () => {
+      if (foldTable) return;
+      const end = Math.min(cp + FOLD_STEP, FOLD_LAST + 1);
+      addFoldSources(table, cp, end);
+      cp = end;
+      if (cp > FOLD_LAST) { foldTable = table; foldBuild = null; } else foldBuild = setTimeout(step, 0);
+    };
+    foldBuild = setTimeout(step, 0);
+  }
+  return null;
+}
+
+// Every raw character that can become `ch` in normalized text.
+function foldSources(table, ch) {
+  const known = table.sources.get(ch);
+  if (known) return known;
+  const chars = new Set([ch, ...(table.fold.get(ch) || [])]);
+  for (const x of [...chars]) {
+    const base = x.normalize('NFD');
+    if (base === x) continue;
+    const starter = String.fromCodePoint(base.codePointAt(0));
+    chars.add(starter);
+    for (const raw of table.parts.get(starter) || []) chars.add(raw);
+  }
+  table.sources.set(ch, chars);
+  return chars;
+}
+
+// For each normalized search word, the raw-text test of its most telling character, or null while
+// the lists are not ready. A word with no usable character (only marks) has no test. Final sigma
+// (\u03c2, from \u03a3 at a word's end) depends on context, so it is never used.
+function searchPretest(terms, table = searchFoldTable()) {
+  if (!table) return null;
+  const tests = [];
+  for (const term of terms) {
+    let best = null;
+    for (const ch of new Set(term)) {
+      if (ch === '\u03c2' || /^\p{M}$/u.test(ch)) continue;
+      const chars = foldSources(table, ch);
+      if (!best || chars.size < best.size) best = chars;
+    }
+    if (!best) continue;
+    const cls = [...best].map(c => /[\\\]\[^-]/.test(c) ? '\\' + c : c).join('');
+    tests.push(new RegExp(`[${cls}]`, 'u'));
+  }
+  return text => tests.every(re => re.test(text));
+}
+
+// Whether every note holding all the new words also holds all the earlier ones (each earlier word
+// is inside one of the new words), so the new search can look only at the earlier hits.
+function narrowsQuery(previous, terms) {
+  return previous.length > 0 && terms.length > 0 && previous.every(old => terms.some(term => term.includes(old)));
+}
+
 // Where the search words are in a text, as ranges of the original text. Each character is normalized
 // on its own (as normalizeSearch does for the whole), so a range maps back to the text as written:
 // 「セイビ」 is found and marked for the word 「せいび」.
@@ -287,6 +389,12 @@ function searchableNotes(app, excludeFolders) {
     notes.push({ file, title: file.basename, titleKey: normalizeSearch(file.basename), aliases, aliasKeys: aliases.map(normalizeSearch) });
   }
   return notes;
+}
+
+// The notes the body search reads: the same as searchableNotes, without the names.
+function searchableFiles(app, excludeFolders) {
+  const ignored = typeof app.metadataCache.isUserIgnored === 'function' ? p => app.metadataCache.isUserIgnored(p) : () => false;
+  return app.vault.getMarkdownFiles().filter(file => !inFolders(file.path, excludeFolders) && !ignored(file.path));
 }
 
 // Like Another Quick Switcher's Recent search: every space-separated word must be in the
@@ -1049,6 +1157,12 @@ class PalmWikiHome extends Plugin {
         tagged: scopeTagged(this.app, this.scope, aliases), names: scopeTagNames(this.scope, aliases) };
     }
     return this.scopeCache;
+  }
+
+  // The notes of the chosen Project/Area for the body search: linked either way, or tagged with its name.
+  scopePaths(path) {
+    const scope = this.scope === path ? this.currentScope() : { members: scopeMembers(this.app, path), tagged: scopeTagged(this.app, path, this.aliasesOf(path)) };
+    return new Set([...scope.members, ...scope.tagged]);
   }
 
   aliasesOf(path) {
@@ -2467,6 +2581,8 @@ class CardPopover {
 const SEARCH_SOURCES = [
   (search, query) => query ? [] : search.recent().map(file => ({ kind: 'note', file, recent: true })),
   (search, query) => query ? [{ kind: 'body', text: query }] : [],
+  // With a Project/Area chosen on the Home: the same, within its notes.
+  (search, query) => query && search.plugin.scope ? [{ kind: 'scopeBody', text: query, scope: search.plugin.scope }] : [],
   (search, query) => query ? matchNotes(search.notes(), query, search.recentPaths()).map(note => ({ kind: 'note', file: note.file, note })) : [],
   (search, query) => {
     const last = query.split(/\s+/).pop();
@@ -2533,6 +2649,7 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     const row = el ? this.rows.get(el) : null;
     if (row?.kind === 'note') return { file: row.file };
     return { hint: row?.kind === 'body' ? 'Enter で本文を検索します'
+      : row?.kind === 'scopeBody' ? `選ぶと「${noteTitle(row.scope)}」とつながるノートの本文を検索します`
       : row?.kind === 'create' ? 'Enter でこの名前のノートを作ります'
       : row?.kind === 'word' ? '選ぶと入力に反映します' : '' };
   }
@@ -2575,6 +2692,9 @@ class UnifiedSearch extends (SuggestModal || class {}) {
     } else if (row.kind === 'body') {
       title.textContent = `本文を検索：「${row.text}」`;
       meta.textContent = { rank: 'リンクの多いノートから順に並べる', modified: '更新が新しい順に並べる', name: '名前順に並べる' }[this.plugin.settings.bodySearchOrder];
+    } else if (row.kind === 'scopeBody') {
+      title.textContent = `この中を検索：「${row.text}」`;
+      meta.textContent = `「${noteTitle(row.scope)}」とつながるノートの本文から`;
     } else if (row.kind === 'word') {
       title.textContent = `語句の候補：${row.text}`;
       meta.textContent = 'Various Complements（選ぶと入力に反映）';
@@ -2600,8 +2720,8 @@ class UnifiedSearch extends (SuggestModal || class {}) {
   }
 
   onChooseSuggestion(row, evt) {
-    if (row.kind === 'body') {
-      new BodySearch(this.app, this.plugin, row.text).open();
+    if (row.kind === 'body' || row.kind === 'scopeBody') {
+      new BodySearch(this.app, this.plugin, row.text, row.kind === 'scopeBody' ? row.scope : null).open();
       return;
     }
     if (row.kind === 'create') { void this.plugin.createNote(row.text).catch(() => new Notice('ノートを作れませんでした。')); return; }
@@ -2620,17 +2740,24 @@ class UnifiedSearch extends (SuggestModal || class {}) {
 // first or by name instead.
 const BODY_SEARCH_LIMIT = 200;
 class BodySearch extends (SuggestModal || class {}) {
-  constructor(app, plugin, query) {
+  // With scopePath, only that Project/Area's notes are searched (「この中を検索」).
+  constructor(app, plugin, query, scopePath = null) {
     super(app);
     this.plugin = plugin;
     this.initial = query;
+    this.scopePath = scopePath;
     this.scan = null;
+    this.fileList = null;
+    this.pending = null; // words waiting for typing to pause
+    this.startTimer = null;
     this.rows = new WeakMap();
     this.pane = null;
     this.refreshTimer = null;
+    this.drawn = null; // what the list shows: { scan, version }
+    this.statusEl = null;
     this.limit = BODY_SEARCH_LIMIT + 1;
     this.emptyStateText = '本文に含むノートは見つかりませんでした。';
-    this.setPlaceholder?.('本文を検索（リンクの多いノートから順）');
+    this.setPlaceholder?.(`${scopePath ? `「${noteTitle(scopePath)}」の中の` : ''}本文を検索（リンクの多いノートから順）`);
     this.setInstructions?.([
       { command: 'Enter', purpose: 'ノートを開く' },
       { command: 'Cmd+Enter', purpose: '新しいタブで開く' },
@@ -2660,8 +2787,9 @@ class BodySearch extends (SuggestModal || class {}) {
   onClose() {
     super.onClose?.();
     if (this.scan) this.scan.live = false;
-    if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
+    for (const timer of [this.refreshTimer, this.startTimer]) if (timer !== null) clearTimeout(timer);
     this.refreshTimer = null;
+    this.startTimer = null;
     this.pane?.dispose();
     this.pane = null;
   }
@@ -2675,15 +2803,40 @@ class BodySearch extends (SuggestModal || class {}) {
     return top?.kind === 'note' ? { file: top.file } : { hint: '' };
   }
 
-  // Starts reading the notes for a new query; earlier searches stop.
+  // The notes to search, listed once per screen.
+  files() {
+    if (!this.fileList) {
+      let files = searchableFiles(this.app, this.plugin.settings.searchExcludeFolders);
+      if (this.scopePath) {
+        const paths = this.plugin.scopePaths(this.scopePath);
+        files = files.filter(file => paths.has(file.path));
+      }
+      this.fileList = files;
+    }
+    return this.fileList;
+  }
+
+  // Starts reading the notes for a new query; earlier searches stop. When the earlier search finished
+  // and the new words only narrow it (「せいび」 → 「せいび 機器」, 「せい」 → 「せいび」), only its hits are
+  // read again, with notes changed since it started.
   start(query) {
-    if (this.scan) this.scan.live = false;
+    const previous = this.scan;
+    if (previous) previous.live = false;
     const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
-    const files = searchableNotes(this.app, this.plugin.settings.searchExcludeFolders).map(note => note.file);
-    const scan = { query, terms, hits: [], checked: 0, total: files.length, done: !terms.length, live: true, started: Date.now(), ms: 0 };
+    let files = this.files();
+    let narrowed = false;
+    if (previous?.done && narrowsQuery(previous.terms, terms)) {
+      const hits = new Set(previous.hits.map(hit => hit.file.path));
+      files = files.filter(file => hits.has(file.path) || file.stat.mtime >= previous.started);
+      narrowed = true;
+    }
+    const scan = { query, terms, hits: [], version: 0, sorted: null, sortedKey: '', checked: 0, total: files.length, narrowed,
+      done: !terms.length, live: true, started: Date.now(), ms: 0 };
     this.scan = scan;
     if (scan.done) return;
     const ranks = this.plugin.settings.bodySearchOrder === 'rank' ? this.plugin.linkRanks() : new Map();
+    // A note the raw-text test rules out cannot hold the words, so it is not normalized at all.
+    let pretest = searchPretest(terms);
     let next = 0;
     const worker = async () => {
       while (next < files.length && scan.live) {
@@ -2691,11 +2844,15 @@ class BodySearch extends (SuggestModal || class {}) {
         if (file.stat.size <= MAX_SCAN_BYTES) {
           try {
             const text = await this.app.vault.cachedRead(file);
-            const key = normalizeSearch(text);
-            if (terms.every(term => key.includes(term))) {
-              scan.hits.push({ kind: 'note', file, rank: ranks.get(file.path) || 0, snippet: bodySnippet(text, key, terms),
-                tier: linkTier(this.app.metadataCache.getFileCache(file), terms) });
-              this.refreshSoon();
+            if (!pretest) pretest = searchPretest(terms); // ready meanwhile
+            if (!pretest || pretest(text)) {
+              const key = normalizeSearch(text);
+              if (terms.every(term => key.includes(term))) {
+                scan.hits.push({ kind: 'note', file, rank: ranks.get(file.path) || 0, snippet: bodySnippet(text, key, terms),
+                  tier: linkTier(this.app.metadataCache.getFileCache(file), terms) });
+                scan.version++;
+                this.refreshSoon();
+              }
             }
           } catch { /* unreadable notes are skipped */ }
         }
@@ -2711,30 +2868,83 @@ class BodySearch extends (SuggestModal || class {}) {
     });
   }
 
-  // Redraws the list as hits arrive, at most a few times a second.
+  // While typing, the earlier reading stops at once and the new one starts when typing pauses.
+  queueStart(query) {
+    if (this.pending === query) return;
+    if (this.scan && !this.scan.done) this.scan.live = false;
+    if (this.startTimer !== null) clearTimeout(this.startTimer);
+    this.pending = query;
+    this.startTimer = setTimeout(() => {
+      this.startTimer = null;
+      const words = this.pending;
+      this.pending = null;
+      if (words === null) return;
+      this.start(words);
+      this.redraw();
+    }, BODY_SEARCH_DELAY);
+  }
+
+  cancelPending() {
+    if (this.startTimer !== null) clearTimeout(this.startTimer);
+    this.startTimer = null;
+    this.pending = null;
+  }
+
+  redraw() {
+    this.inputEl?.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
+  }
+
+  // Updates the list as hits arrive, at most a few times a second. When only the count moved, the
+  // status line changes in place and the list is not drawn again.
   refreshSoon(delay = 250) {
     if (this.refreshTimer !== null) { if (delay) return; clearTimeout(this.refreshTimer); }
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      if (!this.inputEl || !this.scan?.live) return;
-      this.inputEl.dispatchEvent(new (this.inputEl.ownerDocument?.defaultView?.Event || Event)('input'));
+      const scan = this.scan;
+      if (!this.inputEl || !scan?.live) return;
+      if (this.drawn?.scan === scan && this.drawn.version === scan.version && this.statusEl?.isConnected) {
+        this.statusEl.textContent = this.statusText(scan);
+        return;
+      }
+      this.redraw();
     }, delay);
+  }
+
+  statusText(scan) {
+    if (this.pending !== null) return '入力が止まったら検索します';
+    const n = value => value.toLocaleString('ja-JP');
+    const count = scan.hits.length;
+    if (!scan.done) return `検索中 ${n(scan.checked)} / ${n(scan.total)}（${n(count)}件）`;
+    const where = this.scopePath ? `「${noteTitle(this.scopePath)}」の中で` : '';
+    const searched = scan.narrowed ? `前の結果から ${n(scan.total)}件` : `${n(scan.total)}件`;
+    return `${where}本文に含むノート ${n(count)}件（${searched}を ${(scan.ms / 1000).toFixed(1)}秒で検索）${count > BODY_SEARCH_LIMIT ? `・上位${BODY_SEARCH_LIMIT}件を表示` : ''}`;
+  }
+
+  // Sorted once per change in the hits, not on every redraw.
+  sortedHits(scan) {
+    const order = this.plugin.settings.bodySearchOrder;
+    const key = `${order}:${scan.version}`;
+    if (scan.sorted && scan.sortedKey === key) return scan.sorted;
+    const byTime = (a, b) => b.file.stat.mtime - a.file.stat.mtime;
+    scan.sorted = [...scan.hits].sort(order === 'name' ? (a, b) => a.file.basename.localeCompare(b.file.basename, 'ja')
+      : order === 'modified' ? byTime : (a, b) => b.tier - a.tier || b.rank - a.rank || byTime(a, b));
+    scan.sortedKey = key;
+    return scan.sorted;
   }
 
   getSuggestions(input) {
     const query = input.trim();
-    if (!this.scan || this.scan.query !== query) this.start(query);
     const scan = this.scan;
-    if (!scan.terms.length) return [];
-    const order = this.plugin.settings.bodySearchOrder;
-    const byTime = (a, b) => b.file.stat.mtime - a.file.stat.mtime;
-    const hits = [...scan.hits].sort(order === 'name' ? (a, b) => a.file.basename.localeCompare(b.file.basename, 'ja')
-      : order === 'modified' ? byTime : (a, b) => b.tier - a.tier || b.rank - a.rank || byTime(a, b));
-    const count = hits.length.toLocaleString('ja-JP');
-    const status = scan.done
-      ? `本文に含むノート ${count}件（${scan.total.toLocaleString('ja-JP')}件を ${(scan.ms / 1000).toFixed(1)}秒で検索）${hits.length > BODY_SEARCH_LIMIT ? `・上位${BODY_SEARCH_LIMIT}件を表示` : ''}`
-      : `検索中 ${scan.checked.toLocaleString('ja-JP')} / ${scan.total.toLocaleString('ja-JP')}（${count}件）`;
-    return [{ kind: 'status', text: status }, ...hits.slice(0, BODY_SEARCH_LIMIT)];
+    if (!scan) this.start(query); // the words from the unified search: at once
+    else if (scan.query !== query || (!scan.live && !scan.done)) {
+      if (normalizeSearch(query).trim()) this.queueStart(query);
+      else { this.cancelPending(); this.start(query); }
+    } else this.cancelPending(); // back to the words already searched
+    const current = this.scan;
+    if (!current.terms.length && this.pending === null) return [];
+    this.drawn = { scan: current, version: current.version };
+    const hits = current.terms.length ? this.sortedHits(current) : [];
+    return [{ kind: 'status', text: this.statusText(current) }, ...hits.slice(0, BODY_SEARCH_LIMIT)];
   }
 
   renderSuggestion(row, el) {
@@ -2744,6 +2954,7 @@ class BodySearch extends (SuggestModal || class {}) {
     if (row.kind === 'status') {
       title.className = 'palmwiki-search-meta';
       title.textContent = row.text;
+      this.statusEl = title;
       el.append(title);
       return;
     }

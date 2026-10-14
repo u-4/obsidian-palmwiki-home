@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { attachmentNames, embedsMayUse, scopeAffected, linkGraphSize, ranksFresh, quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { attachmentNames, embedsMayUse, searchFoldTable, searchPretest, narrowsQuery, scopeAffected, linkGraphSize, ranksFresh, quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -933,7 +933,9 @@ test('only matches in note text are highlighted, not in titles', async () => {
 });
 test('a new query stops the earlier body search', async () => {
   const f = await fixture(0); searchVault(f); const s = new f.BodySearch(f.app, f.plugin, '機器');
-  s.getSuggestions('機器'); const first = s.scan; s.getSuggestions('整備'); assert.equal(first.live, false); assert.equal(s.scan.query, '整備');
+  s.getSuggestions('機器'); const first = s.scan; s.getSuggestions('整備'); assert.equal(first.live, false);
+  // The new words are read once typing pauses (0.3 s).
+  assert.equal(s.scan.query, '機器'); f.clock.tick(299); assert.equal(s.scan.query, '機器'); f.clock.tick(300); assert.equal(s.scan.query, '整備');
   s.onClose(); f.stop();
 });
 test('search preview can be turned off in settings', async () => {
@@ -1113,6 +1115,94 @@ test('the quick check by attachment name', () => {
   assert.ok(embedsMayUse([{ link: 'ガ.png' }], attachmentNames(['ガ.png'])));
 });
 
+function freshFold() { const h = load(); h.searchFoldTable({ now: true }); return h; }
+test('the raw-text check never drops a note the full search keeps (kana, width, marks, compatibility characters)', () => {
+  const { searchPretest, normalizeSearch } = freshFold();
+  const full = (text, terms) => { const key = normalizeSearch(text); return terms.every(t => key.includes(t)); };
+  const words = q => normalizeSearch(q).split(/\s+/).filter(Boolean);
+  const cases = [
+    ['機器のｾｲﾋﾞは別', 'せいび'], ['セイビ記録', 'せいび'], ['ｶﾞｲﾄﾞ', 'がいど'], ['ガイド', 'がいど'], ['がいど', 'がいど'],
+    ['ﾜﾞｲﾝ', 'ヷいん'], ['ヷイン', 'ヷいん'], ['ＡＮＡ ＳＦＣ', 'ana sfc'], ['Ana', 'ANA'], ['㍿パナ', '株式会社'], ['①番', '1番'],
+    ['ǅemal', 'dž'], ['été', 'été'], ['ậ', 'ậ'], ['Ậ', 'ậ'], ['ㄱㅏ', '가'], ['각', '각'], ['İstanbul', 'i'],
+    ['⽊曜', '木曜'], ['𝐀𝐁𝐂', 'abc'], ['ﬁle', 'file'], ['Å', 'å'], ['K', 'k'], ['ｳﾞｧｲｵﾘﾝ', 'ゔぁいおりん'], ['ΟΔΟΣ', 'οδος'],
+    ['-ｰ', 'ー'], ['ﾊﾟﾝ', 'ぱん'], ['パン', 'ぱん'],
+  ];
+  for (const [text, query] of cases) {
+    const terms = words(query);
+    assert.equal(full(text, terms) ? searchPretest(terms)(text) : true, true, `${text} / ${query}`);
+  }
+  // Random texts from tricky characters: whenever the full search matches, the quick check passes.
+  const pool = [...'かカｶﾞﾟがガﾜヷワはﾊぱパeEẹ́́̂ạǅAaａＡ①1㍿株式İiΣσς ㄱㅏ각가機⽊木𝐀ﬁfーｰ-うウｳヴゔÅÅKk゙゚'];
+  let seed = 7; const rand = n => { // mulberry32
+    seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return (((t ^ (t >>> 14)) >>> 0) / 4294967296 * n) | 0; };
+  let matched = 0;
+  for (let i = 0; i < 20000; i++) {
+    const text = Array.from({ length: 1 + rand(8) }, () => pool[rand(pool.length)]).join('');
+    const key = normalizeSearch(text);
+    const from = rand(Math.max(1, key.length)), term = key.slice(from, from + 1 + rand(3));
+    const terms = (rand(4) ? term : Array.from({ length: 1 + rand(3) }, () => pool[rand(pool.length)]).join('')).split(/\s+/).map(normalizeSearch).filter(Boolean);
+    if (!terms.length) continue;
+    if (full(text, terms)) { matched++; assert.equal(searchPretest(terms)(text), true, JSON.stringify([text, terms])); }
+  }
+  assert.ok(matched > 5000, String(matched));
+  // And it does rule notes out.
+  assert.equal(searchPretest(words('せいび'))('機器の点検'), false);
+  assert.equal(searchPretest(words('機器 点検'))('機器のメモ'), false);
+});
+test('narrowing: each earlier word is inside one of the new words', () => {
+  const { narrowsQuery } = load();
+  assert.ok(narrowsQuery(['せい'], ['せいび'])); assert.ok(narrowsQuery(['せいび'], ['せいび', '機器'])); assert.ok(narrowsQuery(['a', 'b'], ['ab']));
+  assert.equal(narrowsQuery(['せいび'], ['せい']), false); assert.equal(narrowsQuery(['せいび', '機器'], ['せいび']), false); assert.equal(narrowsQuery([], ['a']), false);
+});
+test('body search: the raw-text check gives the same hits as normalizing every note', async () => {
+  const run = async ready => {
+    const f = await fixture(0); searchVault(f); if (ready) f.searchFoldTable({ now: true });
+    f.bodies.set('00_Inbox/ANA SFC.md', '修行のメモ\n機器のｾｲﾋﾞは別'); f.bodies.set('00_Inbox/カタカナのメモ.md', 'セイビ記録');
+    f.bodies.set('00_Inbox/整備機器リスト.md', '一覧'); f.bodies.set('00_Inbox/R7機器整備.md', 'ぜいび'); // ぜいび: not a hit
+    const s = new f.BodySearch(f.app, f.plugin, 'セイビ'); s.getSuggestions('セイビ'); for (let i = 0; i < 6; i++) await settle();
+    const rows = s.getSuggestions('セイビ'); s.onClose(); f.stop();
+    return [...rows.slice(1).map(r => [r.file.basename, r.snippet])];
+  };
+  const quick = await run(true), plain = await run(false);
+  assert.deepEqual(quick, plain); assert.equal(quick.length, 2);
+});
+test('body search waits for typing to pause, lists the notes once, and narrows from the earlier hits', async () => {
+  const f = await fixture(0); searchVault(f);
+  f.bodies.set('00_Inbox/ANA SFC.md', 'せいび 機器'); f.bodies.set('00_Inbox/カタカナのメモ.md', 'せいび'); f.bodies.set('00_Inbox/R7機器整備.md', 'せいかつ');
+  const s = new f.BodySearch(f.app, f.plugin, 'せい'); s.getSuggestions('せい'); for (let i = 0; i < 6; i++) await settle();
+  assert.ok(s.scan.done); assert.equal(s.scan.hits.length, 3); const enumerations = f.calls.enumerations;
+  f.calls.reads.length = 0;
+  for (const q of ['せいび', 'せいび ', 'せいび き', 'せいび 機器']) {
+    const rows = s.getSuggestions(q); assert.equal(rows[0].text, '入力が止まったら検索します');
+  }
+  assert.equal(f.calls.reads.length, 0); assert.equal(s.scan.query, 'せい'); // nothing read while typing
+  f.clock.tick(300); for (let i = 0; i < 6; i++) await settle();
+  assert.equal(s.scan.query, 'せいび 機器'); assert.ok(s.scan.narrowed);
+  assert.deepEqual([...new Set(f.calls.reads)].sort(), ['00_Inbox/ANA SFC.md', '00_Inbox/R7機器整備.md', '00_Inbox/カタカナのメモ.md'].sort()); // only the earlier hits
+  const rows = s.getSuggestions('せいび 機器');
+  assert.deepEqual([...rows.slice(1).map(r => r.file.basename)], ['ANA SFC']); assert.match(rows[0].text, /前の結果から 3件/);
+  assert.equal(f.calls.enumerations, enumerations); // the note list is kept for the screen
+  // A word that does not narrow reads every note again.
+  f.calls.reads.length = 0; s.getSuggestions('機器'); f.clock.tick(300); for (let i = 0; i < 6; i++) await settle();
+  assert.equal(s.scan.narrowed, false); assert.equal(new Set(f.calls.reads).size, 5);
+  // Clearing the box stops at once.
+  assert.deepEqual([...s.getSuggestions('')], []);
+  s.onClose(); f.stop();
+});
+test('body search: when only the count moves, the status line changes in place; hits are sorted once per change', async () => {
+  const f = await fixture(0); searchVault(f); f.bodies.set('00_Inbox/ANA SFC.md', 'せいび');
+  const s = new f.BodySearch(f.app, f.plugin, 'せいび'); s.onOpen(); const rows = s.getSuggestions('せいび');
+  const el = f.doc.createElement('div'); s.renderSuggestion(rows[0], el);
+  for (let i = 0; i < 6; i++) await settle();
+  const before = s.inputEl.inputs; f.clock.tick(); assert.equal(s.inputEl.inputs, before + 1); // a new hit: drawn again
+  const again = s.getSuggestions('せいび'); s.renderSuggestion(again[0], f.doc.createElement('div'));
+  const sorted = s.scan.sorted; assert.equal(s.getSuggestions('せいび').length, 2); assert.equal(s.scan.sorted, sorted);
+  s.refreshSoon(0); s.scan.live = true; f.clock.tick(); assert.equal(s.inputEl.inputs, before + 1); // nothing new: no redraw
+  assert.match(s.statusEl.textContent, /本文に含むノート 1件/);
+  s.onClose(); f.stop();
+});
+
 test('link changes redo a Project/Area only when a changed note can change it; a hidden Home waits', async () => {
   const f = await fixture(0); const v = scopeVault(f);
   f.plugin.setScope(v.project.path); f.doc.flush(); const first = f.plugin.scopeCache; const count = f.calls.enumerations;
@@ -1154,4 +1244,21 @@ test('link ranks are kept after link changes while recent and the same size', as
   f.plugin.rankCache.at -= 5 * 60000; f.plugin.linkChanges.add('a.md'); f.plugin.onLinksResolved();
   assert.notEqual(f.plugin.linkRanks(), r2); // old enough
   f.stop();
+});
+
+test('with a Project chosen, the unified search offers この中を検索, which reads only its notes', async () => {
+  const f = await fixture(0); const v = scopeVault(f);
+  f.bodies.set(v.daily.path, '機器の点検予定'); f.bodies.set(v.linked.path, '点検の手順書'); f.bodies.set('bulk/3.md', '点検');
+  const u = new f.UnifiedSearch(f.app, f.plugin);
+  assert.equal(u.getSuggestions('点検').some(r => r.kind === 'scopeBody'), false);
+  f.plugin.setScope(v.project.path);
+  const rows = u.getSuggestions('点検'); assert.equal(rows[0].kind, 'body'); assert.equal(rows[1].kind, 'scopeBody');
+  const el = f.doc.createElement('div'); u.renderSuggestion(rows[1], el);
+  assert.match(labelText(el), /この中を検索：「点検」/); assert.match(labelText(el), /「機器整備」とつながるノート/);
+  u.selectSuggestion(rows[1], {}); const s = f.modals.at(-1); assert.ok(s instanceof f.BodySearch); assert.equal(s.scopePath, v.project.path);
+  f.calls.reads.length = 0; s.getSuggestions('点検'); for (let i = 0; i < 6; i++) await settle();
+  assert.deepEqual([...new Set(f.calls.reads)].sort(), [v.daily.path, v.linked.path, v.project.path].sort());
+  const hits = s.getSuggestions('点検'); assert.deepEqual([...hits.slice(1).map(r => r.file.path)].sort(), [v.daily.path, v.linked.path].sort());
+  assert.match(hits[0].text, /「機器整備」の中で本文に含むノート 2件/);
+  s.onClose(); f.stop();
 });
