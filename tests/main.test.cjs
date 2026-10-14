@@ -116,7 +116,7 @@ function load() {
     activeWindow: { open: url => urls.push(url) },
   };
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  vm.runInNewContext(source + '\nmodule.exports.testing = { attachmentNames, embedsMayUse, searchFoldTable, searchPretest, narrowsQuery, scopeAffected, linkGraphSize, ranksFresh, quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
+  vm.runInNewContext(source + '\nmodule.exports.testing = { attachmentNames, embedsMayUse, restoredScrollTop, searchFoldTable, searchPretest, narrowsQuery, scopeAffected, linkGraphSize, ranksFresh, quotePrefix, quoteEdits, videoEmbedUrl, isTweetUrl, emptyLineAt, pageTitle, titledLink, pageCharset, fetchPageTitle, matchRanges, setHighlighted, linkTier, linkRanks, bodySnippet, BodySearch, safeHomePath, excerpt, cardWindow, firstImage, PreviewStore, snapshotKey, LiteCards, defaultBase, scopeKind, listScopes, scopeMembers, ScopePicker, normalizeSearch, matchNotes, searchableNotes, complementWords, UnifiedSearch, hoverOpenDelay, cardsBelowPreview, FileView, WorkspaceLeaf };', context);
   const Main = context.module.exports;
   return { Main, ...Main.testing, doc, clock, notices, modals, urls, rendered, platform };
 }
@@ -1261,4 +1261,35 @@ test('with a Project chosen, the unified search offers この中を検索, which
   const hits = s.getSuggestions('点検'); assert.deepEqual([...hits.slice(1).map(r => r.file.path)].sort(), [v.daily.path, v.linked.path].sort());
   assert.match(hits[0].text, /「機器整備」の中で本文に含むノート 2件/);
   s.onClose(); f.stop();
+});
+
+test('the list position comes back when the Home view is built again; the Home button goes to the top', async () => {
+  const f = await fixture(10000); f.refresh();
+  f.parent.scrollTop = 1600; f.parent.emit('scroll'); f.doc.flush(); assert.equal(f.view.limit, 48);
+  for (const card of f.view.cards.values()) card.el.rect = { top: -400, bottom: -200 };
+  f.view.cards.get('30.md').el.rect = { top: -150, bottom: 50 };
+  f.clock.tick(150); // the position is noted once scrolling stops
+  f.view.cards.get('31.md').el.emit('click', { button: 0 }); // opening a note notes it too
+  f.view.unload();
+  const build = () => { const parent = f.doc.createElement('div'); parent.rect.bottom = 600; f.leaf.view.containerEl.append(parent);
+    const view = new f.LiteCards({ app: f.app }, parent, f.plugin); view.data = f.data; view.onDataUpdated(); f.doc.flush(); return { view, parent }; };
+  let next = build();
+  assert.equal(next.view.limit, 48); assert.equal(next.parent.scrollTop, 150); // card 30 is back 150 px above the top
+  // Without that card (the list changed), the old scroll position.
+  next.parent.scrollTop = 1600; next.parent.emit('scroll'); f.clock.tick(150); next.view.unload();
+  const position = f.plugin.homePositions.get(f.leaf); position.path = 'gone.md';
+  next = build(); assert.equal(next.parent.scrollTop, 1600);
+  // A different Project/Area does not reuse it.
+  next.view.unload(); f.plugin.scope = '0.md'; const other = build(); assert.equal(other.parent.scrollTop, 0); other.view.unload();
+  f.plugin.scope = null; next = build(); assert.equal(next.parent.scrollTop, 1600);
+  // The Home button starts at the top.
+  next.view.goFirst(); assert.equal(f.plugin.homePositions.has(f.leaf), false); assert.equal(next.parent.scrollTop, 0);
+  next.view.unload(); f.plugin.onunload();
+});
+test('restored scroll position from the remembered card', () => {
+  const { restoredScrollTop } = load();
+  assert.equal(restoredScrollTop({ scrollTop: 0, anchorTop: 3000, offset: -50, fallback: 2000 }), 3050);
+  assert.equal(restoredScrollTop({ scrollTop: 100, anchorTop: 20, offset: 40, fallback: 9 }), 80);
+  assert.equal(restoredScrollTop({ scrollTop: 0, anchorTop: NaN, offset: 10, fallback: 2000 }), 2000);
+  assert.equal(restoredScrollTop({ scrollTop: 0, anchorTop: 0, offset: 500, fallback: 0 }), 0);
 });

@@ -45,6 +45,8 @@ const ATTACHMENT_BATCH_MS = 500;
 const RANK_MAX_AGE = 5 * 60 * 1000;
 // The body search starts reading once typing pauses this long.
 const BODY_SEARCH_DELAY = 300;
+// The Home list position is noted this long after scrolling stops.
+const POSITION_SAVE_MS = 150;
 // PARA-PKM marks Project and Area notes with these frontmatter tags.
 const SCOPE_KINDS = Object.freeze({ Projects: 'プロジェクト', Areas: 'エリア' });
 const DONE_STATUSES = new Set(['completed', 'done', 'archived', 'cancelled', 'canceled', '完了', '終了', '中止']);
@@ -679,6 +681,13 @@ function embedsMayUse(embeds, names) {
   return false;
 }
 
+// The scroll position that puts a remembered card back where it was: `offset` px from the top of the
+// list, the card now `anchorTop` px from it at `scrollTop`. Without the card, the old scroll position.
+function restoredScrollTop({ scrollTop, anchorTop, offset, fallback }) {
+  if (!Number.isFinite(anchorTop) || !Number.isFinite(offset)) return Math.max(0, fallback || 0);
+  return Math.max(0, scrollTop + anchorTop - offset);
+}
+
 // 2hop-links-plus copies this into src/cardPreview.ts; tell its session when it changes.
 class PreviewStore {
   constructor(app) {
@@ -807,6 +816,7 @@ class PalmWikiHome extends Plugin {
     this.linkChanges = new Set(); // notes changed since Obsidian last resolved the links
     this.attachmentChanges = new Set();
     this.attachmentTimer = null;
+    this.homePositions = new WeakMap(); // tab → where its Home list was, kept in memory only
     this.previews = new PreviewStore(this.app);
     this.disposed = false;
     this.bars = new Map();
@@ -1093,6 +1103,8 @@ class PalmWikiHome extends Plugin {
       if (this.disposed || path !== this.settings.homePath || file.path !== path) return;
       let leaf = sourceLeaf || this.app.workspace.getMostRecentLeaf();
       if (!leaf || leaf.getViewState().pinned) leaf = this.app.workspace.getLeaf('tab');
+      // The Home button starts at the top; going back to Home returns to where the list was.
+      this.homePositions.delete(leaf);
       await leaf.openFile(file, { active: true });
       if (this.disposed) return;
       await this.app.workspace.revealLeaf(leaf);
@@ -1316,6 +1328,9 @@ class LiteCards extends BasesView {
     this.disposed = false;
     this.stale = false; // data arrived while hidden; worked out when shown again
     this.imagesStale = false; // attachments changed while hidden
+    this.positionTimer = null;
+    this.restoreChecked = false; // the remembered list position is looked at once, with the first notes
+    this.leaf = null;
     this.lastScrollTop = parent.scrollTop;
     this.hoverPopover = null; // Lets this view act as the hover parent for card previews.
     const doc = parent.ownerDocument;
@@ -1355,6 +1370,7 @@ class LiteCards extends BasesView {
       const down = top > this.lastScrollTop;
       this.lastScrollTop = top;
       this.scheduleViewport();
+      this.schedulePosition();
       if (down && this.visible() && parent.scrollHeight - top - parent.clientHeight < 320) this.requestMore();
     }, { passive: true });
     this.registerDomEvent(doc, 'visibilitychange', () => this.scheduleViewport());
@@ -1388,13 +1404,68 @@ class LiteCards extends BasesView {
     if (this.disposed) return;
     this.stale = false;
     this.ensureScans();
+    const saved = this.restoreChecked ? null : this.savedPosition();
+    if (saved) this.limit = Math.min(MAX_CARDS, Math.max(this.limit, saved.limit));
     const window = cardWindow(this.data, this.limit, this.currentFilter());
     this.files = window.files; this.total = window.total;
     this.render();
+    if (!this.restoreChecked && this.files.length) {
+      this.restoreChecked = true;
+      if (saved) this.restorePosition(saved);
+    }
+  }
+
+  // The tab this Home is in: positions are remembered per tab, since Home and notes share a tab and
+  // going back to Home builds a new view.
+  ownerLeaf() {
+    if (!this.leaf) this.app.workspace.iterateAllLeaves(leaf => { if (!this.leaf && leaf.view?.containerEl?.contains(this.root)) this.leaf = leaf; });
+    return this.leaf;
+  }
+
+  positionKey() {
+    return JSON.stringify([this.plugin.scope, this.includeDaily, this.includeMentions, this.includeTagged, this.bodyQuery]);
+  }
+
+  savedPosition() {
+    const leaf = this.ownerLeaf();
+    const saved = leaf ? this.plugin.homePositions.get(leaf) : null;
+    return saved && saved.key === this.positionKey() ? saved : null;
+  }
+
+  schedulePosition() {
+    if (this.disposed || this.positionTimer !== null) return;
+    this.positionTimer = setTimeout(() => { this.positionTimer = null; this.rememberPosition(); }, POSITION_SAVE_MS);
+  }
+
+  // Notes the first card showing at the top of the list, and how far from the top it is.
+  rememberPosition() {
+    if (this.disposed || !this.visible() || !this.restoreChecked) return;
+    const leaf = this.ownerLeaf();
+    if (!leaf) return;
+    const top = this.parent.scrollTop;
+    if (top <= 0) { this.plugin.homePositions.delete(leaf); return; }
+    const parentTop = this.parent.getBoundingClientRect().top;
+    let anchor = null;
+    for (const file of this.files.slice(0, this.limit)) {
+      const card = this.cards.get(file.path);
+      if (card && card.el.getBoundingClientRect().bottom > parentTop) { anchor = card; break; }
+    }
+    this.plugin.homePositions.set(leaf, { key: this.positionKey(), limit: this.limit, top,
+      path: anchor?.path || null, offset: anchor ? anchor.el.getBoundingClientRect().top - parentTop : null });
+  }
+
+  restorePosition(saved) {
+    const card = saved.path ? this.cards.get(saved.path) : null;
+    const parentTop = this.parent.getBoundingClientRect().top;
+    this.parent.scrollTop = restoredScrollTop({ scrollTop: this.parent.scrollTop,
+      anchorTop: card ? card.el.getBoundingClientRect().top - parentTop : NaN, offset: saved.offset, fallback: saved.top });
+    this.lastScrollTop = this.parent.scrollTop;
+    this.scheduleViewport();
   }
 
   resetScope() {
     if (this.disposed) return;
+    this.restoreChecked = true;
     this.limit = INITIAL_CARDS;
     this.parent.scrollTop = 0; this.lastScrollTop = 0;
     this.bodyQuery = '';
@@ -1544,6 +1615,9 @@ class LiteCards extends BasesView {
 
   goFirst() {
     this.limit = INITIAL_CARDS;
+    this.restoreChecked = true;
+    const leaf = this.ownerLeaf();
+    if (leaf) this.plugin.homePositions.delete(leaf);
     this.parent.scrollTop = 0; this.lastScrollTop = 0;
     if (this.stale) this.refreshWindow(); else this.render();
   }
@@ -1659,6 +1733,8 @@ class LiteCards extends BasesView {
       if (this.disposed) return;
       // Opening a note (even in another tab, where this view stays) puts the card popups away.
       this.plugin.cardPopover?.close();
+      this.rememberPosition(); // for coming back
+      if (this.positionTimer !== null) { clearTimeout(this.positionTimer); this.positionTimer = null; }
       const current = this.app.vault.getAbstractFileByPath(file.path);
       if (!(current instanceof TFile)) { new Notice('このノートは移動または削除されました。'); return; }
       const mode = Keymap.isModEvent(event);
@@ -1828,6 +1904,7 @@ class LiteCards extends BasesView {
     for (const frame of [this.renderFrame, this.viewportFrame, this.moreFrame]) if (frame !== null) win?.cancelAnimationFrame(frame);
     if (this.imageTimer !== null) clearTimeout(this.imageTimer);
     if (this.queryTimer !== null) clearTimeout(this.queryTimer);
+    if (this.positionTimer !== null) clearTimeout(this.positionTimer);
     this.scans = { mentions: null, body: null };
     this.observer?.disconnect();
     this.resizeObserver?.disconnect();
